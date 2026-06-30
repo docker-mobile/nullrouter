@@ -1,0 +1,51 @@
+[package]
+name = "nullrouter-dashboard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Leptos SSR + WASM hydrate dashboard — port of inspire/src/app/(dashboard) + sibling pages"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nullrouter-core = { path = "../nullrouter-core" }
+leptos.workspace = true
+leptos_meta.workspace = true
+leptos_router.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+url.workspace = true
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlElement", "Storage"] }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+
+# SSR-only deps (gated by feature)
+leptos_actix = { workspace = true, optional = true }
+actix-web = { workspace = true, optional = true }
+actix-files = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+hydrate = ["leptos/hydrate"]
+ssr = [
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "dep:leptos_actix",
+    "dep:actix-web",
+    "dep:actix-files",
+    "dep:tokio",
+]
+
+[dev-dependencies]
+pretty_assertions.workspace = true

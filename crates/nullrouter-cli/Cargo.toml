@@ -1,0 +1,40 @@
+[package]
+name = "nullrouter-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Setup / admin CLI — port of inspire/cli (install, start, stop, tray, cert-trust)"
+
+[[bin]]
+name = "nullrouter-cli"
+path = "src/main.rs"
+
+[dependencies]
+nullrouter-core = { path = "../nullrouter-core" }
+nullrouter-db = { path = "../nullrouter-db" }
+nullrouter-auth = { path = "../nullrouter-auth" }
+
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+
+clap.workspace = true
+inquire.workspace = true
+dialoguer.workspace = true
+indicatif.workspace = true
+console.workspace = true
+tray-icon.workspace = true
+
+directories.workspace = true
+dirs.workspace = true
+open.workspace = true
+webbrowser.workspace = true

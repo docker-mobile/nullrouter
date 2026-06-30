@@ -1,0 +1,43 @@
+[package]
+name = "nullrouter-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "HTTP route handlers — port of inspire/src/app/api/* (125 route files)"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nullrouter-core = { path = "../nullrouter-core" }
+nullrouter-sse = { path = "../nullrouter-sse" }
+nullrouter-db = { path = "../nullrouter-db" }
+nullrouter-auth = { path = "../nullrouter-auth" }
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+actix-web.workspace = true
+actix-files.workspace = true
+actix-cors.workspace = true
+actix-rt.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-actix-web.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+url.workspace = true
+mime.workspace = true
+mime_guess.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+insta.workspace = true
+wiremock.workspace = true

@@ -1,0 +1,34 @@
+[package]
+name = "nullrouter-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Core types, provider registry, runtime config — port of inspire/open-sse/config + inspire/src/shared"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+once_cell.workspace = true
+regex.workspace = true
+url.workspace = true
+uuid.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+directories.workspace = true
+dirs.workspace = true
+machine-uid.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+insta.workspace = true

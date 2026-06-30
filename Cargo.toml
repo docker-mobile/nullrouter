@@ -1,0 +1,146 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nullrouter-core",
+    "crates/nullrouter-sse",
+    "crates/nullrouter-db",
+    "crates/nullrouter-auth",
+    "crates/nullrouter-api",
+    "crates/nullrouter-mitm",
+    "crates/nullrouter-server",
+    "crates/nullrouter-cli",
+    "crates/nullrouter-dashboard",
+]
+
+[workspace.package]
+version = "0.5.15"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/decolua/9router"
+authors = ["nullrouter contributors"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP / web (server)
+actix-web = "4.14"
+actix-files = "0.6"
+actix-cors = "0.7"
+actix-rt = "2.10"
+
+# Leptos (SSR + hydrate)
+leptos = "0.7"
+leptos_actix = "0.7"
+leptos_meta = "0.7"
+leptos_router = "0.7"
+
+# Pingora (MITM proxy)
+pingora = { version = "0.4", features = ["proxy"] }
+pingora-proxy = "0.4"
+pingora-core = "0.4"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks", "gzip", "brotli", "deflate"] }
+hyper = { version = "1.5", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
+serde_with = "3.11"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "serde_json", "chrono", "blob"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# Crypto / auth
+bcrypt = "0.16"
+jsonwebtoken = "9.3"
+rcgen = "0.13"
+rustls = "0.23"
+rustls-pemfile = "2.2"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+hex = "0.4"
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+rand = "0.8"
+ring = "0.17"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+inquire = "0.7"
+dialoguer = "0.11"
+indicatif = "0.17"
+console = "0.15"
+tray-icon = "0.19"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-actix-web = "0.7"
+
+# Errors
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Util
+chrono = { version = "0.4", features = ["serde"] }
+once_cell = "1.20"
+regex = "1.11"
+url = "2.5"
+percent-encoding = "2.3"
+bytes = "1.8"
+dashmap = "6.1"
+parking_lot = "0.12"
+mime = "0.3"
+mime_guess = "2.0"
+encoding_rs = "0.8"
+flate2 = "1.0"
+brotli = "7.0"
+
+# Machine id / paths
+machine-uid = "0.5"
+directories = "5.0"
+dirs = "5.0"
+
+# Markdown / templating
+pulldown-cmark = "0.12"
+
+# Webview / browser open
+open = "5.3"
+webbrowser = "1.0"
+
+# Testing
+pretty_assertions = "1.4"
+insta = { version = "1.41", features = ["json", "yaml"] }
+wiremock = "0.6"
+
+# Pinned to satisfy cookie 0.16.2 (see note at bottom)
+time = "=0.3.41"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# Force time to last pre-breakage release.
+# cookie 0.16.2 (pulled by actix-web 4.14 → leptos_actix) uses old time::Parsable::parse(s) signature.
+# time 0.3.52 added a `defaults` parameter, breaking cookie 0.16.2 build.
+# Declared here so all workspace members share the same constraint via `time.workspace = true`.

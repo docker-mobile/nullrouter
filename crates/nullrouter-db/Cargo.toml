@@ -1,0 +1,32 @@
+[package]
+name = "nullrouter-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "SQLite storage layer — port of inspire/src/db (better-sqlite3 → rusqlite, sync API)"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nullrouter-core = { path = "../nullrouter-core" }
+rusqlite.workspace = true
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+directories.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+insta.workspace = true

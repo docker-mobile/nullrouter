@@ -1,0 +1,48 @@
+[package]
+name = "nullrouter-mitm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "MITM HTTPS proxy — port of inspire/src/mitm. Uses Pingora for upstream proxying + rcgen for cert minting"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nullrouter-core = { path = "../nullrouter-core" }
+nullrouter-sse = { path = "../nullrouter-sse" }
+nullrouter-db = { path = "../nullrouter-db" }
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+pingora.workspace = true
+pingora-proxy.workspace = true
+pingora-core.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+reqwest.workspace = true
+rcgen.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+url.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+insta.workspace = true
+wiremock.workspace = true
