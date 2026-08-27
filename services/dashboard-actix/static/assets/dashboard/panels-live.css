@@ -1,0 +1,519 @@
+/* Live Proxy Pools, Combos, and Pricing.
+ *
+ * These three panels replaced fixture surfaces, and each one had the same tell:
+ * a card that looked like data. Proxy Pools drew a fabricated "Cloudflare edge
+ * relay" row; Combos drew two invented tiles; Pricing drew five `0.00` fields.
+ * So the styling here is built around making the three honest states visually
+ * distinct at a glance:
+ *
+ *   `.nr-skeleton` (from motion.css)  loading — shimmering, colourless, labelled
+ *   `.nr-panel-notice`               empty — dashed edge, no actions on the data
+ *   `.nr-panel-notice.is-error`      failed — solid warn edge, retry button
+ *
+ * A row with real data is the only thing that gets a solid border and an accent
+ * edge. Nothing in this file can render a value; if a panel shows a rate or a
+ * proxy URL, the server sent it.
+ *
+ * `.nr-panel-notice`, `.nr-button.danger`, and the skeleton/spinner classes are
+ * shared with providers-live.css and motion.css. No keyframes are declared here.
+ */
+
+/* ── shared row chrome ───────────────────────────────────────────────────── */
+
+.nr-live-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nr-live-toolbar {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+.nr-live-totals {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nr-live-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.nr-live-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+}
+
+/* Status line under a card head. Always present so its appearance does not shift
+ * the layout when a write reports back. */
+.nr-live-status {
+  min-height: 1.1rem;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+.nr-live-status.is-error { color: var(--warn); }
+.nr-live-status.is-ok { color: var(--ok); }
+
+.nr-live-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.nr-live-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nr-live-field label,
+.nr-live-field > strong {
+  color: var(--text-main-dark);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.nr-live-field small {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+
+.nr-live-form {
+  display: grid;
+  gap: 10px;
+}
+
+.nr-live-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* A checkbox that carries meaning, not a nested form control label. */
+.nr-live-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 10px;
+}
+
+.nr-live-switch input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: var(--brand);
+}
+
+.nr-live-switch span {
+  display: grid;
+  gap: 2px;
+}
+
+.nr-live-switch strong {
+  color: var(--text-main-dark);
+  font-size: 0.82rem;
+}
+
+.nr-live-switch small {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+/* ── proxy pools ─────────────────────────────────────────────────────────── */
+
+.nr-pool-list {
+  display: grid;
+  gap: 10px;
+}
+
+.nr-pool-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--brand);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* A pool that is not routing traffic must look inert, not merely say so. */
+.nr-pool-row.is-inactive {
+  border-left-color: var(--text-muted-dark);
+  background: color-mix(in srgb, var(--surface-dark-2) 70%, var(--bg-dark));
+}
+
+/* While a write is in flight the row stays visible but uninteractable, so it
+ * cannot be clicked twice. */
+.nr-pool-row.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.nr-pool-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.nr-pool-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nr-pool-copy h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-main-dark);
+  font-size: var(--font-tile-title);
+}
+
+.nr-pool-copy code {
+  overflow-wrap: anywhere;
+  color: #ffb199;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.nr-pool-copy small {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+.nr-pool-error {
+  border-left: 2px solid var(--warn);
+  padding-left: 8px;
+  overflow-wrap: anywhere;
+  color: var(--warn);
+  font-size: var(--font-caption);
+}
+
+.nr-pool-skeleton {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* The bulk bar only appears once something is selected, so it is never a row of
+ * disabled controls waiting for a purpose. */
+.nr-live-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border-dark));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  padding: 10px;
+}
+
+.nr-live-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* Relay deployment is not implemented in this build. The menu says so and its
+ * items are inert; muted styling keeps them from reading as available. */
+.nr-relay-menu {
+  display: grid;
+  gap: 4px;
+  min-width: 210px;
+  border: 1px dashed var(--border-dark);
+  border-radius: 8px;
+  background: transparent;
+  padding: 6px;
+}
+
+.nr-relay-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted-dark);
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+}
+
+.nr-relay-item small { color: var(--text-muted-dark); }
+
+/* ── combos ──────────────────────────────────────────────────────────────── */
+
+.nr-combo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nr-combo-tile {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--brand);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+.nr-combo-tile.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.nr-combo-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nr-combo-tile h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-main-dark);
+  font-size: var(--font-tile-title);
+}
+
+.nr-combo-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Members are an ordered list: the router tries them in this order, so the index
+ * is information and is rendered rather than implied by position alone. */
+.nr-combo-members {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: nr-combo-member;
+}
+
+.nr-combo-members li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  counter-increment: nr-combo-member;
+}
+
+.nr-combo-members li::before {
+  content: counter(nr-combo-member);
+  min-width: 1.2em;
+  color: var(--text-muted-dark);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.nr-combo-members code {
+  overflow-wrap: anywhere;
+  color: #ffb199;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+/* A combo the store holds with no members. Real, and worth flagging. */
+.nr-combo-empty-members {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+.nr-combo-skeleton {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* Chosen members in the create form, in the order they will be tried. */
+.nr-combo-picked {
+  display: grid;
+  gap: 6px;
+}
+
+.nr-combo-picked-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 6px 10px;
+}
+
+.nr-combo-picked-row span:first-child {
+  color: var(--text-muted-dark);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.nr-combo-picked-row code {
+  overflow: hidden;
+  color: #ffb199;
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── pricing ─────────────────────────────────────────────────────────────── */
+
+.nr-pricing-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* A wide table must scroll inside its own box; the page never scrolls sideways. */
+.nr-rate-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+}
+
+.nr-rate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-caption);
+}
+
+.nr-rate-table th,
+.nr-rate-table td {
+  border-bottom: 1px solid var(--border-subtle-dark, var(--border-dark));
+  padding: 8px 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.nr-rate-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-dark);
+  color: var(--text-muted-dark);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nr-rate-table th:first-child,
+.nr-rate-table td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+
+.nr-rate-table td { color: var(--text-main-dark); font-variant-numeric: tabular-nums; }
+
+.nr-rate-table tbody tr:last-child th,
+.nr-rate-table tbody tr:last-child td { border-bottom: 0; }
+
+.nr-rate-table code {
+  overflow-wrap: anywhere;
+  color: #ffb199;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+/* An unpublished rate. Muted and italic so it cannot be misread as a number, and
+ * it says "not set" rather than showing 0.00 — the bug this panel removed. */
+.nr-rate-unset {
+  color: var(--text-muted-dark);
+  font-style: italic;
+  font-variant-numeric: normal;
+}
+
+.nr-rate-row.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.nr-rate-note {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+
+.nr-rate-editor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+.nr-rate-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nr-live-skeletons {
+  display: grid;
+  gap: 8px;
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .nr-rate-editor-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .nr-combo-grid,
+  .nr-live-form-grid,
+  .nr-pricing-metrics,
+  .nr-rate-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-pool-row { grid-template-columns: 1fr; }
+
+  .nr-live-actions { justify-content: flex-start; }
+
+  .nr-live-actions .nr-button,
+  .nr-relay-menu { width: 100%; }
+}
+

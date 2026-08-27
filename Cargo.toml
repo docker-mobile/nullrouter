@@ -1,0 +1,134 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/dashboard-leptos",
+    "crates/contracts",
+    "crates/execute",
+    "crates/providers",
+    "crates/translate",
+    "services/auth-actix",
+    "services/api-actix",
+    "services/catalog-actix",
+    "services/dashboard-actix",
+    "services/events-actix",
+    "services/gateway-pingora",
+    "services/runtime-actix",
+    "services/state-actix",
+]
+default-members = [
+    "apps/dashboard-leptos",
+    "crates/contracts",
+    "crates/execute",
+    "crates/providers",
+    "crates/translate",
+    "services/auth-actix",
+    "services/api-actix",
+    "services/catalog-actix",
+    "services/dashboard-actix",
+    "services/events-actix",
+    "services/gateway-pingora",
+    "services/runtime-actix",
+    "services/state-actix",
+]
+
+[workspace.package]
+version = "0.5.20"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Microservice Rust port of 9Router"
+repository = "https://github.com/docker-mobile/nullrouter"
+readme = "README.md"
+keywords = ["9router", "ai", "router", "gateway"]
+categories = ["command-line-utilities", "web-programming::http-server"]
+
+[workspace.dependencies]
+actix-cors = "0.7"
+actix-files = "0.6"
+actix-rt = "2"
+actix-web = "4.11"
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env", "wrap_help", "color"] }
+color-eyre = "0.6"
+console_error_panic_hook = "0.1"
+http = "1"
+leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
+mime_guess = "2"
+nullrouter-contracts = { path = "crates/contracts" }
+nullrouter-execute = { path = "crates/execute" }
+nullrouter-providers = { path = "crates/providers" }
+nullrouter-translate = { path = "crates/translate" }
+futures-util = "0.3"
+# Bundled so a 9Router import works without a system SQLite present.
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+    "json",
+    "socks",
+] }
+pingora = { version = "0.8", features = ["proxy"] }
+pingora-core = "0.8"
+pingora-error = "0.8"
+pingora-http = "0.8"
+pingora-proxy = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+debug = "line-tables-only"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "allow"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_must_use = "deny"
+elided_lifetimes_in_paths = "warn"
+non_ascii_idents = "deny"
+trivial_numeric_casts = "warn"
+unused_lifetimes = "warn"
+single_use_lifetimes = "warn"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+mem_forget = "deny"
+as_underscore = "deny"
+as_ptr_cast_mut = "deny"
+fn_to_numeric_cast_any = "deny"
+dbg_macro = "warn"
+print_stdout = "warn"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+multiple_crate_versions = "allow"
+cargo_common_metadata = "allow"
+struct_excessive_bools = "allow"
+literal_string_with_formatting_args = "allow"
+redundant_pub_crate = "allow"

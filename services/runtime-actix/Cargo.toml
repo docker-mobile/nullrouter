@@ -1,0 +1,39 @@
+[package]
+name = "nullrouter-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Actix Web OpenAI-compatible runtime microservice for the nullrouter Rust port"
+repository.workspace = true
+
+[lib]
+name = "nullrouter_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nullrouter-runtime"
+path = "src/main.rs"
+
+[dependencies]
+actix-web.workspace = true
+futures-util.workspace = true
+nullrouter-contracts.workspace = true
+nullrouter-execute.workspace = true
+nullrouter-providers.workspace = true
+nullrouter-translate.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+actix-rt.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
+
+[lints]
+workspace = true

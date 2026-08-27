@@ -1,0 +1,28 @@
+[package]
+name = "nullrouter-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Actix Web API microservice for the nullrouter Rust port"
+repository.workspace = true
+
+[[bin]]
+name = "nullrouter-api"
+path = "src/main.rs"
+
+[dependencies]
+actix-web.workspace = true
+nullrouter-contracts.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
+actix-rt.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,324 @@
+/* Live quota surfaces: the per-account table, its bars, and the two
+ * preview-only panels that share its layout.
+ *
+ * The load-bearing rule in this file is that no bar can imply a number that was
+ * not reported. `.nr-quota-bar` is a share of *recorded* requests, so it is
+ * styled in a neutral accent and always sits next to a text figure; the
+ * provider-limit column has no bar at all, because there is no limit to draw
+ * against. `.nr-quota-unreported` is what fills that space, and it is styled as
+ * muted text rather than as a zeroed track — an empty progress track reads as
+ * "0% used", which is the exact misreading the panel exists to prevent.
+ *
+ * No keyframes are declared here: motion comes from `motion.css`, so these
+ * panels animate like the rest of the dashboard and honour reduced-motion
+ * without repeating the media query.
+ */
+
+/* ── screen-reader utility ───────────────────────────────────────────────── */
+
+/* Declared here because the only other copy lives inside the MITM panel's
+ * scoped <style> block, which does not reach other routes. Several surfaces below
+ * put the full sentence a bar encodes into one of these, so it has to be
+ * available globally. */
+.nr-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── window selector ─────────────────────────────────────────────────────── */
+
+.nr-quota-windows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nr-quota-window {
+  min-height: 30px;
+  border: 1px solid var(--border-dark);
+  border-radius: 999px;
+  background: var(--surface-dark-2);
+  color: var(--text-muted-dark);
+  padding: 0 12px;
+  font-size: var(--font-caption);
+  font-weight: 600;
+}
+
+.nr-quota-window[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--text-main-dark);
+}
+
+.nr-quota-window:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* ── metric row ──────────────────────────────────────────────────────────── */
+
+.nr-quota-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* ── account table ───────────────────────────────────────────────────────── */
+
+.nr-quota-table-scroll {
+  /* A wide table scrolls inside its card rather than widening the page. */
+  overflow-x: auto;
+}
+
+.nr-quota-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-body);
+}
+
+.nr-quota-table caption {
+  margin-bottom: 8px;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  text-align: left;
+}
+
+.nr-quota-table th,
+.nr-quota-table td {
+  border-bottom: 1px solid var(--border-subtle-dark);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.nr-quota-table th {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.nr-quota-table tbody tr:last-child th,
+.nr-quota-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.nr-quota-table .nr-quota-numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.nr-quota-account {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.nr-quota-account strong {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.nr-quota-account small {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  overflow-wrap: anywhere;
+}
+
+/* ── share bar ───────────────────────────────────────────────────────────── */
+
+.nr-quota-share {
+  min-width: 140px;
+  display: grid;
+  gap: 4px;
+}
+
+.nr-quota-bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-raised);
+}
+
+.nr-quota-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  /* Deliberately not a red/amber/green scale: this is a share of recorded
+   * traffic, not proximity to a limit, so a colour that reads as "danger" would
+   * assert a threshold nobody reported. */
+  background: color-mix(in srgb, var(--brand) 70%, transparent);
+  transition: width var(--motion-base, 240ms) var(--ease-standard, ease);
+}
+
+.nr-quota-share small {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── the unreported limit ────────────────────────────────────────────────── */
+
+.nr-quota-unreported {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  font-style: italic;
+}
+
+.nr-quota-probe {
+  min-height: 26px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control);
+  background: var(--surface-dark-2);
+  color: var(--text-muted-dark);
+  padding: 0 8px;
+  font-size: var(--font-caption);
+  white-space: nowrap;
+}
+
+.nr-quota-probe:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.nr-quota-row-status {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  overflow-wrap: anywhere;
+}
+
+.nr-quota-orphan {
+  color: var(--warn);
+  font-size: var(--font-caption);
+}
+
+/* ── notices ─────────────────────────────────────────────────────────────── */
+
+/* Shared by the quota limit note and by the two preview-only panels. A dashed
+ * edge is the dashboard's existing "this is not live data" signal (see
+ * `.nr-empty-state`), so the vocabulary stays consistent. */
+.nr-quota-notice {
+  display: grid;
+  gap: 4px;
+  border: 1px dashed #464646;
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 12px;
+  color: var(--text-muted-dark);
+  font-size: var(--font-body);
+  line-height: 1.45;
+}
+
+.nr-quota-notice strong {
+  color: var(--text-main-dark);
+}
+
+.nr-quota-notice.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, #464646);
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+}
+
+/* ── preview-only panels (Token Saver, Skills) ───────────────────────────── */
+
+.nr-preview-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed color-mix(in srgb, var(--warn) 45%, #464646);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  padding: 12px;
+  color: var(--text-main-dark);
+  font-size: var(--font-body);
+  line-height: 1.45;
+}
+
+.nr-preview-banner .nr-preview-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.nr-preview-banner p {
+  min-width: 0;
+  flex: 1 1 20rem;
+  margin: 0;
+}
+
+/* A control that is inert by construction. Rendered as a static row rather than
+ * a disabled <button>, so it cannot be focused, clicked, or mistaken for a
+ * setting that would take effect. */
+.nr-preview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control);
+  background: var(--surface-dark-2);
+  padding: 10px 12px;
+}
+
+.nr-preview-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.nr-preview-row small {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+
+.nr-preview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.nr-preview-code {
+  overflow-wrap: anywhere;
+  color: #ffb199;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .nr-quota-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .nr-quota-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-preview-row {
+    grid-template-columns: 1fr;
+  }
+}

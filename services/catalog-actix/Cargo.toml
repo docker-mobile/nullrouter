@@ -1,0 +1,24 @@
+[package]
+name = "nullrouter-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Actix Web catalog and state microservice for the nullrouter Rust port"
+repository.workspace = true
+
+[lib]
+name = "nullrouter_catalog"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nullrouter-catalog"
+path = "src/main.rs"
+
+[dependencies]
+actix-web.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

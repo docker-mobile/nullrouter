@@ -1,0 +1,13 @@
+cognitive-complexity-threshold = 25
+type-complexity-threshold = 250
+too-many-arguments-threshold = 6
+too-many-lines-threshold = 100
+msrv = "1.88"
+# Product names that appear as prose in docs, not as code identifiers.
+# `..` keeps clippy's own default list.
+doc-valid-idents = ["OpenAI", "OpenAPI", ".."]
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true

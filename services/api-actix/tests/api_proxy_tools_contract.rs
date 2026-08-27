@@ -1,0 +1,148 @@
+#![allow(clippy::future_not_send)]
+
+use actix_web::{
+    App,
+    body::to_bytes,
+    http::{Method, StatusCode, header},
+    test, web,
+};
+use serde_json::Value;
+
+use nullrouter_api::{AppConfig, RuntimeClient, StateClient, configure};
+
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+/// A closed loopback port: usage reads fall back to the zeroed shape,
+/// so these parity tests need no state service.
+const UNREACHABLE_STATE_ADDR: &str = "127.0.0.1:1";
+
+#[derive(Debug)]
+struct JsonResponse {
+    status: StatusCode,
+    content_type: String,
+    body: String,
+    json: Value,
+}
+
+const fn app_config() -> AppConfig {
+    AppConfig::new("0.5.20")
+}
+
+async fn request_json(method: Method, uri: &str, body: &str) -> TestResult<JsonResponse> {
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(app_config()))
+            .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .configure(configure),
+    )
+    .await;
+    let req = test::TestRequest::default()
+        .method(method)
+        .uri(uri)
+        .insert_header((header::CONTENT_TYPE, "application/json"))
+        .set_payload(body.to_owned())
+        .to_request();
+
+    let res = test::call_service(&app, req).await;
+    let status = res.status();
+    let content_type = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let body_bytes = to_bytes(res.into_body()).await?;
+    let body = std::str::from_utf8(&body_bytes)?.to_owned();
+    let json = serde_json::from_slice(&body_bytes)?;
+
+    Ok(JsonResponse {
+        status,
+        content_type,
+        body,
+        json,
+    })
+}
+
+fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
+    json.get(name)
+        .ok_or_else(|| test_error(format!("missing field {name}")))
+}
+
+fn assert_structured_json(response: &JsonResponse) {
+    assert!(
+        response.content_type.starts_with("application/json"),
+        "content-type was {}",
+        response.content_type
+    );
+    assert!(!response.body.contains("<html"), "body was HTML");
+    assert!(!response.body.contains("<!DOCTYPE"), "body was HTML");
+}
+
+#[actix_rt::test]
+async fn proxy_pool_test_returns_unsupported_json_when_network_testing_is_unavailable() -> TestResult
+{
+    // Given: nullrouter-api intentionally does not perform outbound proxy tests.
+
+    // When: the dashboard asks to test a proxy pool entry.
+    let response = request_json(Method::POST, "/api/proxy-pools/pool-1/test", "{}").await?;
+
+    // Then: the route preserves the upstream JSON shape while declaring the capability unsupported.
+    assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED);
+    assert_structured_json(&response);
+    assert_eq!(field(&response.json, "id")?, "pool-1");
+    assert_eq!(field(&response.json, "ok")?, false);
+    assert_eq!(field(&response.json, "status")?, &Value::Null);
+    assert_eq!(field(&response.json, "statusText")?, &Value::Null);
+    assert_eq!(
+        field(&response.json, "error")?,
+        "Proxy pool testing is not supported by nullrouter-api"
+    );
+    assert_eq!(field(&response.json, "elapsedMs")?, 0);
+    assert_eq!(field(&response.json, "unsupported")?, true);
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn proxy_pool_deploy_routes_return_targeted_unsupported_json_for_valid_input() -> TestResult {
+    // Given: deploy requests include the provider credentials required by the upstream routes.
+    let cases = [
+        (
+            "/api/proxy-pools/vercel-deploy",
+            r#"{"vercelToken":"token"}"#,
+            "vercel",
+        ),
+        (
+            "/api/proxy-pools/cloudflare-deploy",
+            r#"{"accountId":"account","apiToken":"token"}"#,
+            "cloudflare",
+        ),
+        (
+            "/api/proxy-pools/deno-deploy",
+            r#"{"denoToken":"token","orgDomain":"example.com"}"#,
+            "deno",
+        ),
+    ];
+
+    for (uri, body, target) in cases {
+        // When: the deploy helper route is called.
+        let response = request_json(Method::POST, uri, body).await?;
+
+        // Then: it returns structured 501 JSON without attempting an external deployment.
+        assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED, "{uri}");
+        assert_structured_json(&response);
+        assert_eq!(field(&response.json, "success")?, false, "{uri}");
+        assert_eq!(field(&response.json, "target")?, target, "{uri}");
+        assert_eq!(field(&response.json, "unsupported")?, true, "{uri}");
+        assert_eq!(
+            field(&response.json, "error")?,
+            "Proxy relay deployment is not supported by nullrouter-api",
+            "{uri}"
+        );
+    }
+    Ok(())
+}
+
+fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
+    Box::new(std::io::Error::other(message.into()))
+}

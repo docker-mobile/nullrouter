@@ -1,0 +1,4534 @@
+{
+ "default": {
+  "vision": false,
+  "pdf": false,
+  "audioInput": false,
+  "videoInput": false,
+  "imageOutput": false,
+  "audioOutput": false,
+  "search": false,
+  "tools": true,
+  "reasoning": false,
+  "thinkingFormat": null,
+  "thinkingCanDisable": true,
+  "thinkingRange": null,
+  "contextWindow": 200000,
+  "maxOutput": 64000
+ },
+ "byProviderModel": {
+  "alicode-intl/qwen3.5-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alicode-intl/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "alicode-intl/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "alicode-intl/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "alicode-intl/qwen3-coder-next": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "alicode-intl/qwen3-coder-plus": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "alicode-intl/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "alicode/qwen3.5-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alicode/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "alicode/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "alicode/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "alicode/qwen3-max-2026-01-23": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alicode/qwen3-coder-next": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "alicode/qwen3-coder-plus": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "alicode/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "anthropic/claude-sonnet-4-20250514": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "anthropic/claude-opus-4-20250514": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "anthropic/claude-3-5-sonnet-20241022": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "antigravity/gemini-3.7-flash-high": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.7-flash-medium": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.7-flash-low": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.6-flash-high": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.6-flash-medium": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.6-flash-low": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.5-flash-high": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3-flash-agent": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.5-flash-low": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.5-flash-extra-low": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-pro-agent": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 1048576
+  },
+  "antigravity/gemini-3.1-pro-low": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "antigravity/claude-sonnet-4-6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "antigravity/claude-opus-4-6-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "antigravity/gpt-oss-120b-medium": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "antigravity/gemini-3-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "antigravity/gemini-3.1-flash-image": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "blackbox/claude-fable-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "blackbox/claude-opus-4.8": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "blackbox/claude-sonnet-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "blackbox/gpt-5.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "blackbox/gpt-5.4-pro": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "blackbox/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "blackbox/gpt-5.3-codex": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "blackbox/gpt-5.4-nano": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "blackbox/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "blackbox/grok-4.3": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "byteplus/kimi-k2-thinking-251104": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "byteplus/glm-4-7-251222": {
+   "reasoning": true,
+   "thinkingFormat": "zai"
+  },
+  "byteplus/gpt-oss-120b-250805": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "cerebras/gpt-oss-120b": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "cerebras/zai-glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "cerebras/llama-3.3-70b": {
+   "contextWindow": 128000
+  },
+  "cerebras/llama-4-scout-17b-16e-instruct": {
+   "vision": true,
+   "contextWindow": 1000000
+  },
+  "cerebras/qwen-3-235b-a22b-instruct-2507": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "cerebras/qwen-3-32b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "claude/claude-opus-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "claude/claude-fable-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "claude/claude-sonnet-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "claude/claude-haiku-4-5-20251001": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cline/anthropic/claude-opus-4.7": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "cline/anthropic/claude-sonnet-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "cline/anthropic/claude-opus-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "cline/openai/gpt-5.3-codex": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "cline/openai/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "cline/google/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "cline/google/gemini-3.1-flash-lite-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "clinepass/cline-pass/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "clinepass/cline-pass/kimi-k2.7-code": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "clinepass/cline-pass/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "clinepass/cline-pass/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "clinepass/cline-pass/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "clinepass/cline-pass/mimo-v2.5": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "clinepass/cline-pass/mimo-v2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "clinepass/cline-pass/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "clinepass/cline-pass/qwen3.7-max": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "clinepass/cline-pass/qwen3.7-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "cloudflare-ai/@cf/meta/llama-3.2-1b-instruct": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/meta/llama-3.2-3b-instruct": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/meta/llama-3.1-8b-instruct-fp8-fast": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/meta/llama-3.1-8b-instruct-awq": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/mistralai/mistral-small-3.1-24b-instruct": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/meta/llama-3.1-70b-instruct-fp8-fast": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+   "contextWindow": 128000
+  },
+  "cloudflare-ai/@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "cloudflare-ai/@cf/moonshotai/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "cloudflare-ai/@cf/moonshotai/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "cloudflare-ai/@cf/zai-org/glm-4.7-flash": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "cloudflare-ai/@cf/qwen/qwq-32b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "thinkingCanDisable": false,
+   "contextWindow": 131072
+  },
+  "cloudflare-ai/@cf/qwen/qwen2.5-coder-32b-instruct": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "codebuddy-cn/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 1000000,
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/glm-5.0": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/glm-5.0-turbo": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/glm-5v-turbo": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "maxOutput": 38000
+  },
+  "codebuddy-cn/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 512000,
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/minimax-m2.7": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "maxOutput": 48000
+  },
+  "codebuddy-cn/kimi-k2.7": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 256000,
+   "maxOutput": 32000
+  },
+  "codebuddy-cn/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 256000,
+   "maxOutput": 32000
+  },
+  "codebuddy-cn/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 164000,
+   "maxOutput": 32000
+  },
+  "codebuddy-cn/hy3-preview": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 192000
+  },
+  "codebuddy-cn/deepseek-v4-pro": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 1000000,
+   "maxOutput": 50000
+  },
+  "codebuddy-cn/deepseek-v4-flash": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 1000000,
+   "maxOutput": 50000
+  },
+  "codebuddy-cn/deepseek-v3-2-volc": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 96000,
+   "maxOutput": 32000
+  },
+  "codex/gpt-5.6-sol": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 372000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.6-sol-review": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 372000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.6-terra": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.6-terra-review": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.6-luna": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.6-luna-review": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.5-review": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.4-review": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.4-mini-review": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.3-codex-spark": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.3-codex-spark-review": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "codex/gpt-5.5-image": {
+   "imageOutput": true
+  },
+  "codex/gpt-5.4-image": {
+   "imageOutput": true
+  },
+  "codex/gpt-5.3-image": {
+   "imageOutput": true
+  },
+  "cohere/command-r-plus-08-2024": {
+   "contextWindow": 128000
+  },
+  "cohere/command-r-08-2024": {
+   "contextWindow": 128000
+  },
+  "cohere/command-a-03-2025": {
+   "contextWindow": 128000
+  },
+  "commandcode/deepseek/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "commandcode/deepseek/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "commandcode/moonshotai/Kimi-K2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "commandcode/moonshotai/Kimi-K2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "commandcode/zai-org/GLM-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "commandcode/zai-org/GLM-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "commandcode/MiniMaxAI/MiniMax-M2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "commandcode/MiniMaxAI/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "commandcode/Qwen/Qwen3.6-Max-Preview": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "commandcode/Qwen/Qwen3.6-Plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "commandcode/stepfun/Step-3.5-Flash": {
+   "reasoning": true,
+   "thinkingFormat": "step",
+   "contextWindow": 128000
+  },
+  "cursor/claude-4.5-opus-high-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/claude-4.5-opus-high": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/claude-4.5-sonnet-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/claude-4.5-sonnet": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/claude-4.5-haiku": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/claude-4.5-opus": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/gpt-5.2-codex": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "cursor/claude-4.6-opus-max": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/claude-4.6-sonnet-medium-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "cursor/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "cursor/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "cursor/gpt-5.2": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "cursor/gpt-5.3-codex": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "deepseek/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "deepseek/deepseek-v4-pro-max": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "deepseek/deepseek-v4-pro-none": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "deepseek/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "deepseek/deepseek-chat": {
+   "contextWindow": 128000
+  },
+  "deepseek/deepseek-reasoner": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "thinkingCanDisable": false,
+   "contextWindow": 128000
+  },
+  "featherless/deepseek-ai/DeepSeek-V4-Pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "featherless/deepseek-ai/DeepSeek-V4-Flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "featherless/zai-org/GLM-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "featherless/zai-org/GLM-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "featherless/moonshotai/Kimi-K2.7-Code": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "featherless/moonshotai/Kimi-K2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "featherless/moonshotai/Kimi-K2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "fireworks/accounts/fireworks/models/deepseek-v3p1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct": {
+   "contextWindow": 128000
+  },
+  "fireworks/accounts/fireworks/models/qwen3-235b-a22b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "gemini-cli/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "gemini-cli/gemini-3-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "gemini-cli/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini-cli/gemini-3.1-flash-lite-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini-cli/gemini-2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini-cli/gemini-2.5-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini-cli/gemini-2.5-flash-lite": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-3.7-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-3.6-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-3.5-flash-lite": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "gemini/gemini-3.1-flash-lite-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-2.5-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-2.5-flash-lite": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemma-4-31b-it": {
+   "vision": true,
+   "contextWindow": 128000
+  },
+  "gemini/gemini-embedding-2-preview": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 1048576
+  },
+  "gemini/gemini-embedding-001": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 1048576
+  },
+  "gemini/gemini-3.1-flash-image-preview": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "gemini/gemini-3-pro-image-preview": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "gemini/gemini-2.5-flash-image": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "gemini/gemini-2.0-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-3.1-flash-tts-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-2.5-flash-preview-tts": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "gemini/gemini-2.5-pro-preview-tts": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "github/gpt-5.2": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "github/gpt-5.2-codex": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "github/gpt-5.3-codex": {
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "github/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "github/gpt-5.4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "github/claude-haiku-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "github/claude-opus-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "github/claude-sonnet-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "github/claude-sonnet-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "github/claude-opus-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "github/claude-opus-4.7": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "github/gemini-2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "github/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "github/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "github/grok-code-fast-1": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "glm-cn/glm-5.3": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm-cn/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm-cn/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm-cn/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm-cn/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm-cn/glm-4.6": {
+   "reasoning": true,
+   "thinkingFormat": "zai"
+  },
+  "glm-cn/glm-4.5-air": {
+   "reasoning": true,
+   "thinkingFormat": "zai"
+  },
+  "glm/glm-5.3": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "glm/glm-4.6v": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "contextWindow": 128000
+  },
+  "grok-cli/grok-build": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-cli/grok-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 500000
+  },
+  "grok-cli/grok-4.5-high": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 500000
+  },
+  "grok-cli/grok-4.5-medium": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 500000
+  },
+  "grok-cli/grok-4.5-low": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 500000
+  },
+  "grok-web/grok-3": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 131072
+  },
+  "grok-web/grok-3-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 131072
+  },
+  "grok-web/grok-3-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 131072
+  },
+  "grok-web/grok-4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4-heavy": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4.1-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4.1-fast": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4.1-expert": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4.1-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "grok-web/grok-4.2": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "groq/llama-3.3-70b-versatile": {
+   "contextWindow": 128000
+  },
+  "groq/meta-llama/llama-4-maverick-17b-128e-instruct": {
+   "vision": true,
+   "contextWindow": 1000000
+  },
+  "groq/qwen/qwen3-32b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "groq/openai/gpt-oss-120b": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "hyperbolic/Qwen/QwQ-32B": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "thinkingCanDisable": false,
+   "contextWindow": 131072
+  },
+  "hyperbolic/deepseek-ai/DeepSeek-R1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "thinkingCanDisable": false,
+   "contextWindow": 128000
+  },
+  "hyperbolic/deepseek-ai/DeepSeek-V3": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "hyperbolic/meta-llama/Llama-3.3-70B-Instruct": {
+   "contextWindow": 128000
+  },
+  "hyperbolic/meta-llama/Llama-3.2-3B-Instruct": {
+   "contextWindow": 128000
+  },
+  "hyperbolic/Qwen/Qwen2.5-72B-Instruct": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "hyperbolic/Qwen/Qwen2.5-Coder-32B-Instruct": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "hyperbolic/NousResearch/Hermes-3-Llama-3.1-70B": {
+   "contextWindow": 128000
+  },
+  "iflow/qwen3-coder-plus": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "iflow/qwen3-max": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "iflow/qwen3-vl-plus": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "iflow/qwen3-max-preview": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "iflow/qwen3-235b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "iflow/qwen3-235b-a22b-instruct": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "iflow/qwen3-235b-a22b-thinking-2507": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "iflow/qwen3-32b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "iflow/kimi-k2": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "iflow/deepseek-v3.2": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "iflow/deepseek-v3.1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "iflow/deepseek-v3": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "iflow/deepseek-r1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "thinkingCanDisable": false,
+   "contextWindow": 128000
+  },
+  "iflow/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "kilocode/anthropic/claude-sonnet-4-20250514": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kilocode/anthropic/claude-opus-4-20250514": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kilocode/google/gemini-2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "kilocode/google/gemini-2.5-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "kilocode/openai/gpt-4.1": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "kilocode/openai/o3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 100000
+  },
+  "kilocode/deepseek/deepseek-chat": {
+   "contextWindow": 128000
+  },
+  "kilocode/deepseek/deepseek-reasoner": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "thinkingCanDisable": false,
+   "contextWindow": 128000
+  },
+  "kimchi/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "kimchi/kimi-k2.7": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "kimchi/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "kimchi/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "kimchi/nemotron-3-ultra-fp4": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "kimchi/minimax-m2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "kimchi/claude-opus-4-6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kimchi/claude-sonnet-4-6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kimi/kimi-k3": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "kimi/k3": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "kimi/kimi-for-coding": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "kimi/kimi-for-coding-highspeed": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "kimi/kimi-k2.7-code": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "kimi/kimi-k2.7-code-highspeed": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "kimi/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "kimi/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "kimi/kimi-k2.5-thinking": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "kimi/kimi-latest": {
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144
+  },
+  "kiro/claude-opus-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-5-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-5-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-5-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-4.8": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-4.8-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-4.8-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "kiro/claude-opus-4.8-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "kiro/claude-opus-4.7": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-opus-4.7-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "kiro/claude-opus-4.7-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "kiro/claude-opus-4.7-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "kiro/claude-opus-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-opus-4.5-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-opus-4.5-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-opus-4.5-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-sonnet-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-haiku-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/deepseek-3.2": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "kiro/qwen3-coder-next": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "kiro/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "kiro/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "kiro/gpt-5.6-sol": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-terra": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-luna": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-5-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-4.5-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-haiku-4.5-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/gpt-5.6-sol-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-terra-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-luna-thinking": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-5-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-4.5-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-haiku-4.5-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/gpt-5.6-sol-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-terra-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-luna-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-5-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "kiro/claude-sonnet-4.5-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/claude-haiku-4.5-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "kiro/gpt-5.6-sol-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-terra-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "kiro/gpt-5.6-luna-thinking-agentic": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 272000,
+   "maxOutput": 128000
+  },
+  "mimo-free/mimo-auto": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "minimax-cn/MiniMax-M3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "minimax-cn/MiniMax-M2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "minimax-cn/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "minimax-cn/MiniMax-M2.1": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "minimax/MiniMax-M3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "minimax/MiniMax-M2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "minimax/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "minimax/MiniMax-M2.1": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "minimax/minimax-image-01": {
+   "imageOutput": true
+  },
+  "mistral/mistral-large-latest": {
+   "vision": true,
+   "contextWindow": 256000
+  },
+  "mistral/codestral-latest": {
+   "contextWindow": 256000
+  },
+  "mistral/mistral-medium-latest": {
+   "contextWindow": 128000
+  },
+  "mistral/mistral-embed": {
+   "contextWindow": 128000
+  },
+  "mmf/mimo-auto": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "nanobanana/nanobanana-flash": {
+   "vision": true,
+   "imageOutput": true
+  },
+  "nanobanana/nanobanana-pro": {
+   "vision": true,
+   "imageOutput": true
+  },
+  "nebius/meta-llama/Llama-3.3-70B-Instruct": {
+   "contextWindow": 128000
+  },
+  "nebius/Qwen/Qwen3-Embedding-8B": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "nvidia/minimaxai/minimax-m2.7": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "nvidia/minimaxai/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "thinkingCanDisable": false,
+   "contextWindow": 512000,
+   "maxOutput": 131072
+  },
+  "nvidia/z-ai/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 128000
+  },
+  "nvidia/deepseek-ai/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "nvidia/deepseek-ai/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "nvidia/moonshotai/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "nvidia/nvidia/nemotron-3-ultra-550b-a55b": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "ollama/gpt-oss:120b": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "ollama/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "ollama/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "ollama/minimax-m2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "ollama/glm-4.7-flash": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "ollama/qwen3.5": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "ollama/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "openai/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5.4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5.4-nano": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5.2": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5.1": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-5-nano": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "openai/gpt-4o": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "openai/gpt-4o-mini": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "openai/gpt-4-turbo": {
+   "vision": true,
+   "contextWindow": 128000
+  },
+  "openai/gpt-4.1": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "openai/gpt-4.1-mini": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "openai/gpt-4.1-nano": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "openai/o3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 100000
+  },
+  "openai/o3-mini": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 100000
+  },
+  "openai/o3-pro": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 100000
+  },
+  "openai/o4-mini": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 100000
+  },
+  "openai/o1": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 100000
+  },
+  "openai/o1-mini": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "openai/gpt-4o-mini-tts": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "openai/gpt-4o-transcribe": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "openai/gpt-4o-mini-transcribe": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "openai/gpt-image-1": {
+   "imageOutput": true,
+   "tools": false
+  },
+  "opencode-go/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "opencode-go/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "opencode-go/kimi-k2.7-code": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "opencode-go/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "opencode-go/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "opencode-go/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "opencode-go/mimo-v2.5": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "opencode-go/mimo-v2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "opencode-go/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "opencode-go/minimax-m2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "opencode-go/minimax-m2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "opencode-go/qwen3.7-max": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "opencode-go/qwen3.7-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "opencode-go/qwen3.6-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "openrouter/qwen/qwen3-embedding-8b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "openrouter/perplexity/pplx-embed-v1-4b": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "openrouter/perplexity/pplx-embed-v1-0.6b": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "openrouter/nvidia/llama-nemotron-embed-vl-1b-v2:free": {
+   "contextWindow": 128000
+  },
+  "openrouter/openai/gpt-4o-mini-tts": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "openrouter/openai/gpt-image-1": {
+   "imageOutput": true,
+   "tools": false
+  },
+  "perplexity-web/pplx-auto": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-web/pplx-sonar": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-web/pplx-gpt": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-web/pplx-gemini": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 1048576
+  },
+  "perplexity-web/pplx-sonnet": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-web/pplx-opus": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-web/pplx-nemotron": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity/sonar-pro": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity/sonar": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-agent/perplexity/sonar": {
+   "search": true,
+   "contextWindow": 128000
+  },
+  "perplexity-agent/openai/gpt-5.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "perplexity-agent/openai/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "perplexity-agent/openai/gpt-5.4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "perplexity-agent/anthropic/claude-sonnet-4-6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "perplexity-agent/anthropic/claude-opus-4-8": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "perplexity-agent/google/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "perplexity-agent/xai/grok-4.20-reasoning": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "perplexity-agent/perplexity/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "perplexity-agent/perplexity/kimi-k2.7-code": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "perplexity-agent/nvidia/nemotron-3-super-120b-a12b": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-V4-Pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-V4-Flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-V3.2": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-V3.2-Exp": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-V3.1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-V3.1-Terminus": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "siliconflow/deepseek-ai/DeepSeek-R1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "thinkingCanDisable": false,
+   "contextWindow": 128000
+  },
+  "siliconflow/Qwen/Qwen3.5-397B-A17B": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "siliconflow/Qwen/Qwen3.5-122B-A10B": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "siliconflow/zai-org/GLM-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "siliconflow/zai-org/GLM-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "siliconflow/moonshotai/Kimi-K2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "siliconflow/moonshotai/Kimi-K2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "siliconflow/openai/gpt-oss-120b": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "siliconflow/MiniMaxAI/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "siliconflow/inclusionAI/Ling-flash-2.0": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "together/meta-llama/Llama-3.3-70B-Instruct-Turbo": {
+   "contextWindow": 128000
+  },
+  "together/deepseek-ai/DeepSeek-R1": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "thinkingCanDisable": false,
+   "contextWindow": 128000
+  },
+  "together/Qwen/Qwen3-235B-A22B": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "together/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8": {
+   "vision": true,
+   "contextWindow": 1000000
+  },
+  "venice/zai-org-glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "venice/qwen3-235b-a22b-instruct-2507": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "venice/qwen3-coder-480b-a35b-instruct-turbo": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "venice/qwen3-vl-235b-a22b": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "venice/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "venice/llama-3.3-70b": {
+   "contextWindow": 128000
+  },
+  "venice/hermes-3-llama-3.1-405b": {
+   "contextWindow": 128000
+  },
+  "venice/mistral-small-3-2-24b-instruct": {
+   "contextWindow": 128000
+  },
+  "venice/text-embedding-qwen3-8b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "vertex-partner/deepseek-ai/deepseek-v3.2-maas": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "vertex-partner/qwen/qwen3-next-80b-a3b-thinking-maas": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "vertex-partner/qwen/qwen3-next-80b-a3b-instruct-maas": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "vertex-partner/zai-org/glm-5-maas": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "vertex/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "vertex/gemini-3.1-flash-lite-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "vertex/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "vertex/gemini-2.5-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "volcengine-ark/DeepSeek-V4-Flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "volcengine-ark/DeepSeek-V4-Pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "volcengine-ark/GLM-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "volcengine-ark/MiniMax-M2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "volcengine-ark/Kimi-K2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "xai/grok-4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "xai/grok-4-fast-reasoning": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "xai/grok-code-fast-1": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "xai/grok-3": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 131072
+  },
+  "xai/grok-2-image-1212": {
+   "imageOutput": true
+  },
+  "xai/grok-imagine-video": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "xiaomi-mimo/mimo-v2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-mimo/mimo-v2.5": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-mimo/mimo-v2-omni": {
+   "vision": true,
+   "audioInput": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "xiaomi-mimo/mimo-v2-flash": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "xiaomi-mimo/mimo-v2.5-tts": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2.5-pro-claude": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "xiaomi-tokenplan/mimo-v2.5": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2-pro": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2-omni": {
+   "vision": true,
+   "audioInput": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2-tts": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2.5-tts": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2.5-tts-voiceclone": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "xiaomi-tokenplan/mimo-v2.5-tts-voicedesign": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "alims-intl/qwen3.5-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alims-intl/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "alims-intl/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "alims-intl/MiniMax-M2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "alims-intl/qwen3-coder-next": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "alims-intl/qwen3-coder-plus": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "alims-intl/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/glm-5.0": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/glm-5.0-turbo": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/glm-5v-turbo": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "codebuddy-intl/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "codebuddy-intl/minimax-m2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "codebuddy-intl/kimi-k2.7": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "codebuddy-intl/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "codebuddy-intl/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "codebuddy-intl/hy3-preview": {
+   "reasoning": true,
+   "thinkingFormat": "hunyuan",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "codebuddy-intl/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "codebuddy-intl/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "codebuddy-intl/deepseek-v3-2-volc": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "api-airforce/anthropic/claude-3.7-sonnet": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "api-airforce/moonshot/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "api-airforce/google/gemini-2.5-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "baidu/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "baidu/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "baidu/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "baidu/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "baidu/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "baidu/qwen3.5-397b-a17b": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "baidu/qwen3.5-27b": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "bazaarlink/claude-opus-4.7": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "bazaarlink/claude-sonnet-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "bazaarlink/claude-haiku-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "bazaarlink/gpt-5.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "bazaarlink/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "bazaarlink/gpt-5.4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "bazaarlink/gpt-5.4-nano": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "bazaarlink/grok-4.3": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "bazaarlink/grok-4.20": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "bazaarlink/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "bazaarlink/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "bazaarlink/gemini-3.1-flash-lite-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "bazaarlink/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "bazaarlink/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "bazaarlink/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "bazaarlink/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "bazaarlink/mimo-v2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "bazaarlink/mimo-v2.5": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "bazaarlink/minimax-m3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "bazaarlink/minimax-m2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "bazaarlink/minimax-m2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "bazaarlink/qwen3.6-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "bazaarlink/nemotron-3-super-120b-a12b": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "bluesminds/gpt-4.1": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "bluesminds/gpt-4.1-mini": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "bluesminds/gpt-4.1-nano": {
+   "vision": true,
+   "contextWindow": 1000000,
+   "maxOutput": 32768
+  },
+  "bluesminds/claude-sonnet-4-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "bluesminds/claude-haiku-4-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "bluesminds/gemini-2.0-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "bluesminds/gemini-2.0-flash-exp": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "bluesminds/qwen-turbo": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "bluesminds/kimi-k2": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "bluesminds/kimi-k2-thinking": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "bluesminds/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "bluesminds/minimax-m2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "bluesminds/claude-opus-4-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "bluesminds/gemini-2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-budget",
+   "thinkingRange": {
+    "min": 0,
+    "max": 24576
+   },
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "kilo-gateway/nvidia/nemotron-3-super-120b-a12b:free": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "kilo-gateway/nvidia/nemotron-3-ultra-550b-a55b:free": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "llm7/gpt-5.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "llm7/claude-opus-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "llm7/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "llm7/grok-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 500000
+  },
+  "llm7/kimi-k3": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "sambanova/MiniMax-M2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "tencent/hunyuan-turbos-latest": {
+   "reasoning": true,
+   "thinkingFormat": "hunyuan",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "tencent/hunyuan-t1-latest": {
+   "reasoning": true,
+   "thinkingFormat": "hunyuan",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "morph/morph-qwen35-397b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "morph/morph-minimax27-230b": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "morph/morph-qwen36-27b": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144
+  },
+  "poolside/poolside/laguna-s-2.1": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 1000000,
+   "maxOutput": 32000
+  },
+  "poolside/poolside/laguna-xs-2.1": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "maxOutput": 32000
+  },
+  "tokenrouter/MiniMax-Hailuo-2.3": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "tokenrouter/MiniMax-M3": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "contextWindow": 1048576,
+   "maxOutput": 512000
+  },
+  "tokenrouter/anthropic/claude-fable-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-haiku-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "tokenrouter/anthropic/claude-opus-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "tokenrouter/anthropic/claude-opus-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-opus-4.7": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-opus-4.7-fast": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "tokenrouter/anthropic/claude-opus-4.8": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-opus-4.8-fast": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive"
+  },
+  "tokenrouter/anthropic/claude-opus-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-opus-5-fast": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-sonnet-4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "tokenrouter/anthropic/claude-sonnet-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "tokenrouter/anthropic/claude-sonnet-4.6": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/anthropic/claude-sonnet-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-adaptive",
+   "contextWindow": 1000000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/claude-haiku-4-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "tokenrouter/claude-opus-4-8-m-aws": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "claude-budget"
+  },
+  "tokenrouter/deepseek/deepseek-v3.2": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 128000
+  },
+  "tokenrouter/deepseek/deepseek-v4-flash": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "tokenrouter/deepseek/deepseek-v4-flash-0731": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "tokenrouter/deepseek/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  },
+  "tokenrouter/ex/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/google/gemini-2.5-flash-image": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "tokenrouter/google/gemini-3-flash-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "tokenrouter/google/gemini-3-pro-image-preview": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "tokenrouter/google/gemini-3.1-flash-image-preview": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "tokenrouter/google/gemini-3.1-flash-lite-image": {
+   "vision": true,
+   "imageOutput": true,
+   "contextWindow": 1048576
+  },
+  "tokenrouter/google/gemini-3.1-pro-preview": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65535
+  },
+  "tokenrouter/google/gemini-3.5-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "tokenrouter/google/gemini-3.5-flash-lite": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "tokenrouter/google/gemini-3.6-flash": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "gemini-level",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 65536
+  },
+  "tokenrouter/google/gemini-embedding-2": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 1048576
+  },
+  "tokenrouter/google/gemma-4-26b-a4b-it": {
+   "vision": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/kling-3.0-turbo": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/kling-v2-6": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/kling-v3": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/kling-v3-omni": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/minimax/minimax-m2-her": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "tokenrouter/minimax/minimax-m2.1": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "tokenrouter/minimax/minimax-m2.1-highspeed": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "tokenrouter/minimax/minimax-m2.5": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "maxOutput": 131072
+  },
+  "tokenrouter/minimax/minimax-m2.7": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "tokenrouter/minimax/minimax-m2.7-highspeed": {
+   "reasoning": true,
+   "thinkingFormat": "minimax",
+   "thinkingCanDisable": false,
+   "contextWindow": 204800,
+   "maxOutput": 131072
+  },
+  "tokenrouter/mistralai/devstral-2512": {
+   "contextWindow": 128000
+  },
+  "tokenrouter/mistralai/mistral-medium-3-5": {
+   "contextWindow": 128000
+  },
+  "tokenrouter/mistralai/mistral-small-2603": {
+   "contextWindow": 128000
+  },
+  "tokenrouter/mistralai/voxtral-small-24b-2507": {
+   "contextWindow": 128000
+  },
+  "tokenrouter/moonshotai/kimi-k2.5": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "tokenrouter/moonshotai/kimi-k2.6": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "tokenrouter/moonshotai/kimi-k2.7-code": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "tokenrouter/moonshotai/kimi-k3": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "tokenrouter/moonshotai/kimi-k3-free": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "kimi",
+   "thinkingCanDisable": false,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "tokenrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/nvidia/nemotron-3-super-120b-a12b": {
+   "reasoning": true,
+   "contextWindow": 128000
+  },
+  "tokenrouter/openai/gpt-4o-mini": {
+   "vision": true,
+   "search": true,
+   "contextWindow": 128000,
+   "maxOutput": 16384
+  },
+  "tokenrouter/openai/gpt-5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5-image": {
+   "imageOutput": true
+  },
+  "tokenrouter/openai/gpt-5-image-mini": {
+   "imageOutput": true
+  },
+  "tokenrouter/openai/gpt-5-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.2": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.4": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.4-image-2": {
+   "imageOutput": true
+  },
+  "tokenrouter/openai/gpt-5.4-mini": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.4-nano": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.4-pro": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.5-pro": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.6-luna": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.6-sol": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-5.6-terra": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 400000,
+   "maxOutput": 128000
+  },
+  "tokenrouter/openai/gpt-oss-120b": {
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 128000
+  },
+  "tokenrouter/qwen/qwen3-coder-next": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000
+  },
+  "tokenrouter/qwen/qwen3.5-122b-a10b": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.5-35b-a3b": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.5-397b-a17b": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.5-9b": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.5-flash": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.5-plus-02-15": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.6-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.7-max": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.7-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen/qwen3.8-max": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen3.5-omni-plus": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 262144,
+   "maxOutput": 65536
+  },
+  "tokenrouter/qwen3.6-flash": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "tokenrouter/stepfun/step-3.5-flash": {
+   "reasoning": true,
+   "thinkingFormat": "step",
+   "contextWindow": 128000
+  },
+  "tokenrouter/stepfun/step-3.7-flash": {
+   "reasoning": true,
+   "thinkingFormat": "step",
+   "contextWindow": 128000
+  },
+  "tokenrouter/tencent/hy3-preview": {
+   "reasoning": true,
+   "thinkingFormat": "hunyuan",
+   "contextWindow": 262144,
+   "maxOutput": 262144
+  },
+  "tokenrouter/x-ai/grok-4.1-fast": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "tokenrouter/x-ai/grok-4.20-beta": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "tokenrouter/x-ai/grok-4.3": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "tokenrouter/x-ai/grok-4.5": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 500000
+  },
+  "tokenrouter/x-ai/grok-build-0.1": {
+   "vision": true,
+   "search": true,
+   "reasoning": true,
+   "thinkingFormat": "openai",
+   "contextWindow": 256000
+  },
+  "tokenrouter/xiaomi/mimo-v2-flash": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "tokenrouter/xiaomi/mimo-v2-omni": {
+   "vision": true,
+   "audioInput": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "tokenrouter/xiaomi/mimo-v2-pro": {
+   "vision": true,
+   "contextWindow": 262144,
+   "maxOutput": 131072
+  },
+  "tokenrouter/xiaomi/mimo-v2.5": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "tokenrouter/xiaomi/mimo-v2.5-pro": {
+   "vision": true,
+   "audioInput": true,
+   "videoInput": true,
+   "contextWindow": 1048576,
+   "maxOutput": 131072
+  },
+  "tokenrouter/z-ai/glm-4.5-air": {
+   "reasoning": true,
+   "thinkingFormat": "zai"
+  },
+  "tokenrouter/z-ai/glm-4.6": {
+   "reasoning": true,
+   "thinkingFormat": "zai"
+  },
+  "tokenrouter/z-ai/glm-4.6v": {
+   "vision": true,
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "contextWindow": 128000
+  },
+  "tokenrouter/z-ai/glm-4.7": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "tokenrouter/z-ai/glm-5": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "tokenrouter/z-ai/glm-5-turbo": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "tokenrouter/z-ai/glm-5.1": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "tokenrouter/z-ai/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "alitp-intl/qwen3.8-max-preview": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alitp-intl/qwen3.7-max": {
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alitp-intl/qwen3.7-plus": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alitp-intl/qwen3.6-flash": {
+   "vision": true,
+   "videoInput": true,
+   "reasoning": true,
+   "thinkingFormat": "qwen",
+   "contextWindow": 1000000,
+   "maxOutput": 65536
+  },
+  "alitp-intl/glm-5.2": {
+   "reasoning": true,
+   "thinkingFormat": "zai",
+   "maxOutput": 128000
+  },
+  "alitp-intl/deepseek-v4-pro": {
+   "reasoning": true,
+   "thinkingFormat": "deepseek",
+   "contextWindow": 1000000,
+   "maxOutput": 384000
+  }
+ }
+}

@@ -1,0 +1,285 @@
+/* Headroom panel.
+ *
+ * Extends the shared card vocabulary (`.nr-card`, `.nr-button`,
+ * `.nr-panel-stack`) rather than restyling it, so this page still reads as part
+ * of the dashboard. Only what the headroom surface adds is defined here: the
+ * detection banner, the extras rows, and the install-log region.
+ *
+ * Motion comes from `motion.css` (`.nr-skeleton`, `.nr-spinner`,
+ * `.nr-progress-indeterminate`, `.nr-anim-rise`); no keyframes are declared in
+ * this file.
+ *
+ * State is never carried by colour alone. Every accent below sits beside text
+ * that says the same thing — `.nr-headroom-extra-state` always renders
+ * "Installed" / "Not installed" / "State not reported", and the unsupported
+ * blocks carry the router's own sentence. Colour is redundant emphasis, so the
+ * panel survives greyscale, low vision, and a forced-colours mode.
+ */
+
+.nr-headroom-panel {
+  --headroom-gap: 12px;
+}
+
+/* Screen-reader-only text. Defined here too because the panel is also served in
+ * the CSR build, which links no stylesheet of its own. */
+.nr-headroom-panel .nr-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── detection ───────────────────────────────────────────────────────────── */
+
+.nr-headroom-detect {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 12px 14px;
+}
+
+.nr-headroom-detect.is-ready {
+  border-left-color: var(--ok, #4ade80);
+}
+
+.nr-headroom-detect.is-missing {
+  border-left-color: var(--warn, #fbbf24);
+}
+
+.nr-headroom-detect strong {
+  color: var(--text-main-dark);
+  font-size: 0.92rem;
+}
+
+.nr-headroom-detect p,
+.nr-headroom-detect code {
+  color: var(--text-muted-dark);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.nr-headroom-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--text-muted-dark);
+  font-size: 0.8rem;
+}
+
+/* ── extras rows ─────────────────────────────────────────────────────────── */
+
+.nr-headroom-extras {
+  display: grid;
+  gap: var(--headroom-gap);
+}
+
+.nr-headroom-extra {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 12px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 12px 14px;
+}
+
+.nr-headroom-extra-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nr-headroom-extra-copy strong {
+  color: var(--text-main-dark);
+  font-size: 0.9rem;
+}
+
+.nr-headroom-extra-copy p {
+  color: var(--text-muted-dark);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* The installed state as words. Its dot is decorative and `aria-hidden`. */
+.nr-headroom-extra-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.nr-headroom-extra-state::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted-dark);
+  flex: 0 0 auto;
+}
+
+.nr-headroom-extra-state.is-on {
+  color: var(--ok, #4ade80);
+}
+
+.nr-headroom-extra-state.is-on::before {
+  background: var(--ok, #4ade80);
+}
+
+.nr-headroom-extra-state.is-unknown {
+  color: var(--warn, #fbbf24);
+}
+
+.nr-headroom-extra-state.is-unknown::before {
+  background: var(--warn, #fbbf24);
+  /* A hollow dot so "unknown" is distinguishable from "off" without colour. */
+  box-shadow: inset 0 0 0 2px var(--surface-dark-2);
+}
+
+/* ── actions and refusals ────────────────────────────────────────────────── */
+
+.nr-headroom-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* An action this build refuses. Rendered as a bordered explanation rather than
+ * a disabled button, because a greyed-out control invites clicking and says
+ * nothing about why it will not work. */
+.nr-headroom-unsupported {
+  display: grid;
+  gap: 6px;
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: color-mix(in srgb, var(--surface-dark-2) 70%, transparent);
+  padding: 10px 12px;
+}
+
+.nr-headroom-unsupported-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warn, #fbbf24);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nr-headroom-unsupported p {
+  color: var(--text-muted-dark);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* The requirement string the user can run themselves. Selectable, and allowed
+ * to scroll rather than force the panel wide. */
+.nr-headroom-command {
+  display: block;
+  border: 1px solid var(--border-dark);
+  border-radius: 6px;
+  background: var(--bg-dark, #111);
+  color: var(--text-main-dark);
+  padding: 8px 10px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+  overflow-x: auto;
+  white-space: pre;
+  user-select: all;
+}
+
+.nr-headroom-status {
+  color: var(--text-muted-dark);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.nr-headroom-status.is-error {
+  color: #f87171;
+}
+
+.nr-headroom-status.is-refused {
+  color: var(--warn, #fbbf24);
+}
+
+.nr-headroom-status.is-ok {
+  color: var(--ok, #4ade80);
+}
+
+/* ── install log ─────────────────────────────────────────────────────────── */
+
+.nr-headroom-log-card {
+  display: grid;
+  gap: 8px;
+}
+
+/* Bounded so a long log scrolls inside the card instead of pushing the page. */
+.nr-headroom-log {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--bg-dark, #111);
+  padding: 10px 12px;
+  margin: 0;
+  color: var(--text-muted-dark);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.nr-headroom-log.is-empty {
+  font-family: inherit;
+  font-size: 0.82rem;
+  white-space: normal;
+}
+
+.nr-headroom-log-path {
+  color: var(--text-muted-dark);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+/* ── loading and failure ─────────────────────────────────────────────────── */
+
+.nr-headroom-skeletons {
+  display: grid;
+  gap: var(--headroom-gap);
+}
+
+.nr-headroom-failure {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border: 1px solid color-mix(in srgb, #f87171 45%, var(--border-dark));
+  border-radius: var(--radius-control, 8px);
+  background: color-mix(in srgb, #f87171 8%, var(--surface-dark-2));
+  padding: 12px 14px;
+}
+
+.nr-headroom-failure p {
+  color: var(--text-muted-dark);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .nr-headroom-extra {
+    grid-template-columns: 1fr;
+  }
+}

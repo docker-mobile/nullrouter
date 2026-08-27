@@ -1,0 +1,28 @@
+[package]
+name = "nullrouter-dashboard-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[lib]
+name = "nullrouter_dashboard_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nullrouter-dashboard-host"
+path = "src/main.rs"
+
+[dependencies]
+actix-files.workspace = true
+actix-web.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

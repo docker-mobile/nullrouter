@@ -1,0 +1,641 @@
+/* Live tooling surfaces: CLI Tools, Translator, Console Log.
+ *
+ * These three panels stopped rendering fixtures at the same time and share one
+ * problem, so they share one stylesheet: each has to make "loading", "nothing
+ * there", and "the request failed" look like three different things. The shared
+ * vocabulary for that is `.nr-tool-notice` — dashed for an empty state, solid
+ * warn for a failure — and it is used identically in all three.
+ *
+ * No keyframes are declared here. Motion comes from `motion.css`
+ * (`.nr-skeleton`, `.nr-spinner`, `.nr-anim-rise`, `.nr-stagger`, `.nr-tick`) so
+ * these panels animate like the rest of the dashboard.
+ */
+
+/* ── shared states ───────────────────────────────────────────────────────── */
+
+.nr-tool-notice {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border: 1px dashed #464646;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.nr-tool-notice strong {
+  color: var(--text-main-dark);
+}
+
+.nr-tool-notice span {
+  color: var(--text-muted-dark);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+/* A failure is bordered solid in warn and never dashed, so it cannot be read as
+ * an empty state at a glance. */
+.nr-tool-notice.is-error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border-dark));
+}
+
+.nr-tool-skeletons {
+  display: grid;
+  gap: 8px;
+}
+
+.nr-tool-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted-dark);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* ── CLI tools list ──────────────────────────────────────────────────────── */
+
+.nr-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nr-tool-card {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* A tool the router did not find is not an account and must not read like one:
+ * quieter background, muted title. It still shows, because "we looked and it is
+ * not here" is information. */
+.nr-tool-card.is-absent {
+  background: color-mix(in srgb, var(--surface-dark-2) 65%, var(--bg-dark));
+}
+
+.nr-tool-card.is-absent h3 {
+  color: var(--text-muted-dark);
+}
+
+.nr-tool-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nr-tool-card h3 {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text-main-dark);
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nr-tool-card p {
+  overflow-wrap: anywhere;
+  color: var(--text-muted-dark);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.nr-tool-card-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nr-tool-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.nr-tool-skeleton-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* ── CLI tool detail ─────────────────────────────────────────────────────── */
+
+.nr-tool-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nr-tool-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.nr-tool-form {
+  display: grid;
+  gap: 10px;
+}
+
+.nr-tool-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nr-tool-field label {
+  color: var(--text-main-dark);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.nr-tool-field small {
+  color: var(--text-muted-dark);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.nr-tool-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  color: var(--text-main-dark);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.nr-tool-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nr-tool-status {
+  color: var(--text-muted-dark);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.nr-tool-status.is-failed {
+  color: var(--warn);
+}
+
+.nr-tool-config {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: #1f1f1f;
+  padding: 12px;
+  color: var(--text-main-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.nr-tool-path {
+  overflow-wrap: anywhere;
+  color: var(--info);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+/* ── translator ──────────────────────────────────────────────────────────── */
+
+.nr-translator-panel {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.nr-translator-head,
+.nr-translator-meta,
+.nr-translator-step-head,
+.nr-translator-step-title,
+.nr-translator-actions,
+.nr-translator-code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nr-translator-head,
+.nr-translator-step-head,
+.nr-translator-code-head {
+  justify-content: space-between;
+}
+
+.nr-translator-head,
+.nr-translator-step-head,
+.nr-translator-actions,
+.nr-translator-meta {
+  flex-wrap: wrap;
+}
+
+.nr-translator-meta {
+  justify-content: flex-end;
+}
+
+.nr-translator-badge,
+.nr-translator-language {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 4px 8px;
+  color: var(--text-main-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+}
+
+.nr-translator-badge small {
+  color: var(--text-muted-dark);
+  font-family: inherit;
+}
+
+.nr-translator-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nr-translator-capability {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 10px;
+}
+
+.nr-translator-capability strong {
+  color: var(--text-main-dark);
+}
+
+.nr-translator-capability span,
+.nr-translator-step-file,
+.nr-translator-step-desc,
+.nr-translator-code-head small {
+  color: var(--text-muted-dark);
+}
+
+.nr-translator-flow {
+  display: grid;
+  gap: 10px;
+}
+
+.nr-translator-step {
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+.nr-translator-step-toggle {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-main-dark);
+  padding: 0;
+  text-align: left;
+}
+
+.nr-translator-step-toggle strong,
+.nr-translator-step-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nr-translator-step-icon {
+  width: 22px;
+  flex: 0 0 22px;
+  color: var(--text-muted-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-align: center;
+}
+
+.nr-translator-step-index {
+  width: 20px;
+  color: var(--text-muted-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+}
+
+.nr-translator-step-title {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.nr-translator-step-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* The editor and the read-only view share one box so a step does not resize when
+ * it becomes editable. */
+.nr-translator-code,
+.nr-translator-editor {
+  min-height: 220px;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: #1f1f1f;
+  padding: 12px;
+  color: var(--text-main-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.nr-translator-editor {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+}
+
+.nr-translator-default-file {
+  border-color: color-mix(in srgb, var(--info) 40%, var(--border-dark));
+  color: var(--info);
+}
+
+.nr-translator-step-status {
+  min-height: 1.1rem;
+  color: var(--text-muted-dark);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.nr-translator-step-status.is-failed {
+  color: var(--warn);
+}
+
+/* ── console log ─────────────────────────────────────────────────────────── */
+
+.nr-console-log-panel {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.nr-console-log-head,
+.nr-console-log-actions,
+.nr-console-log-meta,
+.nr-console-log-stream,
+.nr-console-level-legend,
+.nr-console-endpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nr-console-log-head,
+.nr-console-endpoint-row {
+  justify-content: space-between;
+}
+
+.nr-console-log-head,
+.nr-console-log-actions,
+.nr-console-log-meta,
+.nr-console-level-legend,
+.nr-console-endpoint-row {
+  flex-wrap: wrap;
+}
+
+.nr-console-log-actions {
+  justify-content: flex-end;
+}
+
+.nr-console-log-actions small,
+.nr-console-endpoint-row small,
+.nr-console-log-empty,
+.nr-console-log-note {
+  color: var(--text-muted-dark);
+}
+
+.nr-console-log-meta {
+  padding: 10px 12px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+}
+
+.nr-console-log-stream {
+  align-items: flex-start;
+  justify-content: space-between;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* Only a stream that is not delivering output is tinted warn, so the tint means
+ * something. */
+.nr-console-log-stream.is-stale {
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--border-dark));
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface-dark-2));
+}
+
+.nr-console-log-stream strong,
+.nr-console-endpoint-row strong {
+  color: var(--text-main-dark);
+}
+
+.nr-console-level-legend,
+.nr-console-endpoint-list {
+  display: grid;
+  gap: 8px;
+}
+
+.nr-console-level-legend {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.nr-console-level-chip {
+  min-width: 0;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 8px 10px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.nr-console-log-viewport {
+  min-height: calc(100dvh - 360px);
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: black;
+  padding: 14px;
+  color: var(--text-main-dark);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.nr-console-line {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* The pulse on a new line needs somewhere to draw. */
+  border-radius: 3px;
+}
+
+.nr-console-log-empty {
+  display: block;
+}
+
+.nr-console-endpoint-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nr-console-endpoint-row {
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 10px;
+}
+
+.nr-console-endpoint-label {
+  display: grid;
+  gap: 2px;
+}
+
+.nr-console-endpoint-row code {
+  overflow-wrap: anywhere;
+  color: var(--info);
+  font-size: 0.78rem;
+}
+
+.nr-console-level-log {
+  color: var(--ok);
+}
+
+.nr-console-level-info {
+  color: var(--info);
+}
+
+.nr-console-level-warn {
+  color: var(--warn);
+}
+
+.nr-console-level-error {
+  color: color-mix(in srgb, var(--brand) 42%, red);
+}
+
+.nr-console-level-debug {
+  color: color-mix(in srgb, var(--info) 48%, violet);
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .nr-tool-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nr-tool-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-translator-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .nr-console-log-head,
+  .nr-console-log-actions,
+  .nr-console-log-stream {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nr-console-log-actions .nr-button {
+    width: 100%;
+  }
+
+  .nr-console-level-legend,
+  .nr-console-endpoint-list {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-console-log-viewport {
+    min-height: 300px;
+  }
+
+  .nr-translator-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nr-translator-meta {
+    justify-content: flex-start;
+  }
+
+  .nr-translator-status {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-translator-step-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nr-translator-actions .nr-button {
+    flex: 1;
+  }
+
+  .nr-translator-step-toggle strong,
+  .nr-translator-step-file {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 680px) {
+  .nr-tool-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-tool-card-top,
+  .nr-tool-detail-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nr-tool-card h3 {
+    white-space: normal;
+  }
+}

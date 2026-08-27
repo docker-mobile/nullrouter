@@ -1,0 +1,160 @@
+/* Settings panel.
+ *
+ * Extends the existing settings vocabulary (`.nr-setting-row`, `.nr-toggle`,
+ * `.nr-card`) rather than restyling it, so this page still reads as part of the
+ * dashboard. Only what live saving adds is defined here: the per-row status
+ * line, the control cluster that holds a spinner next to a control, and the
+ * text-input variant of a settings row.
+ *
+ * Motion comes from `motion.css` (`.nr-skeleton`, `.nr-spinner`, `.nr-tick`,
+ * `.nr-anim-rise`); no keyframes are declared here.
+ */
+
+.nr-settings-card .nr-card-head.between {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nr-settings-rows {
+  display: grid;
+  gap: 10px;
+}
+
+/* A row and its status line move together, so `.nr-anim-rise` and the stagger
+ * apply to the pair rather than to the control alone. */
+.nr-setting-block {
+  display: grid;
+  gap: 4px;
+}
+
+/* `.nr-setting-row + .nr-setting-row` in forms.css spaces adjacent rows; inside
+ * a block the gap above owns spacing, so the inherited margin is dropped. */
+.nr-setting-block .nr-setting-row {
+  margin-top: 0;
+}
+
+/* Holds a spinner, the control, and (for text rows) an explicit save action. */
+.nr-setting-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.nr-setting-row-text {
+  /* A URL needs room, so the label column yields before the input does. */
+  align-items: center;
+}
+
+.nr-setting-row-text .nr-setting-control {
+  flex: 1 1 320px;
+  max-width: 460px;
+  justify-content: flex-end;
+}
+
+.nr-setting-row-text label {
+  cursor: pointer;
+}
+
+.nr-setting-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control);
+  background: var(--bg-dark);
+  color: var(--text-main-dark);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: var(--font-body);
+}
+
+.nr-setting-input::placeholder {
+  color: var(--text-muted-dark);
+}
+
+.nr-setting-input:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* A control whose write is in flight is disabled, so a double-click cannot
+ * race. It must still read as present rather than as missing. */
+.nr-setting-row:disabled,
+.nr-setting-input:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+/* Enforced elsewhere and not readable from /api/settings, so it carries no
+ * control at all. */
+.nr-setting-row-unavailable {
+  border-style: dashed;
+}
+
+/* ── per-row save status ─────────────────────────────────────────────────── */
+
+/* Always in the DOM, and never `display:none`/`visibility:hidden`: an
+ * `aria-live` region has to be in the accessibility tree before its text
+ * changes, or the change is not announced. `.is-quiet` therefore collapses the
+ * height of an idle row instead of removing it. */
+.nr-setting-status {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+  line-height: 1.4;
+}
+
+.nr-setting-status.is-quiet {
+  height: 0;
+  overflow: hidden;
+}
+
+.nr-setting-status.is-saved {
+  color: var(--ok);
+  /* `.nr-tick` pulses a box-shadow; give it something to pulse against. */
+  border-radius: 6px;
+  padding: 2px 12px;
+}
+
+.nr-setting-status.is-failed {
+  color: var(--warn);
+}
+
+/* ── load and failure states ─────────────────────────────────────────────── */
+
+.nr-settings-rows[aria-busy="true"] {
+  gap: 14px;
+}
+
+.nr-settings-failure {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border-color: var(--warn);
+}
+
+/* 1023px, not a breakpoint of this file's own choosing: `responsive.css` stacks
+ * `.nr-card-head.between` there, and the rule above is more specific than that
+ * one, so it has to hand the layout back at the same width. */
+@media (max-width: 1023px) {
+  .nr-settings-card .nr-card-head.between {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 720px) {
+  .nr-setting-row,
+  .nr-setting-row-text {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nr-setting-row-text .nr-setting-control {
+    flex-basis: auto;
+    max-width: none;
+    width: 100%;
+  }
+}

@@ -1,0 +1,145 @@
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/inter-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url("/assets/fonts/material-symbols-g016.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: dark;
+  --brand: #e56a4a;
+  --brand-hover: #cc5236;
+  --bg-dark: #1a1a1a;
+  --surface-dark: #262626;
+  --surface-dark-2: #303030;
+  --surface-raised: #353535;
+  --border-dark: #333333;
+  --border-subtle-dark: #2a2a2a;
+  --text-main-dark: #ededed;
+  --text-muted-dark: #9ca3af;
+  --ok: #5cc782;
+  --info: #8ab4ff;
+  --warn: #f7c76f;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-warm: 0 2px 12px -2px rgba(229, 106, 74, 0.25);
+  --shadow-elev:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 16px 48px -8px rgba(0, 0, 0, 0.55);
+  --shadow-focus: 0 0 0 3px rgba(229, 106, 74, 0.18);
+  --space-tight: 8px;
+  --space-row: 10px;
+  --space-card: 16px;
+  --space-page: 24px;
+  --motion-micro: 120ms;
+  --motion-standard: 300ms;
+  --radius-control: 8px;
+  --radius-card: 14px;
+  --font-caption: 0.76rem;
+  --font-body: 0.9rem;
+  --font-tile-title: 0.95rem;
+  --font-card-title: 1.05rem;
+  --mitm-max-width: 1120px;
+  --mitm-server-label: 8rem;
+  --mitm-model-label: 9rem;
+  --mitm-badge-font: 10px;
+  --mitm-copy-server: 11px;
+  --mitm-copy-host: 10px;
+  --mitm-copy-info: 11px;
+  --mitm-copy-warning: 10px;
+  --mitm-control-radius: 4px;
+  --mitm-motion: 150ms;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "liga";
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg-dark);
+  color: var(--text-main-dark);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+button:not(:disabled),
+a[href] {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-focus);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.nr-card-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: rgba(229, 106, 74, 0.18);
+  color: #ffb199;
+  font-weight: 700;
+  line-height: 1;
+}
+
+::selection {
+  background: rgba(229, 106, 74, 0.3);
+  color: #f4b59c;
+}
+
+.nr-brand-copy small,
+.nr-page-title p,
+.nr-card-head p,
+.nr-empty-state span,
+.nr-setting-summary small,
+.nr-provider-foot,
+.nr-model-tile span,
+.nr-model-tile small,
+.nr-metric-card small {
+  color: var(--text-muted-dark);
+}

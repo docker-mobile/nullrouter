@@ -1,0 +1,32 @@
+[package]
+name = "nullrouter-events"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Actix Web event-stream microservice for the nullrouter Rust port"
+repository.workspace = true
+
+[lib]
+name = "nullrouter_events"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nullrouter-events"
+path = "src/main.rs"
+
+[dependencies]
+tracing.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+actix-web.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+actix-rt.workspace = true
+
+[lints]
+workspace = true

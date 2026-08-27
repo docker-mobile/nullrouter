@@ -1,0 +1,332 @@
+/* Live provider connections.
+ *
+ * Two surfaces share this file and must never be confused for one another:
+ *
+ *   `.nr-connection-*`  rows the router actually holds. Solid borders, an
+ *                       accent edge, real actions.
+ *   `.nr-catalog-*`     providers this build *could* configure. Dashed borders
+ *                       and muted text, because a catalog entry is a capability,
+ *                       not an account.
+ *
+ * The old panel drew fixture tiles in the solid style whether or not anything
+ * was configured. The visual split is load-bearing, not decoration.
+ *
+ * Motion is composed from `motion.css` (`.nr-skeleton`, `.nr-spinner`,
+ * `.nr-anim-rise`, `.nr-stagger`, `.nr-card-interactive`, `.nr-tick`); no
+ * keyframes are declared here.
+ */
+
+.nr-connections-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── configured connections ──────────────────────────────────────────────── */
+
+.nr-connection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nr-connection-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--provider-accent, var(--brand));
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+/* A row that is not routing traffic must look inert, not merely say so. */
+.nr-connection-card.is-inactive {
+  border-left-color: var(--text-muted-dark);
+  background: color-mix(in srgb, var(--surface-dark-2) 70%, var(--bg-dark));
+}
+
+/* While a delete is in flight the card stays visible but uninteractable, so the
+ * row cannot be clicked twice. */
+.nr-connection-card.is-deleting {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.nr-connection-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nr-connection-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nr-connection-logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--provider-accent, var(--brand)) 40%, var(--border-dark));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--provider-accent, var(--brand)) 18%, var(--surface-dark-2));
+  color: var(--provider-accent, var(--brand));
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.nr-connection-card h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-main-dark);
+  font-size: var(--font-tile-title);
+}
+
+.nr-connection-card h4 + span {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+.nr-connection-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.nr-connection-meta div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nr-connection-meta dt,
+.nr-connection-meta .nr-meta-label {
+  color: var(--text-muted-dark);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nr-connection-meta dd,
+.nr-connection-meta .nr-meta-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-main-dark);
+  font-size: var(--font-caption);
+}
+
+/* The credential line describes where a secret lives. It never shows one. */
+.nr-connection-credential {
+  border: 1px dashed var(--border-dark);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+.nr-connection-error {
+  border-left: 2px solid var(--warn);
+  padding-left: 8px;
+  overflow-wrap: anywhere;
+  color: var(--warn);
+  font-size: var(--font-caption);
+}
+
+.nr-connection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nr-connection-status {
+  min-height: 1.1rem;
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+.nr-connection-status.is-error {
+  color: var(--warn);
+}
+
+.nr-connection-status.is-ok {
+  color: var(--ok);
+}
+
+/* ── destructive confirmation ────────────────────────────────────────────── */
+
+/* Deleting a connection cannot be undone once the router has applied it, so the
+ * first click only ever arms the confirmation. */
+.nr-connection-confirm {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, #f87171 45%, var(--border-dark));
+  border-radius: 8px;
+  background: color-mix(in srgb, #f87171 10%, var(--surface-dark-2));
+  padding: 10px;
+}
+
+.nr-connection-confirm p {
+  margin: 0;
+  color: var(--text-main-dark);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+
+.nr-button.danger {
+  border-color: color-mix(in srgb, #f87171 60%, var(--border-dark));
+  background: color-mix(in srgb, #f87171 18%, var(--surface-dark-2));
+  color: #fca5a5;
+}
+
+.nr-button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #f87171 28%, var(--surface-dark-2));
+}
+
+/* ── loading, empty, and failure ─────────────────────────────────────────── */
+
+.nr-connection-skeleton {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+}
+
+.nr-panel-notice {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border: 1px dashed #464646;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.nr-panel-notice strong {
+  color: var(--text-main-dark);
+}
+
+.nr-panel-notice span {
+  color: var(--text-muted-dark);
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+
+.nr-panel-notice.is-error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border-dark));
+}
+
+/* ── create form ─────────────────────────────────────────────────────────── */
+
+.nr-connection-form {
+  display: grid;
+  gap: 10px;
+}
+
+.nr-connection-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nr-connection-form .nr-provider-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nr-form-error {
+  color: var(--warn);
+  font-size: var(--font-caption);
+}
+
+/* ── registry catalog ────────────────────────────────────────────────────── */
+
+/* Deliberately quieter than a connection card: dashed edge, no accent bar, muted
+ * body text. Nothing here is an account. */
+.nr-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nr-catalog-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px dashed var(--border-dark);
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 10px;
+}
+
+.nr-catalog-glyph {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--provider-accent, var(--brand)) 22%, transparent);
+  color: var(--text-main-dark);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.nr-catalog-tile > span:last-child {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.nr-catalog-tile strong {
+  overflow: hidden;
+  color: var(--text-main-dark);
+  font-size: var(--font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nr-catalog-tile small {
+  color: var(--text-muted-dark);
+  font-size: 0.7rem;
+}
+
+.nr-catalog-more {
+  color: var(--text-muted-dark);
+  font-size: var(--font-caption);
+}
+
+@media (max-width: 1100px) {
+  .nr-catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .nr-connection-grid,
+  .nr-connection-form-grid,
+  .nr-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-connection-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .nr-connection-actions .nr-button {
+    width: 100%;
+  }
+}

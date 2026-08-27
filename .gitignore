@@ -1,0 +1,84 @@
+# ---- Rust build output ----
+/target/
+**/target/
+**/target-check/
+*.pdb
+*.profraw
+*.profdata
+
+# Root Cargo.lock IS committed: this workspace ships binaries and services,
+# so builds should be reproducible. Do not ignore it.
+
+# ---- Generated WASM artifacts ----
+# Both are rebuilt from source via the commands in README.md ("Run locally"):
+#   cargo build -p nullrouter-dashboard-wasm --target wasm32-unknown-unknown --release
+#   wasm-bindgen --out-dir services/dashboard-actix/static/pkg ...
+/apps/dashboard-leptos/dist/
+/services/dashboard-actix/static/pkg/
+*.wasm
+
+# ---- Upstream reference (not ours to vendor) ----
+# `inspire/` is a read-only clone of https://github.com/decolua/9router kept
+# locally as the parity reference. It carries its own .git, so it stays out of
+# this tree. Clone it yourself to work on parity:
+#   git clone https://github.com/decolua/9router inspire
+/inspire/
+
+# ---- Agent / tooling scratch ----
+.omo/
+.omo-todos.md
+.codegraph
+.agents/
+.codex/
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/agents/
+
+# ---- Secrets & local environment ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.*
+
+# ---- Local runtime state ----
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+*.log
+
+# ---- Editor / IDE ----
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.zed/
+.helix/
+
+# ---- OS ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# ---- Misc ----
+node_modules/
+*.tmp
+*.bak
+*.orig
+*.rej
+/coverage/
+perf.data*
+flamegraph.svg

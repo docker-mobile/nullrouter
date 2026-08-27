@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+dist = "dist"
+public_url = "/dashboard/"
+
+[serve]
+address = "127.0.0.1"
+port = 20129
+open = false

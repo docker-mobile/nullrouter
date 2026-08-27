@@ -1,0 +1,84 @@
+.nr-auth-page,
+.nr-callback-page {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.nr-auth-wrap {
+  width: min(430px, 100%);
+}
+
+.nr-auth-panel,
+.nr-callback-panel {
+  padding: 28px;
+}
+
+.nr-auth-head,
+.nr-callback-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.nr-auth-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.nr-auth-form input {
+  min-height: 44px;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  color: var(--text-main-dark);
+  padding: 0 12px;
+}
+
+.nr-auth-error {
+  min-height: 18px;
+  color: var(--warn);
+}
+
+.nr-auth-hidden {
+  display: none !important;
+}
+
+.nr-callback-panel {
+  width: min(460px, 100%);
+}
+
+.nr-callback-icon {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+  font-weight: 800;
+}
+
+.nr-callback-ok {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.nr-callback-warn {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+}
+
+#callback-url {
+  display: block;
+  width: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: var(--surface-dark-2);
+  padding: 12px;
+  color: var(--text-main-dark);
+  text-align: left;
+}
