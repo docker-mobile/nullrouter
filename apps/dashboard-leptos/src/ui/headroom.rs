@@ -121,7 +121,9 @@ fn reload_log(state: PanelState, reset: bool) {
         state.log.set(Hydrate::Loading);
     }
     spawn(async move {
-        let next = load_log().await.map_or_else(Hydrate::Failed, Hydrate::Ready);
+        let next = load_log()
+            .await
+            .map_or_else(Hydrate::Failed, Hydrate::Ready);
         state.log.set(next);
     });
 }
@@ -163,7 +165,9 @@ fn dispatch_restart(state: PanelState) {
 fn dispatch_log_refresh(state: PanelState) {
     state.busy.set(Some(Busy::RefreshingLog));
     spawn(async move {
-        let next = load_log().await.map_or_else(Hydrate::Failed, Hydrate::Ready);
+        let next = load_log()
+            .await
+            .map_or_else(Hydrate::Failed, Hydrate::Ready);
         state.busy.set(None);
         state.log.set(next);
     });
@@ -305,7 +309,11 @@ fn ExtrasBody(state: PanelState) -> impl IntoView {
 /// Python detection, stated in words.
 #[component]
 fn PythonBanner(state: PanelState) -> impl IntoView {
-    let python = move || state.report.with(|value| value.ready().map(ExtrasReport::python));
+    let python = move || {
+        state
+            .report
+            .with(|value| value.ready().map(ExtrasReport::python))
+    };
     let version_line = move || {
         state.report.with(|value| {
             value.ready().map(|report| {
@@ -394,9 +402,11 @@ fn InstallAction(state: PanelState) -> impl IntoView {
         })
     };
     let no_python = move || {
-        state
-            .report
-            .with(|value| value.ready().is_some_and(|report| !report.python().is_detected()))
+        state.report.with(|value| {
+            value
+                .ready()
+                .is_some_and(|report| !report.python().is_detected())
+        })
     };
 
     view! {

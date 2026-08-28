@@ -148,7 +148,7 @@ async fn state_owned_routes_keep_structured_json_contracts_during_translator_wor
         request(
             Method::PUT,
             "/api/settings",
-            r#"{"requireLogin":false,"tunnelDashboardAccess":true,"tunnelUrl":"https://translator.example","outboundProxyEnabled":true,"outboundProxyUrl":"http://proxy.example:8080"}"#,
+            r#"{"tunnelDashboardAccess":true,"tunnelUrl":"https://translator.example","outboundProxyEnabled":true,"outboundProxyUrl":"http://proxy.example:8080"}"#,
         ),
     )
     .await?;
@@ -158,8 +158,7 @@ async fn state_owned_routes_keep_structured_json_contracts_during_translator_wor
     let providers = get_json(store.clone(), "/api/providers").await?;
     let combos = get_json(store.clone(), "/api/combos").await?;
     let proxy_pools = get_json(store.clone(), "/api/proxy-pools?includeUsage=true").await?;
-    let settings = get_json(store.clone(), "/api/settings").await?;
-    let require_login = get_json(store, "/api/settings/require-login").await?;
+    let settings = get_json(store, "/api/settings").await?;
 
     // Then: each route still returns its state JSON envelope and core fields.
     assert_eq!(providers.status, StatusCode::OK);
@@ -185,17 +184,15 @@ async fn state_owned_routes_keep_structured_json_contracts_during_translator_wor
     assert_eq!(field(listed_pool, "boundConnectionCount")?, 1);
 
     assert_eq!(settings.status, StatusCode::OK);
-    assert_eq!(field(&settings.body, "requireLogin")?, false);
     assert_eq!(field(&settings.body, "tunnelDashboardAccess")?, true);
     assert_eq!(field(&settings.body, "outboundProxyEnabled")?, true);
     assert_eq!(
         field(&settings.body, "outboundProxyUrl")?,
         "http://proxy.example:8080"
     );
-
-    assert_eq!(require_login.status, StatusCode::OK);
-    assert_eq!(field(&require_login.body, "requireLogin")?, false);
-    assert_eq!(field(&require_login.body, "tunnelDashboardAccess")?, true);
+    // `requireLogin` is not part of the settings shape: dashboard login is
+    // unconditional, so there is no flag for translator work to have disturbed.
+    missing_field(&settings.body, "requireLogin")?;
     Ok(())
 }
 

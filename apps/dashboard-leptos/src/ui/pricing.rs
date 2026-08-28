@@ -86,7 +86,8 @@ impl PanelState {
     }
 
     fn is_busy(self, key: &str) -> bool {
-        self.busy.with(|busy| busy.iter().any(|busy_key| busy_key == key))
+        self.busy
+            .with(|busy| busy.iter().any(|busy_key| busy_key == key))
     }
 
     fn set_busy(self, key: &str) {
@@ -97,7 +98,8 @@ impl PanelState {
     }
 
     fn clear_busy(self, key: &str) {
-        self.busy.update(|busy| busy.retain(|busy_key| busy_key != key));
+        self.busy
+            .update(|busy| busy.retain(|busy_key| busy_key != key));
     }
 
     fn note(self, key: &str) -> Option<String> {
@@ -235,11 +237,14 @@ fn PricingMetrics(state: PanelState) -> impl IntoView {
             .with(|table| table.ready().map(PricingTable::provider_count))
     };
     let published = move || {
-        state
-            .table
-            .with(|table| table.ready().map(|table| {
-                (table.published_rate_count(), table.model_count() * RATE_FIELDS.len())
-            }))
+        state.table.with(|table| {
+            table.ready().map(|table| {
+                (
+                    table.published_rate_count(),
+                    table.model_count() * RATE_FIELDS.len(),
+                )
+            })
+        })
     };
 
     view! {

@@ -65,8 +65,8 @@ pub use proxy_pools::{
 };
 pub use settings::{
     LOGIN_ALWAYS_REQUIRED, REQUIRE_API_KEY_UNAVAILABLE, Resolution, SETTINGS_FIELDS,
-    SETTINGS_GROUPS, SETTINGS_PATH, SettingsControl, SettingsField, SettingsGroup, SettingsSnapshot,
-    SettingsValue, WriteOutcome, parse_settings, patch_body, resolve,
+    SETTINGS_GROUPS, SETTINGS_PATH, SettingsControl, SettingsField, SettingsGroup,
+    SettingsSnapshot, SettingsValue, WriteOutcome, parse_settings, patch_body, resolve,
 };
 pub use translator::{
     TranslatorAction, TranslatorActionTone, TranslatorCapability, TranslatorMetaBadge,

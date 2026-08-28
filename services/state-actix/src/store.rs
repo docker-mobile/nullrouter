@@ -1105,7 +1105,10 @@ impl StateStore {
             for (key, target) in [
                 ("oidcIssuerUrl", &mut snapshot.settings.oidc_issuer_url),
                 ("oidcClientId", &mut snapshot.settings.oidc_client_id),
-                ("oidcClientSecret", &mut snapshot.settings.oidc_client_secret),
+                (
+                    "oidcClientSecret",
+                    &mut snapshot.settings.oidc_client_secret,
+                ),
                 ("oidcScopes", &mut snapshot.settings.oidc_scopes),
                 ("oidcLoginLabel", &mut snapshot.settings.oidc_login_label),
                 ("samlEntryPoint", &mut snapshot.settings.saml_entry_point),

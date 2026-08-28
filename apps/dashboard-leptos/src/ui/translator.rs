@@ -340,7 +340,7 @@ fn StepBody(file: TranslatorFile, panel: PanelSignals, signals: StepSignals) -> 
                 aria-describedby=status_id.clone()
                 aria-busy=move || busy().to_string()
                 prop:value=move || signals.buffer.get()
-                disabled=move || busy()
+                disabled=busy
                 on:input=move |event| {
                     signals.buffer.set(event_target_value(&event));
                     signals.source.set(StepSource::Edited);
@@ -394,7 +394,7 @@ fn StepActions(file: TranslatorFile, panel: PanelSignals, signals: StepSignals) 
             <button
                 type="button"
                 class="nr-button secondary small"
-                disabled=move || busy()
+                disabled=busy
                 on:click=move |_| load_step(file, signals)
             >
                 "Load"
@@ -641,7 +641,10 @@ fn load_step(file: TranslatorFile, signals: StepSignals) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_step(_file: TranslatorFile, signals: StepSignals) {
-    finish_load(signals, LoadOutcome::Rejected(crate::api::ApiError::Environment));
+    finish_load(
+        signals,
+        LoadOutcome::Rejected(crate::api::ApiError::Environment),
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -673,7 +676,10 @@ fn save_step(file: TranslatorFile, signals: StepSignals) {
         signals.status.set(StepStatus::bad(error.message()));
         return;
     }
-    finish_save(signals, SaveOutcome::Rejected(crate::api::ApiError::Environment));
+    finish_save(
+        signals,
+        SaveOutcome::Rejected(crate::api::ApiError::Environment),
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -738,7 +744,11 @@ fn send_step(panel: PanelSignals, signals: StepSignals) {
 #[cfg(not(target_arch = "wasm32"))]
 fn send_step(panel: PanelSignals, signals: StepSignals) {
     if build_send_body(panel, signals).is_some() {
-        finish_send(panel, signals, SendOutcome::Rejected(crate::api::ApiError::Environment));
+        finish_send(
+            panel,
+            signals,
+            SendOutcome::Rejected(crate::api::ApiError::Environment),
+        );
     }
 }
 

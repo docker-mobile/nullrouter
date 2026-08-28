@@ -206,9 +206,17 @@ async fn state_defaults_are_empty_and_zeroed_when_requested() -> TestResult {
     // Then: dashboard state shapes are present with default values.
     assert_eq!(settings_status, StatusCode::OK);
     assert_eq!(field(&settings, "requireApiKey")?, false);
-    assert_eq!(field(&settings, "requireLogin")?, true);
     assert_eq!(field(&settings, "hasPassword")?, false);
     assert_eq!(field(&settings, "enableTranslator")?, false);
+    assert_eq!(field(&settings, "tunnelDashboardAccess")?, false);
+    assert_eq!(field(&settings, "oidcConfigured")?, false);
+    assert_eq!(field(&settings, "enableRequestLogs")?, false);
+    // No `requireLogin`: dashboard login is unconditional in nullrouter, so the
+    // shape must not carry a flag that would imply it can be turned off.
+    assert!(
+        settings.get("requireLogin").is_none(),
+        "requireLogin must stay absent from the state shape"
+    );
 
     assert_eq!(keys_status, StatusCode::OK);
     assert!(array_field(&keys, "keys")?.is_empty());

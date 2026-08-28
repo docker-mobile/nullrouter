@@ -18,8 +18,6 @@ fn console_log_visible_contract_contains_upstream_console_surface() {
         "Disconnected",
         "Connected",
         "No live capture",
-        "EventSource stream unwired in this WASM slice",
-        "Clear endpoint unwired",
         "/api/translator/console-logs",
         "/api/translator/console-logs/stream",
         "Newest 200 lines retained",
@@ -58,6 +56,25 @@ fn console_log_visible_contract_does_not_use_old_generic_placeholder_copy() {
         assert!(
             !contract.contains(&old_placeholder),
             "old placeholder still visible: {old_placeholder}"
+        );
+    }
+}
+
+#[test]
+fn console_log_contract_does_not_claim_the_stream_is_unwired() {
+    // Given: the panel subscribes to the SSE feed and Clear performs a DELETE.
+    let contract = console_log_visible_contract();
+
+    // When/Then: the fixture-era copy must not come back. Rendering it while the
+    // stream is actually wired would tell the user the feed is dead when it is
+    // live — the inverse of the bug the wiring fixed.
+    for stale in [
+        "EventSource stream unwired in this WASM slice",
+        "Clear endpoint unwired",
+    ] {
+        assert!(
+            !contract.contains(&stale),
+            "stale unwired copy still in the contract: {stale}"
         );
     }
 }

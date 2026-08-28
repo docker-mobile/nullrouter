@@ -508,12 +508,9 @@ impl OidcHttp {
     /// Fetch and parse a discovery document.
     pub async fn discovery(&self, issuer_url: &str) -> Result<Discovery, OidcError> {
         let url = discovery_url(issuer_url);
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|error| OidcError::Discovery(format!("{url} could not be reached: {error}")))?;
+        let response = self.client.get(&url).send().await.map_err(|error| {
+            OidcError::Discovery(format!("{url} could not be reached: {error}"))
+        })?;
         if !response.status().is_success() {
             return Err(OidcError::Discovery(format!(
                 "{url} responded with {}",
@@ -539,12 +536,9 @@ impl OidcHttp {
                     .to_owned(),
             ));
         }
-        let response = self
-            .client
-            .get(jwks_uri)
-            .send()
-            .await
-            .map_err(|error| OidcError::IdToken(format!("{jwks_uri} could not be reached: {error}")))?;
+        let response = self.client.get(jwks_uri).send().await.map_err(|error| {
+            OidcError::IdToken(format!("{jwks_uri} could not be reached: {error}"))
+        })?;
         if !response.status().is_success() {
             return Err(OidcError::IdToken(format!(
                 "{jwks_uri} responded with {}",
@@ -602,15 +596,15 @@ impl OidcHttp {
     }
 
     async fn bounded_body(&self, response: reqwest::Response) -> Result<Vec<u8>, OidcError> {
-        if response.content_length().is_some_and(|length| {
-            length > u64::try_from(MAX_METADATA_BYTES).unwrap_or(u64::MAX)
-        }) {
+        if response
+            .content_length()
+            .is_some_and(|length| length > u64::try_from(MAX_METADATA_BYTES).unwrap_or(u64::MAX))
+        {
             return Err(OidcError::Discovery("response is too large".to_owned()));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| OidcError::Discovery(format!("response could not be read: {error}")))?;
+        let bytes = response.bytes().await.map_err(|error| {
+            OidcError::Discovery(format!("response could not be read: {error}"))
+        })?;
         if bytes.len() > MAX_METADATA_BYTES {
             return Err(OidcError::Discovery("response is too large".to_owned()));
         }

@@ -95,7 +95,6 @@ async fn g015_state_does_not_own_mitm_routes_and_keeps_default_json() -> TestRes
             .content_type
             .starts_with("application/json")
     );
-    assert_eq!(field(&settings, "requireLogin")?, true);
     assert_eq!(field(&settings, "tunnelDashboardAccess")?, false);
     assert_eq!(field(&settings, "tunnelUrl")?, "");
     assert_eq!(field(&settings, "tailscaleUrl")?, "");

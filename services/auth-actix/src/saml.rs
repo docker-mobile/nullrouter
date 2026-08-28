@@ -220,7 +220,11 @@ pub fn create_request_id() -> String {
 /// The request is deflated (raw, no zlib header) and base64-encoded per
 /// §3.4.4.1 of the SAML bindings spec. Unsigned, which matches the
 /// `AuthnRequestsSigned="false"` this SP publishes in its metadata.
-pub fn authn_request(origin: &str, config: &SamlConfig, issue_instant: &str) -> Option<AuthnRequest> {
+pub fn authn_request(
+    origin: &str,
+    config: &SamlConfig,
+    issue_instant: &str,
+) -> Option<AuthnRequest> {
     let request_id = create_request_id();
     let xml = format!(
         "<samlp:AuthnRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" \

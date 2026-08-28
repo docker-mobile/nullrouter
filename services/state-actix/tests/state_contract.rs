@@ -185,16 +185,19 @@ async fn provider_combo_proxy_and_settings_crud_are_stateful() -> TestResult {
         store.clone(),
         Method::PUT,
         "/api/settings",
-        r#"{"requireLogin":false,"tunnelDashboardAccess":true,"tunnelUrl":"https://example.test"}"#,
+        r#"{"tunnelDashboardAccess":true,"tunnelUrl":"https://example.test"}"#,
     )
     .await?;
     assert_eq!(settings_status, StatusCode::OK);
-    assert_eq!(field(&settings, "requireLogin")?, false);
+    assert_eq!(field(&settings, "tunnelDashboardAccess")?, true);
+    assert_eq!(field(&settings, "tunnelUrl")?, "https://example.test");
 
-    let (require_status, require_login) =
-        get_json(store.clone(), "/api/settings/require-login").await?;
-    assert_eq!(require_status, StatusCode::OK);
-    assert_eq!(field(&require_login, "tunnelDashboardAccess")?, true);
+    // The written value is readable back from the collection route. There is no
+    // `/api/settings/require-login` to read it from: login is unconditional, so
+    // the route and the flag were both removed rather than left to mislead.
+    let (fetched_status, fetched) = get_json(store.clone(), "/api/settings").await?;
+    assert_eq!(fetched_status, StatusCode::OK);
+    assert_eq!(field(&fetched, "tunnelDashboardAccess")?, true);
 
     let (provider_delete_status, _) = request_json(
         store.clone(),

@@ -47,6 +47,23 @@ async fn get_json(uri: &str) -> TestResult<(StatusCode, Value)> {
     request_json(Method::GET, uri, "").await
 }
 
+/// The status of a `GET`, without requiring a JSON body.
+///
+/// Used to assert a route is *absent*: a 404 from Actix carries an empty body,
+/// so [`get_json`] would fail to parse it before the status could be checked.
+async fn status_of(uri: &str) -> TestResult<StatusCode> {
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(app_config()))
+            .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .configure(configure),
+    )
+    .await;
+    let req = test::TestRequest::default().uri(uri).to_request();
+    Ok(test::call_service(&app, req).await.status())
+}
+
 fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
     json.get(name)
         .ok_or_else(|| test_error(format!("missing field {name}")))
@@ -177,7 +194,7 @@ async fn media_and_settings_routes_return_default_json() -> TestResult {
     let (provider_voices_status, provider_voices) =
         get_json("/api/media-providers/tts/elevenlabs/voices").await?;
     let (database_status, database) = get_json("/api/settings/database").await?;
-    let (require_login_status, require_login) = get_json("/api/settings/require-login").await?;
+    let require_login_status = status_of("/api/settings/require-login").await?;
     let (proxy_test_status, proxy_test) = request_json(
         Method::POST,
         "/api/settings/proxy-test",
@@ -195,8 +212,10 @@ async fn media_and_settings_routes_return_default_json() -> TestResult {
     assert_eq!(field(&provider_voices, "voices")?, &serde_json::json!([]));
     assert_eq!(database_status, StatusCode::OK);
     assert_eq!(field(&database, "success")?, true);
-    assert_eq!(require_login_status, StatusCode::OK);
-    assert_eq!(field(&require_login, "requireLogin")?, true);
+    // `GET /api/settings/require-login` is deliberately absent: dashboard login is
+    // unconditional in nullrouter, so there is no value to report. A 200 here
+    // would mean the route came back and is answering with an invented flag.
+    assert_eq!(require_login_status, StatusCode::NOT_FOUND);
     assert_eq!(proxy_test_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&proxy_test, "ok")?, false);
     assert_eq!(malformed_status, StatusCode::BAD_REQUEST);

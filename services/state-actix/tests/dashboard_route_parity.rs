@@ -225,7 +225,6 @@ async fn api_settings_remain_state_owned_default_and_update_routes() -> TestResu
 
     let defaults = get_json(store.clone(), "/api/settings").await?;
     assert_eq!(defaults.status, StatusCode::OK);
-    assert_eq!(field(&defaults.body, "requireLogin")?, true);
     assert_eq!(field(&defaults.body, "tunnelDashboardAccess")?, false);
     assert_eq!(field(&defaults.body, "tunnelUrl")?, "");
     assert_eq!(field(&defaults.body, "tailscaleUrl")?, "");
@@ -235,18 +234,21 @@ async fn api_settings_remain_state_owned_default_and_update_routes() -> TestResu
     missing_field(&defaults.body, "requireApiKey")?;
     missing_field(&defaults.body, "hasPassword")?;
     missing_field(&defaults.body, "oidcConfigured")?;
+    // Login is unconditional, so `requireLogin` is not part of this shape. A
+    // dashboard that found one would render a toggle for a knob that does not
+    // exist.
+    missing_field(&defaults.body, "requireLogin")?;
 
     let put = request_json(
         store.clone(),
         request(
             Method::PUT,
             "/api/settings",
-            r#"{"requireLogin":false,"outboundProxyEnabled":true,"outboundProxyUrl":"http://127.0.0.1:8888","outboundNoProxy":"localhost"}"#,
+            r#"{"outboundProxyEnabled":true,"outboundProxyUrl":"http://127.0.0.1:8888","outboundNoProxy":"localhost"}"#,
         ),
     )
     .await?;
     assert_eq!(put.status, StatusCode::OK);
-    assert_eq!(field(&put.body, "requireLogin")?, false);
     assert_eq!(field(&put.body, "outboundProxyEnabled")?, true);
 
     let post = request_json(
@@ -259,7 +261,6 @@ async fn api_settings_remain_state_owned_default_and_update_routes() -> TestResu
     )
     .await?;
     assert_eq!(post.status, StatusCode::OK);
-    assert_eq!(field(&post.body, "requireLogin")?, false);
     assert_eq!(field(&post.body, "tunnelDashboardAccess")?, true);
     assert_eq!(field(&post.body, "tunnelUrl")?, "https://state.example");
     assert_eq!(field(&post.body, "tailscaleUrl")?, "https://tail.example");
@@ -267,7 +268,6 @@ async fn api_settings_remain_state_owned_default_and_update_routes() -> TestResu
 
     let fetched = get_json(store, "/api/settings").await?;
     assert_eq!(fetched.status, StatusCode::OK);
-    assert_eq!(field(&fetched.body, "requireLogin")?, false);
     assert_eq!(field(&fetched.body, "tunnelDashboardAccess")?, true);
     assert_eq!(
         field(&fetched.body, "outboundProxyUrl")?,

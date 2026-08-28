@@ -93,7 +93,11 @@ fn cleared_cookie(service: &AuthService, name: &'static str) -> Cookie<'static> 
 fn redirect_clearing_oidc(service: &AuthService, origin: &str, path: &str) -> HttpResponse {
     let mut response = HttpResponse::build(StatusCode::FOUND);
     response.insert_header((header::LOCATION, format!("{origin}{path}")));
-    for name in [oidc::STATE_COOKIE, oidc::NONCE_COOKIE, oidc::VERIFIER_COOKIE] {
+    for name in [
+        oidc::STATE_COOKIE,
+        oidc::NONCE_COOKIE,
+        oidc::VERIFIER_COOKIE,
+    ] {
         response.cookie(cleared_cookie(service, name));
     }
     response.finish()
@@ -229,8 +233,7 @@ async fn oidc_callback(
         return redirect_clearing_oidc(&service, &origin, &login_error_path(error));
     }
 
-    let cookie_value =
-        |name: &str| request.cookie(name).map(|cookie| cookie.value().to_owned());
+    let cookie_value = |name: &str| request.cookie(name).map(|cookie| cookie.value().to_owned());
     let stored_state = cookie_value(oidc::STATE_COOKIE);
     let stored_nonce = cookie_value(oidc::NONCE_COOKIE);
     let verifier = cookie_value(oidc::VERIFIER_COOKIE);
@@ -249,7 +252,11 @@ async fn oidc_callback(
         Ok(token) => {
             let mut response = HttpResponse::build(StatusCode::FOUND);
             response.insert_header((header::LOCATION, format!("{origin}/dashboard")));
-            for name in [oidc::STATE_COOKIE, oidc::NONCE_COOKIE, oidc::VERIFIER_COOKIE] {
+            for name in [
+                oidc::STATE_COOKIE,
+                oidc::NONCE_COOKIE,
+                oidc::VERIFIER_COOKIE,
+            ] {
                 response.cookie(cleared_cookie(&service, name));
             }
             response.cookie(service.session().session_cookie(token));
@@ -431,7 +438,8 @@ async fn oidc_test(
             .trim()
             .to_owned()
     };
-    let issuer_url = oidc::trim_trailing_slashes(&pick(overrides.issuer_url, &stored.oidc_issuer_url));
+    let issuer_url =
+        oidc::trim_trailing_slashes(&pick(overrides.issuer_url, &stored.oidc_issuer_url));
     let client_id = pick(overrides.client_id, &stored.oidc_client_id);
     let scopes = oidc::normalize_scopes(&pick(overrides.scopes, &stored.oidc_scopes));
     let client_secret = pick(overrides.client_secret, &stored.oidc_client_secret);
@@ -538,7 +546,10 @@ async fn saml_start(service: web::Data<AuthService>, request: HttpRequest) -> Ht
 
 fn saml_login_redirect(service: &AuthService, origin: &str, code: &str) -> HttpResponse {
     let mut response = HttpResponse::build(StatusCode::FOUND);
-    response.insert_header((header::LOCATION, format!("{origin}{}", login_error_path(code))));
+    response.insert_header((
+        header::LOCATION,
+        format!("{origin}{}", login_error_path(code)),
+    ));
     response.cookie(cleared_cookie(service, saml::STATE_COOKIE));
     response.finish()
 }
@@ -684,7 +695,10 @@ fn is_authenticated(service: &AuthService, request: &HttpRequest) -> bool {
 }
 
 fn unauthorized() -> HttpResponse {
-    responses::json(StatusCode::UNAUTHORIZED, &json!({ "error": "Unauthorized" }))
+    responses::json(
+        StatusCode::UNAUTHORIZED,
+        &json!({ "error": "Unauthorized" }),
+    )
 }
 
 /// Whether the caller would rather have JSON than a redirect.

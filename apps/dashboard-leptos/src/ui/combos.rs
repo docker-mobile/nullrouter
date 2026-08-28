@@ -70,7 +70,8 @@ impl PanelState {
     }
 
     fn is_busy(self, id: &str) -> bool {
-        self.busy.with(|busy| busy.iter().any(|busy_id| busy_id == id))
+        self.busy
+            .with(|busy| busy.iter().any(|busy_id| busy_id == id))
     }
 
     fn set_busy(self, id: &str) {
@@ -81,7 +82,8 @@ impl PanelState {
     }
 
     fn clear_busy(self, id: &str) {
-        self.busy.update(|busy| busy.retain(|busy_id| busy_id != id));
+        self.busy
+            .update(|busy| busy.retain(|busy_id| busy_id != id));
     }
 
     fn note(self, id: &str) -> Option<String> {
@@ -538,9 +540,7 @@ fn CreateComboCard(state: PanelState) -> impl IntoView {
     let blocking = move || {
         state.list.with(|list| {
             let existing = list.ready().cloned().unwrap_or_default();
-            state
-                .draft
-                .with(|draft| draft.validation_error(&existing))
+            state.draft.with(|draft| draft.validation_error(&existing))
         })
     };
     let saving = move || state.save.with(Save::is_saving);

@@ -25,6 +25,7 @@ mod usage;
 
 use basic_chat::BasicChatPanel;
 use cli_tools_live::{CliToolDetailPanel, CliToolsPanel};
+use combos::CombosPanel;
 use console_log::ConsoleLogPanel;
 use endpoint::EndpointPanel;
 use g003::{MediaProvidersWebPanel, ProfilePanel};
@@ -40,7 +41,6 @@ pub use navigation::{
     dashboard_primary_navigation, dashboard_search, dashboard_section_path,
     dashboard_system_navigation,
 };
-use combos::CombosPanel;
 use parity::{QuotaTrackerPanel, SkillsPanel, TokenSaverPanel};
 use pricing::PricingSettingsPanel;
 use providers::{ModelsPanel, ProviderDetailPanel, ProviderNewPanel, ProvidersPanel};

@@ -482,10 +482,15 @@ pub fn patch_body(field: SettingsField, value: &SettingsValue) -> String {
 }
 
 /// How a `PUT /api/settings` ended.
+///
+/// The confirmed snapshot is boxed: [`SettingsSnapshot`] is 16 fields wide, so
+/// carrying it inline would make every `WriteOutcome` — including the two empty
+/// refusal arms — that large. One allocation per settled write is cheaper than
+/// that, and this is a per-click path, not a hot one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WriteOutcome {
     /// 2xx with a body that parsed: the server told us its new state.
-    Confirmed(SettingsSnapshot),
+    Confirmed(Box<SettingsSnapshot>),
     /// 2xx with a body that did not parse.
     ///
     /// Distinct from [`Self::Rejected`] because the write probably landed, so
@@ -520,7 +525,7 @@ pub fn resolve(
 ) -> Resolution {
     match outcome {
         WriteOutcome::Confirmed(server) => Resolution {
-            snapshot: server,
+            snapshot: *server,
             error: None,
             committed: true,
         },

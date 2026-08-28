@@ -124,7 +124,7 @@ fn ClearAction(signals: ConsoleSignals) -> impl IntoView {
                 class="nr-button secondary small"
                 title="Empty the router's console buffer with DELETE /api/translator/console-logs"
                 aria-describedby="nr-console-clear-status"
-                disabled=move || clearing()
+                disabled=clearing
                 on:click=move |_| clear(signals)
             >
                 "Clear"

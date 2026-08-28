@@ -1,6 +1,4 @@
-use crate::dashboard::{
-    SkillSummary, quota_tracker_state, skill_summaries, token_saver_state,
-};
+use crate::dashboard::{SkillSummary, quota_tracker_state, skill_summaries, token_saver_state};
 use leptos::prelude::*;
 
 const PARITY_STYLES: &str = r"

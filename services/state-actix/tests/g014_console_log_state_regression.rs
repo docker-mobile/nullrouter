@@ -125,7 +125,6 @@ async fn g014_console_log_work_keeps_state_json_routes_structured_and_stateful()
             Method::PUT,
             "/api/settings",
             r#"{
-                "requireLogin":false,
                 "tunnelDashboardAccess":true,
                 "tunnelUrl":"https://state.example",
                 "outboundProxyEnabled":true,
@@ -136,7 +135,7 @@ async fn g014_console_log_work_keeps_state_json_routes_structured_and_stateful()
     )
     .await?;
     assert_eq!(settings.status, StatusCode::OK);
-    assert_eq!(field(&settings.body, "requireLogin")?, false);
+    assert_eq!(field(&settings.body, "tunnelDashboardAccess")?, true);
 
     let pool = request_json(
         store.clone(),
@@ -184,7 +183,6 @@ async fn g014_console_log_work_keeps_state_json_routes_structured_and_stateful()
     // Then: the state-owned JSON routes keep their upstream envelopes and persisted state.
     let fetched_settings = get_json(store.clone(), "/api/settings").await?;
     assert_eq!(fetched_settings.status, StatusCode::OK);
-    assert_eq!(field(&fetched_settings.body, "requireLogin")?, false);
     assert_eq!(
         field(&fetched_settings.body, "tunnelDashboardAccess")?,
         true

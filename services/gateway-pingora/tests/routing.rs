@@ -144,7 +144,6 @@ fn route_for_path_selects_state_for_local_db_api_paths() {
         "/api/proxy-pools",
         "/api/proxy-pools/pool_1",
         "/api/settings",
-        "/api/settings/require-login",
     ] {
         // When: a local-DB-backed public API path is routed.
         let route = config.route_for_path(path);
@@ -167,6 +166,10 @@ fn route_for_path_leaves_nested_provider_proxy_and_settings_tools_on_api() {
         "/api/proxy-pools/vercel-deploy",
         "/api/settings/database",
         "/api/settings/proxy-test",
+        // Not a state route: `/api/settings/require-login` was removed with the
+        // flag itself. It falls through to nullrouter-api like any other unknown
+        // `/api/settings/*` subpath, and answers 404 there.
+        "/api/settings/require-login",
     ] {
         // When: an adjacent tool/default route is routed.
         let route = config.route_for_path(path);

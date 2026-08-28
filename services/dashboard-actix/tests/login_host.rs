@@ -68,7 +68,14 @@ async fn login_uses_cookie_aware_safe_dashboard_redirect_when_rendered() -> Test
 
     // Then: cookies are explicit and navigation is constrained to this origin's dashboard.
     assert!(login.matches(r#"credentials: "same-origin""#).count() >= 2);
-    assert!(login.contains("status.authenticated === true || status.requireLogin === false"));
+    // An existing session is the ONLY thing that skips this screen. Honouring a
+    // `requireLogin: false` from the status body would be an auth bypass driven
+    // by a JSON field, so the check must stay on `authenticated` alone.
+    assert!(login.contains("status.authenticated === true"));
+    assert!(
+        !login.contains("requireLogin === false"),
+        "login must not skip auth on a requireLogin flag"
+    );
     assert!(login.contains(r#"new URLSearchParams(window.location.search).get("next")"#));
     assert!(login.contains("new URL(requestedTarget, window.location.origin)"));
     assert!(login.contains("target.origin !== window.location.origin"));
