@@ -13,6 +13,7 @@ The default bind is `127.0.0.1:20131`. Override it with `NULLROUTER_CATALOG_HOST
 Routes:
 
 - `GET /health`
+- `GET /api/catalog` (same payload as `/api/catalog/routes`)
 - `GET /api/catalog/routes`
 - `GET /api/catalog/providers`
 - `GET /api/state/settings`

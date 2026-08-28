@@ -1,8 +1,10 @@
 # Nullrouter Design System
 
-This port follows the local 9Router reference under `inspire/`, tracked at upstream
-`699edac3273e13d4744bc46f6082618f08560702` (v0.5.55). Registry, per-service endpoint, and
-per-model capability tables are generated from that checkout rather than hand-transcribed.
+This port follows the 9Router reference at upstream `699edac3273e13d4744bc46f6082618f08560702`
+(v0.5.55). Registry, per-service endpoint, and per-model capability tables are generated from that
+checkout rather than hand-transcribed. The checkout itself is not vendored here — it is gitignored at
+`/inspire`, and the generated JSON under `crates/providers/data/` is committed, so builds and tests do
+not need it.
 
 ## 1. Product Surface
 
@@ -81,17 +83,24 @@ bidirectional format translation, and usage metrics come from recorded requests 
 
 Remaining debt:
 
-- Usage is still an in-shell `#usage` route rather than a host-level `/dashboard/usage` route, and
-  topology nodes are catalog previews rather than live provider connections.
-- Full OAuth authorization flows (device-code, PKCE, vendor token imports) are not ported; only
-  generic refresh-token grants are modeled.
+- Usage topology nodes are catalog previews rather than live provider connections.
+- Provider OAuth authorization flows (device-code, PKCE browser flows, vendor token imports) are not
+  ported. A stored `accessToken` is used for provider calls, and `refreshToken` plus the registry's
+  refresh descriptors are persisted, but no code performs a refresh grant against a provider token
+  URL, so an expired token must be replaced manually. Dashboard sign-in via OIDC is a separate
+  subsystem and is fully implemented, including PKCE and JWKS verification.
 - Providers needing bespoke executors (`kiro`, `cursor`, `codex`, `antigravity`, `gemini-cli`,
   `commandcode`, `grok-web`, `perplexity-web`, `ollama`) return an explicit 501 naming the provider
   rather than a wrong answer.
 - Provider-native thinking normalization is not applied: the registry's `thinkingFormat` is carried
   in the capability table but not yet used to shape outbound requests.
-- State persists to JSON with a bounded ring of recent requests, not SQLite. A 9Router SQLite
-  install can be imported into it (see README), but API keys cannot carry over because only digests
-  are stored.
-- MITM, headroom compression, token savers, tunnel/tailscale, MCP stdio bridging, and combo
-  rotation/fusion remain future porting work.
+- State persists to JSON with a bounded ring of recent requests, not SQLite, and is in-memory unless
+  `NULLROUTER_STATE_FILE` is set. A 9Router SQLite install can be imported (see README), but API keys
+  cannot carry over because only digests are stored.
+- MITM, headroom compression, token savers, tunnel/tailscale, MCP backend bridging, proxy-pool
+  testing and relay deployment, and combo rotation/fusion have route surfaces that validate input and
+  then return an explicit `501` with `"unsupported": true`. Headroom detection is the exception: it
+  probes for real. Combos resolve to their first model rather than rotating.
+- SAML assertion consumption is refused rather than deferred: verifying a signature needs exclusive
+  XML canonicalisation, and a subtly wrong implementation is an authentication bypass. Metadata and
+  outbound `AuthnRequest` generation are complete.
