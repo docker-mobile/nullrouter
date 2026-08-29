@@ -223,6 +223,25 @@ On a retryable failure the runtime walks to the next account for that provider, 
   `Retry-After` header — not a generic 503.
 - Round-robin selection is sticky, ordered by last-used time and consecutive-use count.
 
+### Combo fallback
+
+A combo is one name fronting several models. Account fallback above walks *accounts* for one model;
+this walks *models*. Both apply: each model exhausts its own accounts before the combo advances.
+
+- **`fallback`** (default) tries the models in configured order.
+- **`round-robin`** advances the starting model each request, wrapping — so every model stays a
+  fallback for the others rather than only the ones after it. `comboStickyRoundRobinLimit` (default 1)
+  holds one model for that many requests before moving on.
+- The **last** model owns the client-visible outcome. If nothing answered, you get that model's real
+  status and message, not a synthesised "all models unavailable".
+- A model whose provider needs an unported executor is stepped past rather than ending the combo, so
+  one `ollama` entry does not disable the whole combo. A *single-model* request for that provider still
+  gets its explicit 501 naming the protocol.
+- Rotation is per combo, and a combo whose model list was edited starts over: a cursor recorded against
+  a different list points at an arbitrary model.
+
+A `fusion` combo is currently routed as `fallback`; the panel-and-judge fan-out is not ported.
+
 ### Per-model output ceilings
 
 `max_tokens` is clamped to the model's real ceiling from the capability table (685 per-model rows),
@@ -434,7 +453,9 @@ not work.
 ## Migrating from 9Router
 
 An existing 9Router install imports in place. Provider connections (including API keys and OAuth
-tokens), combos, proxy pools, and routing settings carry over.
+tokens), combos, proxy pools, and routing settings carry over — including both fallback strategies and
+their sticky limits, so an imported round-robin combo keeps rotating rather than quietly answering from
+one model.
 
 ```bash
 # Preview what would be imported, writing nothing.
@@ -554,8 +575,8 @@ deliver it. Console-log streams connect and emit an empty init frame — there i
 backend.
 
 **Not ported at all:** remote `/models` probing for dynamic compatible providers (set
-`providerSpecificData.enabledModels` instead) and combo rotation/fusion strategies — a combo resolves
-to its first model.
+`providerSpecificData.enabledModels` instead) and the `fusion` combo strategy — a fusion combo is
+routed as `fallback` rather than fanning out to a judge.
 
 **Deliberately excluded, not deferred:** `pxpipe` (8 routes) and `/v1/videos/*`. `pxpipe` is an
 external binary subsystem that upstream itself keeps commented out of its own sidebar.

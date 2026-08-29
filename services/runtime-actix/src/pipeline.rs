@@ -27,6 +27,7 @@ use nullrouter_translate::state::Clock;
 use nullrouter_translate::{RequestRoute, StreamState, translate_request};
 use serde_json::Value;
 
+use crate::combo::{self, ComboStrategy, RotationState};
 use crate::responses;
 use crate::state_client::{Selection, StateClient, UsageReport};
 
@@ -120,6 +121,10 @@ const fn service_label(kind: ServiceKind) -> &'static str {
 /// misconfigured provider cannot spin indefinitely.
 const MAX_ACCOUNT_ATTEMPTS: usize = 10;
 
+/// Upstream's `comboStickyRoundRobinLimit` default, used when state does not
+/// report one (an older state service, say).
+const DEFAULT_COMBO_STICKY_LIMIT: u32 = 1;
+
 /// One inbound chat-style request.
 #[derive(Debug)]
 pub(crate) struct ChatContext<'a> {
@@ -136,10 +141,14 @@ pub(crate) struct ChatContext<'a> {
 }
 
 /// Shared execution dependencies.
+///
+/// `rotation` is shared rather than per-request: round-robin only means anything
+/// relative to the previous request, so the cursor has to outlive one call.
 #[derive(Debug, Clone)]
 pub struct Runtime {
     executor: Executor,
     state: StateClient,
+    rotation: RotationState,
 }
 
 impl Default for Runtime {
@@ -154,6 +163,7 @@ impl Runtime {
         Self {
             executor: Executor::new(),
             state: StateClient::from_env(),
+            rotation: RotationState::new(),
         }
     }
 
@@ -162,6 +172,7 @@ impl Runtime {
         Self {
             executor: Executor::new(),
             state: StateClient::new(addr),
+            rotation: RotationState::new(),
         }
     }
 
@@ -197,21 +208,52 @@ impl Runtime {
     }
 
     /// Resolve, execute, and respond.
+    ///
+    /// A combo yields several targets; each is tried in turn, and a failure only
+    /// advances to the next model when it is one worth retrying elsewhere. A
+    /// refusal that would recur on every model — a malformed request, say — is
+    /// returned immediately rather than replayed against the whole combo.
     pub(crate) async fn execute_chat(&self, context: ChatContext<'_>) -> HttpResponse {
-        let Some(target) = self.resolve_target(&context.requested_model).await else {
+        let targets = self.resolve_targets(&context.requested_model).await;
+        let Some((last, leading)) = targets.split_last() else {
             return responses::json(
                 StatusCode::BAD_REQUEST,
                 &build_error_body(400, "Invalid model format"),
             );
         };
 
+        for target in leading {
+            match self.execute_for_target(&context, target).await {
+                TargetOutcome::Responded(response) => return response,
+                TargetOutcome::Failed { .. } => {}
+            }
+        }
+        // The last model owns the client-visible outcome: there is nothing left to
+        // fall back to, so its own error is reported rather than a synthesised
+        // one. A single-model request takes this path too, which is why its
+        // failure keeps its real status and message.
+        match self.execute_for_target(&context, last).await {
+            TargetOutcome::Responded(response) | TargetOutcome::Failed { response } => response,
+        }
+    }
+
+    /// Run one resolved target through account selection and execution.
+    async fn execute_for_target(
+        &self,
+        context: &ChatContext<'_>,
+        target: &model::ModelTarget,
+    ) -> TargetOutcome {
         // A provider whose protocol needs a bespoke executor is refused with an
-        // explicit message rather than a wrong answer.
+        // explicit message rather than a wrong answer. Inside a combo it is worth
+        // stepping past — another model may well be executable — but the 501 is
+        // kept as the response in case this is the last one.
         if !is_executor_supported(&target.provider) {
             let message = unsupported_executor_message(&target.provider);
-            return self
-                .fail(&context, &target, StatusCode::NOT_IMPLEMENTED, &message)
-                .await;
+            return TargetOutcome::Failed {
+                response: self
+                    .fail(context, target, StatusCode::NOT_IMPLEMENTED, &message)
+                    .await,
+            };
         }
 
         let mut excluded: Vec<String> = Vec::new();
@@ -225,42 +267,50 @@ impl Runtime {
 
             let credentials = match selection {
                 Selection::Selected(credentials) => *credentials,
+                // No credentials for this provider at all. Inside a combo that is
+                // exactly what the next model is for.
                 Selection::NoCredentials { message } => {
-                    return self
-                        .fail(&context, &target, StatusCode::NOT_FOUND, &message)
-                        .await;
+                    return TargetOutcome::Failed {
+                        response: self
+                            .fail(context, target, StatusCode::NOT_FOUND, &message)
+                            .await,
+                    };
                 }
                 Selection::AllRateLimited {
                     retry_at_ms,
                     last_error: reported,
                     last_error_code,
                 } => {
-                    return self
-                        .rate_limited(
-                            &context,
-                            &target,
-                            retry_at_ms,
-                            last_error
-                                .as_ref()
-                                .map(|(_, message)| message.clone())
-                                .or(reported),
-                            last_error
-                                .as_ref()
-                                .map(|(status, _)| *status)
-                                .or(last_error_code),
-                        )
-                        .await;
+                    return TargetOutcome::Failed {
+                        response: self
+                            .rate_limited(
+                                context,
+                                target,
+                                retry_at_ms,
+                                last_error
+                                    .as_ref()
+                                    .map(|(_, message)| message.clone())
+                                    .or(reported),
+                                last_error
+                                    .as_ref()
+                                    .map(|(status, _)| *status)
+                                    .or(last_error_code),
+                            )
+                            .await,
+                    };
                 }
                 Selection::Exhausted => break,
                 Selection::Unavailable { message } => {
-                    return self
-                        .fail(&context, &target, StatusCode::SERVICE_UNAVAILABLE, &message)
-                        .await;
+                    return TargetOutcome::Failed {
+                        response: self
+                            .fail(context, target, StatusCode::SERVICE_UNAVAILABLE, &message)
+                            .await,
+                    };
                 }
             };
 
-            match self.attempt(&context, &target, &credentials).await {
-                Attempt::Responded(response) => return response,
+            match self.attempt(context, target, &credentials).await {
+                Attempt::Responded(response) => return TargetOutcome::Responded(response),
                 Attempt::Retryable {
                     status,
                     message,
@@ -283,11 +333,15 @@ impl Runtime {
             }
         }
 
-        // Every account failed; report the last real upstream error.
+        // Every account for this model failed; report the last real upstream
+        // error. Inside a combo the next model is tried first, and this response
+        // is only shown if there is none.
         let (status, message) =
             last_error.unwrap_or_else(|| (503, "All provider accounts are unavailable".to_owned()));
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
-        self.fail(&context, &target, status, &message).await
+        TargetOutcome::Failed {
+            response: self.fail(context, target, status, &message).await,
+        }
     }
 
     /// Build the OpenAI-compatible model list for the requested service kinds.
@@ -468,9 +522,12 @@ impl Runtime {
     /// registry recognizes is treated as a provider id (upstream's
     /// `required_provider_or_model` semantics), and anything else falls back to
     /// the chat resolution path.
+    /// A non-chat service takes the first resolved target only. These endpoints
+    /// dispatch one call to one provider; there is no fallback chain to walk, so a
+    /// combo naming several models contributes only its first.
     async fn resolve_service_target(&self, requested: &str) -> Option<model::ModelTarget> {
         if requested.contains('/') {
-            return self.resolve_target(requested).await;
+            return self.resolve_targets(requested).await.into_iter().next();
         }
         let canonical = nullrouter_providers::resolve_provider_id(requested);
         if nullrouter_providers::entry(canonical).is_some() {
@@ -480,20 +537,25 @@ impl Runtime {
                 model: String::new(),
             });
         }
-        self.resolve_target(requested).await
+        self.resolve_targets(requested).await.into_iter().next()
     }
 
-    /// Resolve a client model string to a provider/model pair.
+    /// Resolve a client model string to the ordered list of targets to try.
     ///
-    /// Combos resolve to their first model: full combo rotation and fusion are
-    /// not ported, so the first entry is used rather than failing outright.
-    async fn resolve_target(&self, requested: &str) -> Option<model::ModelTarget> {
+    /// A plain `provider/model` yields one target. A combo name yields one per
+    /// configured model, in the order its strategy chose — so every model in the
+    /// combo is a fallback for the ones before it.
+    async fn resolve_targets(&self, requested: &str) -> Vec<model::ModelTarget> {
         let parsed = model::parse_model(requested);
         if !parsed.is_alias {
-            return parsed.provider.map(|provider| model::ModelTarget {
-                provider,
-                model: parsed.model,
-            });
+            return parsed
+                .provider
+                .map(|provider| model::ModelTarget {
+                    provider,
+                    model: parsed.model,
+                })
+                .into_iter()
+                .collect();
         }
 
         let context = self.state.routing_context().await;
@@ -501,19 +563,35 @@ impl Runtime {
             .combos
             .iter()
             .find(|combo| combo.name == parsed.model)
-            && let Some(first) = combo.models.first()
+            && !combo.models.is_empty()
         {
-            let resolved = model::parse_model(first);
-            if let Some(provider) = resolved.provider {
-                return Some(model::ModelTarget {
-                    provider,
-                    model: resolved.model,
-                });
+            let strategy = ComboStrategy::from_settings(context.settings.combo_strategy.as_deref());
+            let sticky = context
+                .settings
+                .combo_sticky_round_robin_limit
+                .unwrap_or(DEFAULT_COMBO_STICKY_LIMIT);
+            let ordered =
+                combo::ordered_models(&combo.models, &combo.name, strategy, sticky, &self.rotation);
+            let targets: Vec<model::ModelTarget> = ordered
+                .iter()
+                .map(|entry| {
+                    let resolved = model::parse_model(entry);
+                    resolved.provider.map_or_else(
+                        || model::infer_target(&resolved.model),
+                        |provider| model::ModelTarget {
+                            provider,
+                            model: resolved.model.clone(),
+                        },
+                    )
+                })
+                .collect();
+            if !targets.is_empty() {
+                return targets;
             }
         }
 
         // Fall back to prefix inference, as upstream does for bare aliases.
-        Some(model::infer_target(&parsed.model))
+        vec![model::infer_target(&parsed.model)]
     }
 
     /// One account attempt.
@@ -891,6 +969,15 @@ impl Runtime {
 }
 
 /// Result of one account attempt.
+/// What running one combo model produced.
+enum TargetOutcome {
+    /// A terminal response: the provider answered, and no other model is asked.
+    Responded(HttpResponse),
+    /// This model did not answer. The response is carried anyway, so the last
+    /// model in a combo can report its real error instead of a synthesised one.
+    Failed { response: HttpResponse },
+}
+
 enum Attempt {
     /// A client response is ready.
     Responded(HttpResponse),

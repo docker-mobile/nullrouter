@@ -299,6 +299,16 @@ pub(crate) struct Settings {
     /// Calls to keep on one account before rotating (upstream default 3).
     #[serde(default = "default_sticky_limit")]
     pub sticky_round_robin_limit: u32,
+    /// How a combo picks among its models: `fallback` (default), `round-robin`,
+    /// or `fusion`.
+    ///
+    /// Distinct from [`Self::fallback_strategy`], which chooses among *accounts*
+    /// for one model. A combo chooses among *models*.
+    #[serde(default = "default_combo_strategy")]
+    pub combo_strategy: String,
+    /// Requests to keep on one combo model before rotating (upstream default 1).
+    #[serde(default = "default_combo_sticky_limit")]
+    pub combo_sticky_round_robin_limit: u32,
     /// Require a managed API key on `/v1` calls.
     #[serde(default)]
     pub require_api_key: bool,
@@ -365,6 +375,15 @@ const fn default_sticky_limit() -> u32 {
     3
 }
 
+fn default_combo_strategy() -> String {
+    "fallback".to_owned()
+}
+
+/// Upstream's `comboStickyRoundRobinLimit` default: switch model every request.
+const fn default_combo_sticky_limit() -> u32 {
+    1
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -386,6 +405,8 @@ impl Default for Settings {
             saml_attribute_name: String::new(),
             fallback_strategy: default_fallback_strategy(),
             sticky_round_robin_limit: default_sticky_limit(),
+            combo_strategy: default_combo_strategy(),
+            combo_sticky_round_robin_limit: default_combo_sticky_limit(),
             require_api_key: false,
         }
     }
@@ -1073,6 +1094,18 @@ impl StateStore {
     ) -> Result<(), StoreError> {
         let boolean = |key: &str| imported.get(key).and_then(Value::as_bool);
         let text = |key: &str| imported.get(key).and_then(Value::as_str).map(str::to_owned);
+        // 9Router stores this as a JSON number, but a SQLite settings row can
+        // carry it as text, so both spellings are read.
+        let count = |key: &str| {
+            imported
+                .get(key)
+                .and_then(|value| {
+                    value
+                        .as_u64()
+                        .or_else(|| value.as_str().and_then(|raw| raw.parse().ok()))
+                })
+                .and_then(|value| u32::try_from(value).ok())
+        };
 
         self.write_snapshot(|snapshot| {
             // `requireLogin` is deliberately not imported: nullrouter always
@@ -1100,6 +1133,18 @@ impl StateStore {
             }
             if let Some(value) = text("fallbackStrategy") {
                 snapshot.settings.fallback_strategy = value;
+            }
+            // Combo routing. Dropping these would silently downgrade an imported
+            // round-robin combo to fallback: it would still answer, so nothing
+            // would look broken while only the first model was ever used.
+            if let Some(value) = text("comboStrategy") {
+                snapshot.settings.combo_strategy = value;
+            }
+            if let Some(value) = count("comboStickyRoundRobinLimit") {
+                snapshot.settings.combo_sticky_round_robin_limit = value;
+            }
+            if let Some(value) = count("stickyRoundRobinLimit") {
+                snapshot.settings.sticky_round_robin_limit = value;
             }
             // Dashboard SSO configuration, under the same keys 9Router uses.
             for (key, target) in [

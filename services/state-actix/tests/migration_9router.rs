@@ -174,6 +174,8 @@ impl Fixture {
                         "requireApiKey": true,
                         "fallbackStrategy": "round-robin",
                         "stickyRoundRobinLimit": 7,
+                        "comboStrategy": "round-robin",
+                        "comboStickyRoundRobinLimit": 4,
                         "outboundProxyEnabled": true,
                         "outboundProxyUrl": "http://127.0.0.1:8888",
                     })
@@ -349,6 +351,18 @@ async fn imported_settings_reach_the_routing_context() -> TestResult {
     assert_eq!(
         body.pointer("/settings/fallbackStrategy"),
         Some(&json!("round-robin"))
+    );
+    // Combo routing is behavioral in the same way: dropping it would leave an
+    // imported round-robin combo answering from only its first model, with
+    // nothing to indicate the strategy had been lost.
+    assert_eq!(
+        body.pointer("/settings/comboStrategy"),
+        Some(&json!("round-robin")),
+        "body: {body}"
+    );
+    assert_eq!(
+        body.pointer("/settings/comboStickyRoundRobinLimit"),
+        Some(&json!(4))
     );
     Ok(())
 }

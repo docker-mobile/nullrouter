@@ -618,6 +618,8 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
             "settings": {
                 "requireApiKey": settings.require_api_key,
                 "fallbackStrategy": settings.fallback_strategy,
+                "comboStrategy": settings.combo_strategy,
+                "comboStickyRoundRobinLimit": settings.combo_sticky_round_robin_limit,
             },
         }),
     )

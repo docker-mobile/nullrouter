@@ -94,6 +94,15 @@ pub(crate) struct ConnectionSummary {
 pub(crate) struct RoutingSettings {
     #[serde(default)]
     pub require_api_key: bool,
+    /// How a combo picks among its models: `fallback`, `round-robin`, `fusion`.
+    ///
+    /// Absent or unrecognised reads as `fallback`, the upstream default, so a
+    /// state service that predates this field does not change routing.
+    #[serde(default)]
+    pub combo_strategy: Option<String>,
+    /// Requests to keep on one combo model before rotating.
+    #[serde(default)]
+    pub combo_sticky_round_robin_limit: Option<u32>,
 }
 
 /// Usage report sent after a request finishes.

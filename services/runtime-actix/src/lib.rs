@@ -1,3 +1,4 @@
+mod combo;
 mod errors;
 mod handlers;
 mod models;

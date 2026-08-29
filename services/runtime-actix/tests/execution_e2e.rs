@@ -665,3 +665,219 @@ async fn a_reply_without_usage_records_zero_rather_than_failing() -> TestResult 
     assert_eq!(usage_json.get("status"), Some(&json!("success")));
     Ok(())
 }
+
+/// A state service whose routing context declares one combo.
+///
+/// `models` are the combo's entries in order; `strategy` is the routing setting.
+/// Credentials are handed out for any provider, pointing at `provider_base`, so a
+/// combo can walk several models against one fake provider.
+async fn fake_state_with_combo(provider_base: &str, models: &[&str], strategy: &str) -> FakeServer {
+    let credentials = json!({
+        "status": "selected",
+        "credentials": {
+            "connectionId": "conn_e2e",
+            "connectionName": "e2e",
+            "apiKey": "sk-e2e",
+            "providerSpecificData": { "baseUrl": provider_base },
+        },
+    });
+    let routing = json!({
+        "combos": [{ "id": "combo_1", "name": "mixed", "kind": null, "models": models }],
+        "connections": [],
+        "settings": { "comboStrategy": strategy, "comboStickyRoundRobinLimit": 1 },
+    });
+    FakeServer::start(vec![
+        (
+            "/internal/v1/credentials/select",
+            Reply::json(credentials.to_string()),
+        ),
+        ("/internal/v1/credentials/clear-error", Reply::json("{}")),
+        ("/internal/v1/credentials/unavailable", Reply::json("{}")),
+        ("/internal/v1/usage", Reply::json(r#"{"ok":true}"#)),
+        (
+            "/internal/v1/routing-context",
+            Reply::json(routing.to_string()),
+        ),
+    ])
+    .await
+}
+
+#[actix_rt::test]
+async fn a_combo_falls_through_to_its_next_model_when_the_first_fails() -> TestResult {
+    // Given: a combo whose first model is a provider that cannot be executed at
+    // all (`ollama` needs a bespoke executor), and whose second is executable.
+    // Before combo fallback existed the combo resolved to `models.first()` and
+    // stopped, so a combo led by a dead model was a dead combo.
+    let provider = FakeServer::start(vec![(
+        "/chat/completions",
+        Reply::json(
+            json!({
+                "id": "chatcmpl-combo",
+                "object": "chat.completion",
+                "model": "gpt-5",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "second model answered" },
+                    "finish_reason": "stop",
+                }],
+                "usage": { "prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5 },
+            })
+            .to_string(),
+        ),
+    )])
+    .await;
+    let state = fake_state_with_combo(
+        &provider.base_url(),
+        &["ollama/llama3", "openai-compatible-e2e/gpt-5"],
+        "fallback",
+    )
+    .await;
+
+    // When: the client asks for the combo by name.
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"mixed","messages":[{"role":"user","content":"ping"}]}"#,
+    )
+    .await?;
+
+    // Then: the second model answered, rather than the combo failing on the first.
+    assert_eq!(response.status, StatusCode::OK, "body: {}", response.body);
+    let json: Value = serde_json::from_str(&response.body)?;
+    assert_eq!(
+        json.pointer("/choices/0/message/content"),
+        Some(&json!("second model answered"))
+    );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn a_single_model_request_keeps_its_own_error() -> TestResult {
+    // Given: a request for one unexecutable provider, not a combo. The combo
+    // fallback path must not replace a real 501 with a generic "all models
+    // unavailable" — the caller needs to know *which* protocol is unported.
+    let provider = FakeServer::start(vec![("/chat/completions", Reply::json("{}"))]).await;
+    let state = fake_state(&provider.base_url()).await;
+
+    // When: the client asks for it directly.
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"ollama/llama3","messages":[{"role":"user","content":"ping"}]}"#,
+    )
+    .await?;
+
+    // Then: the explicit 501 naming the provider survives.
+    assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED);
+    assert!(
+        response.body.contains("ollama"),
+        "the refusal must name the provider: {}",
+        response.body
+    );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn a_combo_whose_every_model_is_unexecutable_reports_the_last_real_error() -> TestResult {
+    // Given: a combo where no model can be executed. The client should still get
+    // a real refusal naming a provider, not a synthesised placeholder.
+    let provider = FakeServer::start(vec![("/chat/completions", Reply::json("{}"))]).await;
+    let state = fake_state_with_combo(
+        &provider.base_url(),
+        &["ollama/llama3", "cursor/gpt-5"],
+        "fallback",
+    )
+    .await;
+
+    // When: the combo is requested.
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"mixed","messages":[{"role":"user","content":"ping"}]}"#,
+    )
+    .await?;
+
+    // Then: the last model's own 501 is reported.
+    assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED);
+    assert!(
+        response.body.contains("cursor"),
+        "the last model's refusal should be the reported one: {}",
+        response.body
+    );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn round_robin_starts_from_a_different_model_each_request() -> TestResult {
+    // Given: a round-robin combo of two executable models, and a provider that
+    // echoes which model it was asked for.
+    let provider = FakeServer::start(vec![(
+        "/chat/completions",
+        Reply::json(
+            json!({
+                "id": "chatcmpl-rr",
+                "object": "chat.completion",
+                "model": "echo",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "ok" },
+                    "finish_reason": "stop",
+                }],
+                "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 },
+            })
+            .to_string(),
+        ),
+    )])
+    .await;
+    let state = fake_state_with_combo(
+        &provider.base_url(),
+        &[
+            "openai-compatible-e2e/first",
+            "openai-compatible-e2e/second",
+        ],
+        "round-robin",
+    )
+    .await;
+
+    // When: the same combo is requested twice through one runtime, so the
+    // rotation cursor persists between calls.
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(app_config()))
+            .app_data(web::Data::new(Runtime::with_state_addr(
+                &state.addr_string(),
+            )))
+            .configure(configure),
+    )
+    .await;
+    for _ in 0..2 {
+        let req = test::TestRequest::default()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .insert_header((header::CONTENT_TYPE, "application/json"))
+            .set_payload(r#"{"model":"mixed","messages":[{"role":"user","content":"ping"}]}"#)
+            .to_request();
+        let res = test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let _ = to_bytes(res.into_body()).await?;
+    }
+
+    // Then: the two requests went out as different models. With no rotation both
+    // would name the first.
+    let sent: Vec<String> = provider
+        .requests()
+        .into_iter()
+        .filter(|(path, _)| path.contains("/chat/completions"))
+        .filter_map(|(_, body)| {
+            serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|json| json.get("model")?.as_str().map(str::to_owned))
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        vec!["first".to_owned(), "second".to_owned()],
+        "{sent:?}"
+    );
+    Ok(())
+}

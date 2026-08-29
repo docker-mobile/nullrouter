@@ -96,10 +96,12 @@ Remaining debt:
 - State persists to JSON with a bounded ring of recent requests, not SQLite, and is in-memory unless
   `NULLROUTER_STATE_FILE` is set. A 9Router SQLite install can be imported (see README), but API keys
   cannot carry over because only digests are stored.
-- MITM, headroom compression, token savers, tunnel/tailscale, MCP backend bridging, proxy-pool
-  testing and relay deployment, and combo rotation/fusion have route surfaces that validate input and
-  then return an explicit `501` with `"unsupported": true`. Headroom detection is the exception: it
-  probes for real. Combos resolve to their first model rather than rotating.
+- MITM, headroom compression, token savers, tunnel/tailscale, MCP backend bridging, and proxy-pool
+  testing and relay deployment have route surfaces that validate input and then return an explicit
+  `501` with `"unsupported": true`. Headroom detection is the exception: it probes for real.
+- Combo `fallback` and `round-robin` strategies route for real, including sticky limits and
+  cross-model fallback. The `fusion` strategy is not ported: a fusion combo is routed as `fallback`
+  rather than fanning out to a panel and judge.
 - SAML assertion consumption is refused rather than deferred: verifying a signature needs exclusive
   XML canonicalisation, and a subtly wrong implementation is an authentication bypass. Metadata and
   outbound `AuthnRequest` generation are complete.
