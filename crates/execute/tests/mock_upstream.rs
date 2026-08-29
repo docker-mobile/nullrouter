@@ -49,6 +49,8 @@ impl MockResponse {
 /// A request the server observed.
 #[derive(Debug, Clone)]
 pub struct RecordedRequest {
+    /// The HTTP method, so a poll (GET) is distinguishable from a create (POST).
+    pub method: String,
     pub path: String,
     pub headers: BTreeMap<String, String>,
     pub body: String,
@@ -151,11 +153,10 @@ async fn handle_connection(
     let raw = String::from_utf8_lossy(&buffer).into_owned();
     let head = raw.get(..headers_end.min(raw.len())).unwrap_or_default();
     let mut lines = head.lines();
-    let path = lines
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/")
-        .to_owned();
+    let request_line = lines.next().unwrap_or_default();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("GET").to_owned();
+    let path = parts.next().unwrap_or("/").to_owned();
     let headers = lines
         .filter_map(|line| line.split_once(':'))
         .map(|(name, value)| (name.to_lowercase(), value.trim().to_owned()))
@@ -164,6 +165,7 @@ async fn handle_connection(
 
     if let Ok(mut sink) = recorded.lock() {
         sink.push(RecordedRequest {
+            method,
             path,
             headers,
             body,

@@ -111,6 +111,7 @@ const fn service_label(kind: ServiceKind) -> &'static str {
         ServiceKind::TextToSpeech => "text-to-speech",
         ServiceKind::SpeechToText => "speech-to-text",
         ServiceKind::ImageGeneration => "image generation",
+        ServiceKind::Video => "video generation",
         ServiceKind::Search => "search",
         ServiceKind::Fetch => "fetch",
     }
@@ -175,6 +176,97 @@ impl Runtime {
             state: StateClient::new(addr),
             rotation: RotationState::new(),
         }
+    }
+
+    /// The state client, for endpoint families implemented outside this module.
+    pub(crate) const fn state_client(&self) -> &StateClient {
+        &self.state
+    }
+
+    /// The HTTP executor, for endpoint families implemented outside this module.
+    pub(crate) const fn executor_ref(&self) -> &Executor {
+        &self.executor
+    }
+
+    /// Record one video call's outcome.
+    ///
+    /// Video jobs report no token usage — the provider bills per second of output —
+    /// so the usage row carries the status and latency only.
+    pub(crate) async fn record_video(&self, outcome: &crate::video::VideoRecord<'_>) {
+        let succeeded = (200..300).contains(&outcome.status);
+        self.record(
+            outcome.context,
+            outcome.target,
+            outcome.credentials,
+            if succeeded { "success" } else { "error" },
+            Some(outcome.status),
+            nullrouter_translate::Usage::default(),
+            outcome.started,
+            outcome.error.clone(),
+        )
+        .await;
+    }
+
+    /// Lock an account after a video failure, using the shared fallback policy.
+    pub(crate) async fn cool_down_video(
+        &self,
+        credentials: &Credentials,
+        target: &model::ModelTarget,
+        status: u16,
+        message: &str,
+    ) {
+        let decision = check_fallback_error(status, message, 0);
+        if !decision.should_fallback {
+            return;
+        }
+        self.state
+            .mark_unavailable(&crate::state_client::Cooldown {
+                connection_id: &credentials.connection_id,
+                model: (!target.model.is_empty()).then_some(target.model.as_str()),
+                status,
+                reason: message,
+                duration_ms: decision.cooldown_ms,
+                backoff_level: decision.new_backoff_level,
+            })
+            .await;
+    }
+
+    /// Clear a prior cooldown after a video call succeeds.
+    pub(crate) async fn clear_video_error(
+        &self,
+        credentials: &Credentials,
+        target: &model::ModelTarget,
+    ) {
+        self.state
+            .clear_error(
+                &credentials.connection_id,
+                (!target.model.is_empty()).then_some(target.model.as_str()),
+            )
+            .await;
+    }
+
+    /// [`Self::fail`], reachable from the video module.
+    pub(crate) async fn video_fail(
+        &self,
+        context: &ChatContext<'_>,
+        target: &model::ModelTarget,
+        status: StatusCode,
+        message: &str,
+    ) -> HttpResponse {
+        self.fail(context, target, status, message).await
+    }
+
+    /// [`Self::rate_limited`], reachable from the video module.
+    pub(crate) async fn video_rate_limited(
+        &self,
+        context: &ChatContext<'_>,
+        target: &model::ModelTarget,
+        retry_at_ms: u64,
+        last_error: Option<String>,
+        last_error_code: Option<u16>,
+    ) -> HttpResponse {
+        self.rate_limited(context, target, retry_at_ms, last_error, last_error_code)
+            .await
     }
 
     /// Enforce `requireApiKey` when state has it enabled.

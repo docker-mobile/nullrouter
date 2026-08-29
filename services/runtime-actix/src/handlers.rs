@@ -22,7 +22,7 @@ use crate::{
     requests::{
         ChatPayload, CountTokensRequest, ModelInfoQuery, gemini_model_from_tail, parse_json,
     },
-    responses,
+    responses, video,
 };
 
 /// Whether an endpoint streams by default when the body omits `stream`.
@@ -200,6 +200,88 @@ pub(crate) async fn count_tokens(body: web::Bytes) -> Result<HttpResponse, Runti
         StatusCode::OK,
         &models::count_tokens(request.input_tokens()),
     ))
+}
+
+/// `POST /v1/videos/{generations,edits,extensions}` — create an async video job.
+pub(crate) async fn video_create(
+    runtime: web::Data<Runtime>,
+    request: HttpRequest,
+    path: web::Path<String>,
+    body: web::Bytes,
+) -> Result<HttpResponse, RuntimeError> {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return Ok(rejection);
+    }
+    let segment = path.into_inner();
+    let Some(action) = video::VideoAction::parse(&segment) else {
+        // The route pattern already restricts this, so reaching here means the
+        // pattern and the parser disagree — answered rather than assumed.
+        return Ok(responses::json(
+            StatusCode::NOT_FOUND,
+            &nullrouter_execute::build_error_body(404, &format!("Unknown video action: {segment}")),
+        ));
+    };
+
+    Ok(runtime
+        .execute_video(&video::VideoRequest {
+            endpoint: request.path(),
+            action: Some(action),
+            job_id: None,
+            body: &body,
+            content_type: header_str(&request, actix_web::http::header::CONTENT_TYPE.as_str()),
+            idempotency_key: header_str(&request, "idempotency-key"),
+            preferred_connection: preferred_connection(&request),
+        })
+        .await)
+}
+
+/// `GET /v1/videos/{id}` — poll a job.
+pub(crate) async fn video_status(
+    runtime: web::Data<Runtime>,
+    request: HttpRequest,
+    path: web::Path<String>,
+) -> Result<HttpResponse, RuntimeError> {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return Ok(rejection);
+    }
+    let job_id = path.into_inner();
+    if job_id.trim().is_empty() {
+        return Ok(responses::json(
+            StatusCode::BAD_REQUEST,
+            &nullrouter_execute::build_error_body(400, "Missing video request id"),
+        ));
+    }
+
+    Ok(runtime
+        .execute_video(&video::VideoRequest {
+            endpoint: request.path(),
+            action: None,
+            job_id: Some(&job_id),
+            body: &[],
+            content_type: None,
+            idempotency_key: None,
+            preferred_connection: preferred_connection(&request),
+        })
+        .await)
+}
+
+/// The account a client is pinning to.
+///
+/// `x-connection-id` is what upstream's clients send; the header this router emits
+/// on a create is also accepted, so a client that simply echoes back what it
+/// received works without rewriting the name.
+fn preferred_connection(request: &HttpRequest) -> Option<&str> {
+    header_str(request, "x-connection-id").or_else(|| header_str(request, video::CONNECTION_HEADER))
+}
+
+/// A request header as a string, when present and valid UTF-8.
+fn header_str<'a>(request: &'a HttpRequest, name: &str) -> Option<&'a str> {
+    request
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) async fn audio_voices() -> HttpResponse {

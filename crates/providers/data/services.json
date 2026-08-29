@@ -598,6 +598,13 @@
    "authHeader": null,
    "format": null,
    "defaultModel": "grok-4.20-reasoning"
+  },
+  "videoConfig": {
+   "baseUrl": "https://api.x.ai/v1/videos",
+   "authType": null,
+   "authHeader": null,
+   "format": null,
+   "defaultModel": null
   }
  },
  "xiaomi-mimo": {

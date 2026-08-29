@@ -148,6 +148,12 @@ pub(crate) struct SelectConnectionRequest<'a> {
     pub model: Option<&'a str>,
     /// Connections already tried and failed in this request.
     pub exclude: &'a [String],
+    /// Pin to this connection when it is available, skipping the strategy.
+    ///
+    /// Async video jobs are account-bound upstream: the account that created a job
+    /// is the only one that can poll it, so the client echoes the creating
+    /// connection back and selection must honour it.
+    pub preferred: Option<&'a str>,
     pub strategy: FallbackStrategy,
     pub sticky_limit: u32,
 }
@@ -895,7 +901,20 @@ impl StateStore {
                 });
             }
 
-            let chosen = if request.strategy == FallbackStrategy::RoundRobin {
+            // A preferred connection wins over the strategy, but only if it is in
+            // the available set: pinning to a locked or excluded account would
+            // defeat the cooldown that locked it.
+            let pinned = request.preferred.and_then(|wanted| {
+                available.iter().copied().find(|index| {
+                    snapshot
+                        .provider_connections
+                        .get(*index)
+                        .is_some_and(|connection| connection.id == wanted)
+                })
+            });
+            let chosen = if let Some(pinned) = pinned {
+                pinned
+            } else if request.strategy == FallbackStrategy::RoundRobin {
                 Self::pick_round_robin(snapshot, &available, request.sticky_limit, &now_iso())
             } else {
                 // fill-first: lowest priority number wins.

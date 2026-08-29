@@ -51,6 +51,12 @@ fn route_for_path_selects_runtime_for_media_runtime_endpoints() {
         "/v1/embeddings",
         "/v1/audio/speech",
         "/v1/images/generations",
+        // Async video jobs: creation and the poll that follows it.
+        "/v1/videos/generations",
+        "/v1/videos/edits",
+        "/v1/videos/extensions",
+        "/v1/videos/vid_abc123",
+        "/api/v1/videos/generations",
         "/v1/search",
         "/v1/web/fetch",
     ] {

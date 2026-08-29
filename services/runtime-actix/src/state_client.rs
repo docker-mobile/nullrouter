@@ -178,11 +178,28 @@ impl StateClient {
         model: Option<&str>,
         exclude: &[String],
     ) -> Selection {
+        self.select_credentials_pinned(provider, model, exclude, None)
+            .await
+    }
+
+    /// [`Self::select_credentials`], optionally pinned to one connection.
+    ///
+    /// The pin is honoured only when that connection is available; state falls back
+    /// to its normal strategy otherwise. Used by the async video endpoints, where a
+    /// job can only be polled by the account that created it.
+    pub(crate) async fn select_credentials_pinned(
+        &self,
+        provider: &str,
+        model: Option<&str>,
+        exclude: &[String],
+        preferred: Option<&str>,
+    ) -> Selection {
         let url = format!("{}/internal/v1/credentials/select", self.base);
         let payload = json!({
             "provider": provider,
             "model": model,
             "exclude": exclude,
+            "preferredConnectionId": preferred,
         });
 
         let response = match self.client.post(&url).json(&payload).send().await {

@@ -87,6 +87,26 @@ pub struct ExecuteRequest<'a> {
     pub credentials: &'a Credentials,
 }
 
+/// One byte-preserving call to an explicit URL.
+///
+/// Used by the async video endpoints, where the client's body may be multipart and
+/// must reach the provider unchanged.
+#[derive(Debug)]
+pub struct RawRequest<'a> {
+    pub provider: &'a str,
+    /// Absolute upstream URL.
+    pub url: &'a str,
+    /// `true` for a job creation POST, `false` for a status GET.
+    pub post: bool,
+    /// Bytes to send. Ignored when `post` is false.
+    pub body: &'a [u8],
+    /// The client's `Content-Type`, forwarded verbatim. `None` sends none.
+    pub content_type: Option<&'a str>,
+    /// Headers applied after the provider's own.
+    pub extra_headers: &'a [(&'a str, &'a str)],
+    pub credentials: &'a Credentials,
+}
+
 /// Builds HTTP clients, reusing a pooled default and building per-proxy
 /// clients only when a connection needs one.
 #[derive(Debug, Clone)]
@@ -166,6 +186,72 @@ impl Executor {
                 url: url.to_owned(),
                 headers,
                 sent_body: request.body.clone(),
+            }),
+            Err(error) if error.is_timeout() => Err(ExecuteError::Timeout {
+                provider: provider.to_owned(),
+            }),
+            Err(error) => Err(ExecuteError::Transport {
+                provider: provider.to_owned(),
+                message: error.to_string(),
+            }),
+        }
+    }
+
+    /// Dispatch to an explicit URL, forwarding bytes exactly as received.
+    ///
+    /// Distinct from [`Self::execute_at`], which serialises a `Value` and always
+    /// sends `application/json`. Async video jobs accept multipart bodies, and
+    /// parsing then re-encoding multipart would mint a new boundary that no longer
+    /// matches the client's `Content-Type` header — so the bytes are passed through
+    /// untouched and the original content type travels with them.
+    ///
+    /// `extra_headers` is applied last, so a caller can add per-request headers
+    /// (`Idempotency-Key`) without them being overwritten by the provider's own.
+    pub async fn execute_raw(
+        &self,
+        request: RawRequest<'_>,
+    ) -> Result<ExecuteOutcome, ExecuteError> {
+        let provider = request.provider;
+        let timeout = Duration::from_millis(
+            registry::transport(provider)
+                .and_then(|transport| transport.timeout_ms)
+                .unwrap_or(DEFAULT_CONNECT_TIMEOUT_MS),
+        );
+        let client = self.client_for(request.credentials);
+
+        let mut headers = build_headers(provider, request.credentials, false);
+        // `build_headers` assumes a JSON body. A GET poll sends none at all, and a
+        // POST carries whatever the client sent.
+        headers.remove("Content-Type");
+        if let Some(content_type) = request.content_type {
+            headers.insert("Content-Type".to_owned(), content_type.to_owned());
+        }
+        headers.insert("Accept".to_owned(), "application/json".to_owned());
+        for (key, value) in request.extra_headers {
+            headers.insert((*key).to_owned(), (*value).to_owned());
+        }
+
+        let mut builder = if request.post {
+            client.post(request.url)
+        } else {
+            client.get(request.url)
+        }
+        .timeout(timeout);
+        for (key, value) in &headers {
+            builder = builder.header(key, value);
+        }
+        if request.post {
+            builder = builder.body(request.body.to_vec());
+        }
+
+        match builder.send().await {
+            Ok(response) => Ok(ExecuteOutcome {
+                response,
+                url: request.url.to_owned(),
+                headers,
+                // The forwarded bytes are not necessarily JSON, and a multipart body
+                // can carry a whole video. Logging records the shape, not the payload.
+                sent_body: Value::Null,
             }),
             Err(error) if error.is_timeout() => Err(ExecuteError::Timeout {
                 provider: provider.to_owned(),

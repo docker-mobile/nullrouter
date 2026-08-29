@@ -23,7 +23,7 @@ use nullrouter_providers::Format;
 
 pub use credentials::Credentials;
 pub use errors::{FallbackDecision, UpstreamError, build_error_body, check_fallback_error};
-pub use executor::{ExecuteError, ExecuteOutcome, ExecuteRequest, Executor};
+pub use executor::{ExecuteError, ExecuteOutcome, ExecuteRequest, Executor, RawRequest};
 pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_stream};
 
 /// Provider formats this port can actually execute.

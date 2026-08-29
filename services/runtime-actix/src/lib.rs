@@ -8,6 +8,7 @@ mod requests;
 mod responses;
 mod routes;
 mod state_client;
+mod video;
 
 pub use pipeline::Runtime;
 pub use routes::configure;

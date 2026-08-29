@@ -154,12 +154,14 @@ async fn serve(
     let reply = routes
         .iter()
         .find(|(suffix, _)| path.contains(suffix))
-        .map(|(_, reply)| reply.clone())
-        .unwrap_or_else(|| Reply {
-            status: 404,
-            content_type: "application/json",
-            body: String::from(r#"{"error":"not found"}"#),
-        });
+        .map_or_else(
+            || Reply {
+                status: 404,
+                content_type: "application/json",
+                body: String::from(r#"{"error":"not found"}"#),
+            },
+            |(_, reply)| reply.clone(),
+        );
     let response = format!(
         "HTTP/1.1 {} OK\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
         reply.status,

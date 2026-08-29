@@ -40,6 +40,9 @@ pub enum ServiceKind {
     TextToSpeech,
     SpeechToText,
     ImageGeneration,
+    /// Async video jobs. Unlike the others this is not one request/response: a
+    /// creation POST returns a job id that a later GET polls.
+    Video,
     Search,
     Fetch,
 }
@@ -52,6 +55,7 @@ impl ServiceKind {
             Self::TextToSpeech => "ttsConfig",
             Self::SpeechToText => "sttConfig",
             Self::ImageGeneration => "imageConfig",
+            Self::Video => "videoConfig",
             Self::Search => "searchConfig",
             Self::Fetch => "fetchConfig",
         }
@@ -70,6 +74,9 @@ impl ServiceKind {
         }
         if path.contains("/images/generations") {
             return Some(Self::ImageGeneration);
+        }
+        if path.contains("/videos") {
+            return Some(Self::Video);
         }
         if path.contains("/search") {
             return Some(Self::Search);
@@ -143,6 +150,27 @@ mod tests {
     }
 
     #[test]
+    fn video_generation_is_configured_for_xai_only() {
+        // The one provider with a `videoConfig` upstream
+        // (inspire/open-sse/providers/registry/xai.js).
+        let video = service_endpoint("xai", ServiceKind::Video).expect("xai video");
+        assert_eq!(
+            video.base_url.as_deref(),
+            Some("https://api.x.ai/v1/videos")
+        );
+        assert!(supports_service("xai", ServiceKind::Video));
+
+        // Everything else must report no support rather than being routed there.
+        for provider in ["openai", "anthropic", "google", "fal-ai"] {
+            assert!(
+                !supports_service(provider, ServiceKind::Video),
+                "{provider} must not claim video support"
+            );
+        }
+        assert_eq!(providers_for_service(ServiceKind::Video), vec!["xai"]);
+    }
+
+    #[test]
     fn service_support_is_reported_per_provider() {
         assert!(supports_service("openai", ServiceKind::Embedding));
         // anthropic offers no embedding endpoint.
@@ -168,6 +196,18 @@ mod tests {
             ServiceKind::from_path("/v1/images/generations"),
             Some(ServiceKind::ImageGeneration)
         );
+        for path in [
+            "/v1/videos/generations",
+            "/v1/videos/edits",
+            "/v1/videos/extensions",
+            "/v1/videos/vid-123",
+        ] {
+            assert_eq!(
+                ServiceKind::from_path(path),
+                Some(ServiceKind::Video),
+                "{path}"
+            );
+        }
         assert_eq!(
             ServiceKind::from_path("/v1/search"),
             Some(ServiceKind::Search)

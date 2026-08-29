@@ -81,6 +81,19 @@ fn register_v1_routes(config: &mut web::ServiceConfig, base: &'static str) {
                     .route(web::post().to(handlers::image_generations))
                     .route(web::method(Method::OPTIONS).to(handlers::no_content)),
             )
+            // Async video jobs. The creation actions are registered before the
+            // catch-all poll route so `/v1/videos/generations` is not read as a job
+            // id — actix matches in registration order.
+            .service(
+                web::resource("/videos/{action:generations|edits|extensions}")
+                    .route(web::post().to(handlers::video_create))
+                    .route(web::method(Method::OPTIONS).to(handlers::no_content)),
+            )
+            .service(
+                web::resource("/videos/{id}")
+                    .route(web::get().to(handlers::video_status))
+                    .route(web::method(Method::OPTIONS).to(handlers::no_content)),
+            )
             .service(
                 web::resource("/audio/speech")
                     .route(web::post().to(handlers::audio_speech))

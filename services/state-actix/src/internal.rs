@@ -115,6 +115,9 @@ struct SelectRequest {
     /// Connections already tried in this request.
     #[serde(default)]
     exclude: Vec<String>,
+    /// Pin to this connection when it is available (account-bound video polls).
+    #[serde(default)]
+    preferred_connection_id: Option<String>,
 }
 
 /// Credentials handed to the runtime, mirroring `nullrouter-execute`'s shape.
@@ -188,6 +191,11 @@ async fn select_credentials(
         provider: &request.provider,
         model: request.model.as_deref(),
         exclude: &request.exclude,
+        preferred: request
+            .preferred_connection_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty()),
         strategy,
         sticky_limit: settings.sticky_round_robin_limit,
     });
