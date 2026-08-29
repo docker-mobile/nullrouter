@@ -82,3 +82,7 @@ node_modules/
 /coverage/
 perf.data*
 flamegraph.svg
+
+# oh-my-claudecode operational state (agent tooling, not project files)
+.omc/
+**/.omc/

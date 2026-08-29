@@ -609,10 +609,9 @@ fn submit(row: RowSignals, field: SettingsField, previous: SettingsValue, body: 
         let outcome = match api::put(SETTINGS_PATH, &body).await {
             // PUT returns the updated SettingsView, so a parseable reply is the
             // server's own state and is preferred over the optimistic guess.
-            Ok(reply) => parse_settings(&reply)
-                .map_or(WriteOutcome::Unconfirmed, |snapshot| {
-                    WriteOutcome::Confirmed(Box::new(snapshot))
-                }),
+            Ok(reply) => parse_settings(&reply).map_or(WriteOutcome::Unconfirmed, |snapshot| {
+                WriteOutcome::Confirmed(Box::new(snapshot))
+            }),
             Err(error) => WriteOutcome::Rejected(error),
         };
         finish(row, field, &previous, outcome);

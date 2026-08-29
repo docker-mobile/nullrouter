@@ -24,7 +24,7 @@ use nullrouter_execute::{
 };
 use nullrouter_providers::{Format, ServiceKind, model, target_format};
 use nullrouter_translate::state::Clock;
-use nullrouter_translate::{StreamState, translate_request};
+use nullrouter_translate::{RequestRoute, StreamState, translate_request};
 use serde_json::Value;
 
 use crate::responses;
@@ -538,9 +538,12 @@ impl Runtime {
         let ceiling = nullrouter_providers::max_output(&target.provider, &target.model);
 
         let translated = translate_request(
-            context.source_format,
-            target_format,
-            &upstream_model,
+            RequestRoute {
+                source: context.source_format,
+                target: target_format,
+                provider: &target.provider,
+                model: &upstream_model,
+            },
             &context.body,
             upstream_stream,
             ceiling,

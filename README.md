@@ -229,6 +229,50 @@ On a retryable failure the runtime walks to the next account for that provider, 
 not a conservative global default. A model with a 128k output limit is not silently truncated at
 64000.
 
+### Reasoning is translated too
+
+Every vendor spells "think harder" differently, and a reasoning field a provider does not recognise is
+either ignored or a 400 — both silent from the caller's side. So thinking intent is read out of
+whichever dialect it arrived in and re-emitted in the target provider's own shape, across **12 wire
+formats** covering **568 of the 685** models in the capability table:
+
+| Format | Wire shape | Models |
+|---|---|---|
+| `openai` | `reasoning_effort: "high"` | 139 |
+| `qwen` | `enable_thinking` + `thinking_budget` | 71 |
+| `zai` | `enable_thinking` (ignores Anthropic's disable) | 59 |
+| `kimi` | Anthropic disable + OpenAI effort | 51 |
+| `deepseek` | `thinking` + effort collapsed to `high`/`max` | 46 |
+| `claude-budget` | `thinking: {budget_tokens}` | 45 |
+| `claude-adaptive` | `thinking: {type:"adaptive"}` + `output_config.effort` | 43 |
+| `minimax` | `thinking: {type:"adaptive"}` | 40 |
+| `gemini-level` | `thinkingConfig.thinkingLevel` | 40 |
+| `gemini-budget` | `thinkingConfig.thinkingBudget` | 14 |
+| `hunyuan` | Anthropic budget shape | 4 |
+| `step` | effort capped at `high` | 3 |
+
+A `reasoning_effort: "high"` aimed at an Anthropic budget model becomes
+`thinking: {type:"enabled", budget_tokens:24576}`; the reverse becomes `reasoning_effort: "high"`. The
+source spelling is always removed, so a request never carries two conflicting instructions.
+
+Details that are easy to get wrong and are pinned by tests:
+
+- **A model that cannot disable thinking** gets minimal effort instead of an "off" it would reject —
+  otherwise you are billed for full-price reasoning while believing it is switched off.
+- **Gemini draws thinking tokens from the output budget**, so `maxOutputTokens` is raised to the floor
+  that budget needs (never above the model's own ceiling). Left alone, reasoning eats the ceiling and
+  truncates the visible answer.
+- **gemini-cli and antigravity wrap the request in an envelope**; the config *inside* it is written.
+  Writing the top-level one sets a field the provider never reads.
+- **Budgets are clamped to the model's stated range** — a 999999-token budget on a 24576-cap model is
+  clamped, not rejected.
+- **A non-reasoning model has thinking stripped entirely**, since an unrecognised field is a 400 on
+  several providers.
+- **Nothing is invented.** A request that says nothing about reasoning is passed through untouched.
+
+Per-request effort can also be pinned on the model id: `openai/gpt-5(high)`, `(8192)`, `(none)`, or
+`(auto)`. The suffix wins over the body and never reaches the provider.
+
 ### Non-chat services
 
 These dispatch to each provider's own service-specific endpoint from the registry, not to a chat
@@ -510,9 +554,8 @@ deliver it. Console-log streams connect and emit an empty init frame — there i
 backend.
 
 **Not ported at all:** remote `/models` probing for dynamic compatible providers (set
-`providerSpecificData.enabledModels` instead), provider-native thinking normalization (the registry's
-`thinkingFormat` is carried in the capability table but not yet applied to outbound requests), and
-combo rotation/fusion strategies — a combo resolves to its first model.
+`providerSpecificData.enabledModels` instead) and combo rotation/fusion strategies — a combo resolves
+to its first model.
 
 **Deliberately excluded, not deferred:** `pxpipe` (8 routes) and `/v1/videos/*`. `pxpipe` is an
 external binary subsystem that upstream itself keeps commented out of its own sidebar.

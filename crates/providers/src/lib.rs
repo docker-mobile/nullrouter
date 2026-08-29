@@ -12,14 +12,18 @@ pub mod models_list;
 pub mod registry;
 pub mod services;
 
-pub use capabilities::{Capabilities, for_model as capabilities_for_model, max_output};
+pub use capabilities::{
+    Capabilities, ThinkingFormat, ThinkingRange, for_model as capabilities_for_model, max_output,
+    thinking_levels,
+};
 pub use format::{
     ANTHROPIC_COMPAT_BASE, Format, OPENAI_COMPAT_BASE, detect_format, detect_format_by_endpoint,
     is_anthropic_compatible, is_openai_compatible, resolve_transport, target_format,
 };
 pub use model::{
     ModelTarget, ParsedModel, infer_provider_from_model_name, infer_target, model_strip_list,
-    model_target_format, parse_model, resolve_model_alias, resolve_target, upstream_model_id,
+    model_target_format, parse_model, resolve_model_alias, resolve_target, split_thinking_suffix,
+    upstream_model_id,
 };
 pub use models_list::{
     ComboView, ConnectionView, LLM_KIND, ModelRow, ModelsListInput, build_models_list,

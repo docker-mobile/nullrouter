@@ -8,7 +8,9 @@
 use nullrouter_providers::Format;
 use nullrouter_translate::schema::DEFAULT_MAX_TOKENS;
 use nullrouter_translate::state::Clock;
-use nullrouter_translate::{StreamState, finalize_response, request, response, translate_request};
+use nullrouter_translate::{
+    RequestRoute, StreamState, finalize_response, request, response, translate_request,
+};
 use serde_json::{Value, json};
 
 const fn state() -> StreamState {
@@ -278,9 +280,12 @@ fn dispatch_routes_responses_source_through_its_own_translator() {
     // would leave `input` in place and produce no `messages`.
     let body = json!({ "input": "hi", "instructions": "be terse" });
     let result = translate_request(
-        Format::OpenAiResponses,
-        Format::OpenAi,
-        "gpt-5",
+        RequestRoute {
+            source: Format::OpenAiResponses,
+            target: Format::OpenAi,
+            provider: "openai",
+            model: "gpt-5",
+        },
         &body,
         false,
         DEFAULT_MAX_TOKENS,
@@ -300,9 +305,12 @@ fn responses_input_reaches_a_claude_provider() {
         "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] }],
     });
     let result = translate_request(
-        Format::OpenAiResponses,
-        Format::Claude,
-        "claude-sonnet-4.5",
+        RequestRoute {
+            source: Format::OpenAiResponses,
+            target: Format::Claude,
+            provider: "anthropic",
+            model: "claude-sonnet-4.5",
+        },
         &body,
         true,
         DEFAULT_MAX_TOKENS,

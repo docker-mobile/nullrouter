@@ -38,6 +38,99 @@ static TABLE: LazyLock<CapabilitiesTable> = LazyLock::new(|| {
     })
 });
 
+/// Provider-native thinking wire format.
+///
+/// Upstream keys `applyFormat`'s switch on these strings
+/// (`open-sse/translator/concerns/thinkingUnified.js`). A value this build does
+/// not know is kept as [`Self::Unrecognized`] rather than discarded: upstream's
+/// switch falls through to a no-op for an unknown format, whereas dropping it to
+/// `None` here would instead fall back to the *target format's* native default
+/// and apply something the model never asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThinkingFormat {
+    OpenAi,
+    ClaudeAdaptive,
+    ClaudeBudget,
+    GeminiLevel,
+    GeminiBudget,
+    Zai,
+    Qwen,
+    Kimi,
+    DeepSeek,
+    MiniMax,
+    Hunyuan,
+    Step,
+    TokenRouter,
+    Kiro,
+    /// A format string this build does not recognise. Applied as a no-op.
+    Unrecognized,
+}
+
+impl ThinkingFormat {
+    /// Read an upstream `thinkingFormat` string. Never fails.
+    pub fn from_wire(raw: &str) -> Self {
+        match raw {
+            "openai" => Self::OpenAi,
+            "claude-adaptive" => Self::ClaudeAdaptive,
+            "claude-budget" => Self::ClaudeBudget,
+            "gemini-level" => Self::GeminiLevel,
+            "gemini-budget" => Self::GeminiBudget,
+            "zai" => Self::Zai,
+            "qwen" => Self::Qwen,
+            "kimi" => Self::Kimi,
+            "deepseek" => Self::DeepSeek,
+            "minimax" => Self::MiniMax,
+            "hunyuan" => Self::Hunyuan,
+            "step" => Self::Step,
+            "tokenrouter" => Self::TokenRouter,
+            "kiro" => Self::Kiro,
+            _ => Self::Unrecognized,
+        }
+    }
+
+    /// The upstream string identifier.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::ClaudeAdaptive => "claude-adaptive",
+            Self::ClaudeBudget => "claude-budget",
+            Self::GeminiLevel => "gemini-level",
+            Self::GeminiBudget => "gemini-budget",
+            Self::Zai => "zai",
+            Self::Qwen => "qwen",
+            Self::Kimi => "kimi",
+            Self::DeepSeek => "deepseek",
+            Self::MiniMax => "minimax",
+            Self::Hunyuan => "hunyuan",
+            Self::Step => "step",
+            Self::TokenRouter => "tokenrouter",
+            Self::Kiro => "kiro",
+            Self::Unrecognized => "unrecognized",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ThinkingFormat {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Lenient by design: an unknown format must not fail the whole table
+        // parse, which would degrade every model to defaults via the LazyLock
+        // fallback.
+        Ok(Self::from_wire(&String::deserialize(deserializer)?))
+    }
+}
+
+/// Inclusive clamp applied to a resolved thinking budget.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub struct ThinkingRange {
+    #[serde(default)]
+    pub min: Option<u64>,
+    #[serde(default)]
+    pub max: Option<u64>,
+}
+
 /// What a model can read, emit, and how much it can handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +149,15 @@ pub struct Capabilities {
     pub reasoning: bool,
     /// Whether the model can turn thinking off entirely.
     pub thinking_can_disable: bool,
+    /// The wire shape this model's reasoning controls take, when it states one.
+    ///
+    /// `None` means the model does not name a format, and the target wire
+    /// format's native default is used instead.
+    #[serde(default)]
+    pub thinking_format: Option<ThinkingFormat>,
+    /// Clamp applied to a resolved thinking budget, when the model states one.
+    #[serde(default)]
+    pub thinking_range: Option<ThinkingRange>,
     // limits (tokens)
     pub context_window: u64,
     pub max_output: u64,
@@ -74,6 +176,8 @@ impl Capabilities {
         tools: true,
         reasoning: false,
         thinking_can_disable: true,
+        thinking_format: None,
+        thinking_range: None,
         context_window: 200_000,
         max_output: 64_000,
     };
@@ -114,18 +218,17 @@ struct CapabilitiesDelta {
     #[serde(default)]
     max_output: Option<u64>,
     /// Provider-native thinking wire format (`claude-adaptive`, `qwen`, ...).
-    ///
-    /// Parsed so the dumped table stays lossless. Not yet consumed: provider-
-    /// native thinking normalization is not ported.
-    #[allow(dead_code, reason = "retained for fidelity until thinking is ported")]
     #[serde(default)]
-    thinking_format: Option<String>,
+    thinking_format: Option<ThinkingFormat>,
+    /// Clamp for a budget-shaped thinking format.
+    #[serde(default)]
+    thinking_range: Option<ThinkingRange>,
 }
 
 impl CapabilitiesDelta {
     #[allow(
         clippy::missing_const_for_fn,
-        reason = "Option::is_some on a String field is not const-stable"
+        reason = "const buys nothing here: called once per lookup behind a LazyLock"
     )]
     fn apply(&self, mut base: Capabilities) -> Capabilities {
         if let Some(value) = self.vision {
@@ -163,6 +266,12 @@ impl CapabilitiesDelta {
         }
         if let Some(value) = self.max_output {
             base.max_output = value;
+        }
+        if let Some(value) = self.thinking_format {
+            base.thinking_format = Some(value);
+        }
+        if let Some(value) = self.thinking_range {
+            base.thinking_range = Some(value);
         }
         base
     }
@@ -207,6 +316,120 @@ pub fn for_model(provider: &str, model: &str) -> Capabilities {
 /// high-output model would silently truncate long completions.
 pub fn max_output(provider: &str, model: &str) -> u64 {
     for_model(provider, model).max_output
+}
+
+// Shared level sets, ported from `open-sse/providers/thinkingLevels.js`.
+const LEVELS_BASE: &[&str] = &["none", "low", "medium", "high"];
+const LEVELS_ON_OFF: &[&str] = &["none", "thinking"];
+const LEVELS_OPENAI: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
+const LEVELS_LEVEL_MAX: &[&str] = &["none", "low", "medium", "high", "max"];
+const LEVELS_BUDGET_X: &[&str] = &["none", "low", "medium", "high", "xhigh", "max"];
+/// Gemini 3's `thinkingLevel` enum, which has no "off".
+const LEVELS_GEMINI: &[&str] = &["minimal", "low", "medium", "high"];
+const LEVELS_HI_MAX: &[&str] = &["none", "high", "max"];
+
+const CODEX_GPT_5_6: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const CODEX_GPT_5_6_ULTRA: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+const CODEX_GENERIC: &[&str] = &["low", "medium", "high", "xhigh"];
+
+/// Model-name overrides, first match wins. Mirrors `PATTERN_THINKING`.
+///
+/// A `None` scope matches every provider.
+const PATTERN_THINKING: &[(Option<&str>, &str, &[&str])] = &[
+    (Some("codex"), "*gpt-5.6-sol*", CODEX_GPT_5_6_ULTRA),
+    (Some("codex"), "*gpt-5.6-terra*", CODEX_GPT_5_6_ULTRA),
+    (Some("codex"), "*gpt-5.6-luna*", CODEX_GPT_5_6),
+    // Codex cannot disable thinking at all.
+    (None, "*codex*", CODEX_GENERIC),
+];
+
+/// The levels a thinking format accepts.
+///
+/// Formats absent from upstream's `FORMAT_LEVELS` table resolve to the base set,
+/// which is what its `|| L.base` does.
+const fn format_levels(format: ThinkingFormat) -> &'static [&'static str] {
+    match format {
+        ThinkingFormat::OpenAi => LEVELS_OPENAI,
+        ThinkingFormat::ClaudeAdaptive | ThinkingFormat::Kimi => LEVELS_LEVEL_MAX,
+        ThinkingFormat::ClaudeBudget => LEVELS_BUDGET_X,
+        ThinkingFormat::GeminiLevel => LEVELS_GEMINI,
+        ThinkingFormat::Zai | ThinkingFormat::MiniMax => LEVELS_ON_OFF,
+        ThinkingFormat::DeepSeek => LEVELS_HI_MAX,
+        ThinkingFormat::GeminiBudget
+        | ThinkingFormat::Qwen
+        | ThinkingFormat::Hunyuan
+        | ThinkingFormat::Step
+        | ThinkingFormat::TokenRouter
+        | ThinkingFormat::Kiro
+        | ThinkingFormat::Unrecognized => LEVELS_BASE,
+    }
+}
+
+/// Whether `pattern` matches `value`, with `*` as the only wildcard.
+///
+/// Upstream `matchPattern` compiles a case-insensitive anchored regex, so both
+/// sides are lowercased and the literal segments between wildcards are walked in
+/// order.
+fn glob_matches(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.to_ascii_lowercase();
+    let value = value.to_ascii_lowercase();
+    let segments: Vec<&str> = pattern.split('*').collect();
+    let Some((first, tail_segments)) = segments.split_first() else {
+        return false;
+    };
+    // No wildcard at all: an exact match.
+    if tail_segments.is_empty() {
+        return value == *first;
+    }
+    // The leading segment is anchored at the start of the value.
+    let Some(mut cursor) = value.strip_prefix(first) else {
+        return false;
+    };
+    let Some((last, middle)) = tail_segments.split_last() else {
+        return false;
+    };
+    // Interior segments may sit anywhere, in order. Leftmost match each.
+    for segment in middle {
+        let Some(at) = cursor.find(segment) else {
+            return false;
+        };
+        cursor = cursor.get(at + segment.len()..).unwrap_or_default();
+    }
+    // The trailing segment is anchored at the end.
+    cursor.ends_with(last)
+}
+
+/// The thinking levels a model accepts, or `None` when it does not reason.
+///
+/// Ports `getThinkingLevels`. Only the OpenAI thinking format consumes this, to
+/// decide whether a requested `max`/`ultra` survives or clamps down to `xhigh` —
+/// sending a level the model rejects is a 400, not a downgrade.
+pub fn thinking_levels(provider: &str, model: &str) -> Option<Vec<&'static str>> {
+    let caps = for_model(provider, model);
+    if !caps.reasoning {
+        return None;
+    }
+    let base_model = model.rsplit('/').next().unwrap_or(model);
+    let matched = PATTERN_THINKING
+        .iter()
+        .find(|entry| {
+            entry.0.is_none_or(|owner| owner == provider) && glob_matches(entry.1, base_model)
+        })
+        .map(|entry| entry.2);
+    let levels = matched.unwrap_or_else(|| caps.thinking_format.map_or(LEVELS_BASE, format_levels));
+    if caps.thinking_can_disable {
+        return Some(levels.to_vec());
+    }
+    // A model that cannot stop reasoning must not offer "none" as a choice.
+    Some(
+        levels
+            .iter()
+            .copied()
+            .filter(|level| *level != "none")
+            .collect(),
+    )
 }
 
 #[cfg(test)]

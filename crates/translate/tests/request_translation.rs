@@ -2,7 +2,7 @@
 
 use nullrouter_providers::Format;
 use nullrouter_translate::schema::DEFAULT_MAX_TOKENS;
-use nullrouter_translate::{request, translate_request};
+use nullrouter_translate::{RequestRoute, request, translate_request};
 use serde_json::{Value, json};
 
 fn openai_to_claude(body: &Value) -> Value {
@@ -620,9 +620,12 @@ fn gemini_schema_placeholder_fills_empty_object_tools() {
 fn dispatch_passes_through_matching_formats_but_rewrites_the_model() {
     let body = json!({ "messages": [{ "role": "user", "content": "hi" }], "model": "alias" });
     let result = translate_request(
-        Format::OpenAi,
-        Format::OpenAi,
-        "gpt-5",
+        RequestRoute {
+            source: Format::OpenAi,
+            target: Format::OpenAi,
+            provider: "openai",
+            model: "gpt-5",
+        },
         &body,
         true,
         DEFAULT_MAX_TOKENS,
@@ -642,9 +645,12 @@ fn dispatch_pivots_claude_to_gemini_through_openai() {
         "max_tokens": 100,
     });
     let result = translate_request(
-        Format::Claude,
-        Format::Gemini,
-        "gemini-2.5-pro",
+        RequestRoute {
+            source: Format::Claude,
+            target: Format::Gemini,
+            provider: "gemini",
+            model: "gemini-2.5-pro",
+        },
         &body,
         true,
         DEFAULT_MAX_TOKENS,
@@ -674,9 +680,12 @@ fn dispatch_carries_tool_name_map_for_claude_targets() {
         }],
     });
     let result = translate_request(
-        Format::OpenAi,
-        Format::Claude,
-        "claude-sonnet-4.5",
+        RequestRoute {
+            source: Format::OpenAi,
+            target: Format::Claude,
+            provider: "anthropic",
+            model: "claude-sonnet-4.5",
+        },
         &body,
         true,
         DEFAULT_MAX_TOKENS,

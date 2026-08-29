@@ -79,7 +79,8 @@ any future continuous animation.
 
 Provider execution and usage telemetry are implemented: requests reach real providers with
 bidirectional format translation, and usage metrics come from recorded requests with a live
-`/api/usage/stream` SSE feed.
+`/api/usage/stream` SSE feed. Reasoning intent is normalized to each provider's native thinking
+format across all 12 formats in the capability table.
 
 Remaining debt:
 
@@ -92,8 +93,6 @@ Remaining debt:
 - Providers needing bespoke executors (`kiro`, `cursor`, `codex`, `antigravity`, `gemini-cli`,
   `commandcode`, `grok-web`, `perplexity-web`, `ollama`) return an explicit 501 naming the provider
   rather than a wrong answer.
-- Provider-native thinking normalization is not applied: the registry's `thinkingFormat` is carried
-  in the capability table but not yet used to shape outbound requests.
 - State persists to JSON with a bounded ring of recent requests, not SQLite, and is in-memory unless
   `NULLROUTER_STATE_FILE` is set. A 9Router SQLite install can be imported (see README), but API keys
   cannot carry over because only digests are stored.
