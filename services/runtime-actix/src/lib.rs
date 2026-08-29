@@ -4,6 +4,7 @@ mod fusion;
 mod handlers;
 mod models;
 mod pipeline;
+mod pxpipe;
 mod requests;
 mod responses;
 mod routes;

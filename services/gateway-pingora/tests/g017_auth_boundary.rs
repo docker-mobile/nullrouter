@@ -160,6 +160,53 @@ fn host_only_route_rejects_non_loopback_peer() {
 }
 
 #[test]
+fn pxpipe_install_and_start_are_host_only() {
+    // Given: the two PXPIPE routes that can run `npm install pxpipe-proxy@latest`,
+    // whose lifecycle scripts execute as the API service.
+    let config = GatewayConfig::default();
+
+    for path in ["/api/pxpipe/install", "/api/pxpipe/start"] {
+        // When: the socket peer is remote, even with a valid dashboard session.
+        let remote = config.access_requirement(path, Some(REMOTE));
+        let local = config.access_requirement(path, Some(LOOPBACK));
+
+        // Then: it is refused before routing. Stricter than upstream, which allows
+        // these from any authenticated session: a session cookie taken from a browser
+        // on another machine must not install software on this host.
+        assert_eq!(remote, AccessRequirement::Forbidden, "{path}");
+        assert_eq!(
+            remote.decision(AuthorizationState::Authorized),
+            AccessDecision::Forbidden,
+            "{path} allowed a remote peer holding a valid session"
+        );
+        // And a local caller still needs a session — host-only is not a bypass.
+        assert_eq!(local, AccessRequirement::ApiSession, "{path}");
+    }
+}
+
+#[test]
+fn the_read_only_pxpipe_routes_stay_reachable_with_a_session() {
+    // Given: the routes that only report. Holding these to host-only would break the
+    // dashboard for every remote user without protecting anything: they install
+    // nothing and run no process.
+    let config = GatewayConfig::default();
+    for path in [
+        "/api/pxpipe/status",
+        "/api/pxpipe/health",
+        "/api/pxpipe/stats",
+        "/api/pxpipe/logs",
+        "/api/pxpipe/stop",
+        "/api/pxpipe/restart",
+    ] {
+        assert_eq!(
+            config.access_requirement(path, Some(REMOTE)),
+            AccessRequirement::ApiSession,
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn runtime_key_enforcement_allows_valid_key() {
     // Given: managed API-key enforcement is active for runtime routes.
     let config = GatewayConfig::default().with_managed_api_key_enforcement(true);

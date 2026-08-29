@@ -23,6 +23,7 @@ use nullrouter_execute::{
     collapse_stream_to_json, is_executor_supported, pipe_stream, unsupported_executor_message,
 };
 use nullrouter_providers::{Format, ServiceKind, model, target_format};
+use nullrouter_pxpipe::TokenSaver;
 use nullrouter_translate::state::Clock;
 use nullrouter_translate::{RequestRoute, StreamState, translate_request};
 use serde_json::Value;
@@ -146,6 +147,21 @@ pub(crate) struct ChatContext<'a> {
     pub source_format: Format,
     /// Model string exactly as the client sent it.
     pub requested_model: String,
+    /// PXPIPE settings for this request, read once from state.
+    ///
+    /// `None` means "not looked up", which is how every handler builds a context and
+    /// what [`Runtime::execute_chat`] fills in. Read once per request rather than per
+    /// attempt: a combo can attempt several models, and the answer cannot change
+    /// between them.
+    pub pxpipe: Option<PxpipeSettings>,
+}
+
+/// The PXPIPE settings that govern one request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct PxpipeSettings {
+    pub enabled: bool,
+    pub min_chars: u64,
+    pub timeout_ms: u64,
 }
 
 /// Shared execution dependencies.
@@ -161,6 +177,12 @@ pub struct Runtime {
     /// spend its refresh token. A provider that invalidates a reused refresh token
     /// would otherwise lock the account out.
     refreshes: RefreshCache,
+    /// The PXPIPE token saver, holding the Node worker.
+    ///
+    /// On the runtime rather than in `nullrouter-api` because the transform runs on
+    /// the request path: a worker anywhere else would report itself running while
+    /// every request here bypassed.
+    pxpipe: TokenSaver,
 }
 
 impl Default for Runtime {
@@ -177,6 +199,7 @@ impl Runtime {
             state: StateClient::from_env(),
             rotation: RotationState::new(),
             refreshes: RefreshCache::new(),
+            pxpipe: TokenSaver::discover(),
         }
     }
 
@@ -187,6 +210,90 @@ impl Runtime {
             state: StateClient::new(addr),
             rotation: RotationState::new(),
             refreshes: RefreshCache::new(),
+            pxpipe: TokenSaver::discover(),
+        }
+    }
+
+    /// Runtime whose token saver uses an explicit data directory, for tests.
+    ///
+    /// Without this a test would install into, and write events to, whatever
+    /// `DATA_DIR` or `$HOME` the suite happened to run under.
+    pub fn with_state_addr_and_pxpipe_dir(addr: &str, data_dir: &std::path::Path) -> Self {
+        Self {
+            executor: Executor::new(),
+            state: StateClient::new(addr),
+            rotation: RotationState::new(),
+            refreshes: RefreshCache::new(),
+            pxpipe: TokenSaver::new(nullrouter_pxpipe::Paths::new(data_dir)),
+        }
+    }
+
+    /// The token saver, for the control routes and the request path.
+    pub(crate) const fn token_saver(&self) -> &TokenSaver {
+        &self.pxpipe
+    }
+
+    /// The PXPIPE settings, from state.
+    ///
+    /// A state outage reads as disabled, which is the safe default: dispatching the
+    /// client's own body is always correct, and imaging it on a guess is not.
+    async fn pxpipe_settings(&self) -> PxpipeSettings {
+        let settings = self.state.routing_context().await.settings;
+        PxpipeSettings {
+            enabled: settings.pxpipe_enabled,
+            min_chars: settings.pxpipe_min_chars,
+            timeout_ms: settings.pxpipe_timeout_ms,
+        }
+    }
+
+    /// Run the body through PXPIPE, or `None` to dispatch it unchanged.
+    ///
+    /// Fails open at every step, and the one that matters most is the first: when the
+    /// saver is off — which is the default — this returns before doing any work at
+    /// all, so a router with PXPIPE disabled pays a settings read it was already
+    /// making and nothing else.
+    ///
+    /// Every attempt is recorded, including the skips, because "I turned it on and
+    /// nothing happened" is the common question and the recorded reason is the answer:
+    /// the package's own threshold counts compressible content rather than body size,
+    /// and it images only a few model families unless configured otherwise, so a large
+    /// request on the wrong model is refused for reasons no amount of guessing
+    /// recovers.
+    async fn compress_body(
+        &self,
+        context: &ChatContext<'_>,
+        target_format: Format,
+        upstream_model: &str,
+        body: &Value,
+    ) -> Option<Value> {
+        let settings = context.pxpipe.as_ref()?;
+        if !settings.enabled {
+            return None;
+        }
+        let serialised = serde_json::to_string(body).ok()?;
+        let gate = nullrouter_pxpipe::Gate {
+            enabled: true,
+            claude_format: target_format == Format::Claude,
+            format: format!("{target_format:?}").to_lowercase(),
+            min_chars: settings.min_chars,
+            timeout_ms: settings.timeout_ms,
+        };
+        let result = self
+            .pxpipe
+            .compress(&serialised, upstream_model, &gate)
+            .await;
+        if let Some(line) = result.summary.log_line() {
+            tracing::info!(provider = %upstream_model, "pxpipe: {line}");
+        }
+        // A replacement that will not parse is discarded rather than dispatched: a
+        // token saver must not be able to turn a valid request into a broken one.
+        let replaced = result.body?;
+        match serde_json::from_str::<Value>(&replaced) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                tracing::warn!(%error, "pxpipe returned a body that is not JSON; dispatching the original");
+                None
+            }
         }
     }
 
@@ -319,7 +426,10 @@ impl Runtime {
     /// only advances to the next model when it is one worth retrying elsewhere. A
     /// refusal that would recur on every model — a malformed request, say — is
     /// returned immediately rather than replayed against the whole combo.
-    pub(crate) async fn execute_chat(&self, context: ChatContext<'_>) -> HttpResponse {
+    pub(crate) async fn execute_chat(&self, mut context: ChatContext<'_>) -> HttpResponse {
+        if context.pxpipe.is_none() {
+            context.pxpipe = Some(self.pxpipe_settings().await);
+        }
         let resolved = self.resolve_targets(&context.requested_model).await;
         if resolved.strategy == ComboStrategy::Fusion && resolved.targets.len() > 1 {
             return self.execute_fusion(&context, &resolved.targets).await;
@@ -412,6 +522,7 @@ impl Runtime {
                     stream: context.stream,
                     source_format: context.source_format,
                     requested_model: context.requested_model.clone(),
+                    pxpipe: context.pxpipe,
                 };
                 match self.execute_for_target(&judge_context, first).await {
                     TargetOutcome::Responded(response) | TargetOutcome::Failed { response } => {
@@ -987,11 +1098,22 @@ impl Runtime {
             ceiling,
         );
 
+        // PXPIPE, the last saver before dispatch: bulky Claude-format context is
+        // rendered to dense images, which bill by pixel rather than by token.
+        //
+        // Applied to the *translated* body, after every other reshaping, because the
+        // package rewrites Anthropic content blocks and only the translated body is
+        // in that shape. It fails open in every case — see `compress_body`.
+        let dispatch_body = self
+            .compress_body(context, target_format, &upstream_model, &translated.body)
+            .await;
+        let dispatch_body = dispatch_body.as_ref().unwrap_or(&translated.body);
+
         let outcome = self
             .executor
             .execute(ExecuteRequest {
                 provider: &target.provider,
-                body: &translated.body,
+                body: dispatch_body,
                 stream: upstream_stream,
                 credentials,
             })

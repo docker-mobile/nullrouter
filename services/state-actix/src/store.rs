@@ -302,6 +302,25 @@ pub(crate) struct Settings {
     pub saml_attribute_email: String,
     #[serde(default)]
     pub saml_attribute_name: String,
+    // ── PXPIPE token saver ──
+    // Read by the runtime through `/internal/v1/routing-context`, and reported on
+    // the public `/api/settings` as upstream reports them: the dashboard's Token
+    // Saver page is the only place they are set.
+    /// Whether bulky Claude-format context is rendered to images before dispatch.
+    ///
+    /// Off by default, as upstream: it changes what the provider is sent, and a
+    /// token saver that turns itself on is not one a user chose.
+    #[serde(default)]
+    pub pxpipe_enabled: bool,
+    /// Whether a missing package may be installed on demand.
+    #[serde(default = "default_true")]
+    pub pxpipe_auto_install: bool,
+    /// Body size below which compression is not attempted (0 = the default).
+    #[serde(default = "default_pxpipe_min_chars")]
+    pub pxpipe_min_chars: u64,
+    /// Budget for one transform (0 = the default).
+    #[serde(default = "default_pxpipe_timeout_ms")]
+    pub pxpipe_timeout_ms: u64,
     // ── routing settings, read by the runtime ──
     // Persisted here, but omitted from the public `/api/settings` response,
     // whose shape is pinned by `dashboard_route_parity`. The runtime reads
@@ -355,6 +374,10 @@ pub(crate) struct SettingsView {
     pub saml_cert_set: bool,
     pub saml_attribute_email: String,
     pub saml_attribute_name: String,
+    pub pxpipe_enabled: bool,
+    pub pxpipe_auto_install: bool,
+    pub pxpipe_min_chars: u64,
+    pub pxpipe_timeout_ms: u64,
 }
 
 impl From<Settings> for SettingsView {
@@ -376,8 +399,26 @@ impl From<Settings> for SettingsView {
             saml_cert_set: !settings.saml_cert.is_empty(),
             saml_attribute_email: settings.saml_attribute_email,
             saml_attribute_name: settings.saml_attribute_name,
+            pxpipe_enabled: settings.pxpipe_enabled,
+            pxpipe_auto_install: settings.pxpipe_auto_install,
+            pxpipe_min_chars: settings.pxpipe_min_chars,
+            pxpipe_timeout_ms: settings.pxpipe_timeout_ms,
         }
     }
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+/// Upstream's `pxpipeMinChars` default.
+const fn default_pxpipe_min_chars() -> u64 {
+    25_000
+}
+
+/// Upstream's `pxpipeTimeoutMs` default.
+const fn default_pxpipe_timeout_ms() -> u64 {
+    15_000
 }
 
 fn default_fallback_strategy() -> String {
@@ -416,6 +457,10 @@ impl Default for Settings {
             saml_cert: String::new(),
             saml_attribute_email: String::new(),
             saml_attribute_name: String::new(),
+            pxpipe_enabled: false,
+            pxpipe_auto_install: default_true(),
+            pxpipe_min_chars: default_pxpipe_min_chars(),
+            pxpipe_timeout_ms: default_pxpipe_timeout_ms(),
             fallback_strategy: default_fallback_strategy(),
             sticky_round_robin_limit: default_sticky_limit(),
             combo_strategy: default_combo_strategy(),
@@ -841,6 +886,18 @@ impl StateStore {
             }
             if let Some(saml_attribute_name) = update.saml_attribute_name {
                 snapshot.settings.saml_attribute_name = saml_attribute_name;
+            }
+            if let Some(pxpipe_enabled) = update.pxpipe_enabled {
+                snapshot.settings.pxpipe_enabled = pxpipe_enabled;
+            }
+            if let Some(pxpipe_auto_install) = update.pxpipe_auto_install {
+                snapshot.settings.pxpipe_auto_install = pxpipe_auto_install;
+            }
+            if let Some(pxpipe_min_chars) = update.pxpipe_min_chars {
+                snapshot.settings.pxpipe_min_chars = pxpipe_min_chars;
+            }
+            if let Some(pxpipe_timeout_ms) = update.pxpipe_timeout_ms {
+                snapshot.settings.pxpipe_timeout_ms = pxpipe_timeout_ms;
             }
             snapshot.settings.clone()
         })
@@ -1411,6 +1468,10 @@ pub(crate) struct SettingsUpdate {
     pub saml_cert: Option<String>,
     pub saml_attribute_email: Option<String>,
     pub saml_attribute_name: Option<String>,
+    pub pxpipe_enabled: Option<bool>,
+    pub pxpipe_auto_install: Option<bool>,
+    pub pxpipe_min_chars: Option<u64>,
+    pub pxpipe_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

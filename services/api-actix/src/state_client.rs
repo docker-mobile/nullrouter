@@ -127,6 +127,73 @@ impl RuntimeClient {
             body,
         })
     }
+
+    /// `GET /internal/pxpipe/{action}` on the runtime.
+    ///
+    /// The worker holding the transform lives there, so the routes that report or
+    /// change its state are proxied rather than answered here — see
+    /// `crate::pxpipe`. `/internal/*` is refused by the gateway from outside, so
+    /// this is reachable only from a service on the loopback.
+    pub(crate) async fn pxpipe_get(&self, action: &str) -> Option<ForwardedResponse> {
+        self.relay(self.client.get(self.pxpipe_url(action))).await
+    }
+
+    /// `POST /internal/pxpipe/{action}` on the runtime.
+    pub(crate) async fn pxpipe_post(&self, action: &str, body: &[u8]) -> Option<ForwardedResponse> {
+        self.relay(
+            self.client
+                .post(self.pxpipe_url(action))
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.to_vec()),
+        )
+        .await
+    }
+
+    fn pxpipe_url(&self, action: &str) -> String {
+        format!("{}/internal/pxpipe/{action}", self.base)
+    }
+
+    /// Send one request and capture the reply verbatim.
+    ///
+    /// The upstream status is preserved rather than normalised: the runtime answers
+    /// 409 for "not installed" and 502 for "will not load", and those call for
+    /// different actions from whoever is reading.
+    async fn relay(&self, request: reqwest::RequestBuilder) -> Option<ForwardedResponse> {
+        let response = request
+            .send()
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(%error, "runtime unreachable for a pxpipe control call");
+            })
+            .ok()?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("application/json")
+            .to_owned();
+        let body = response.text().await.ok()?;
+        Some(ForwardedResponse {
+            status,
+            content_type,
+            body,
+        })
+    }
+}
+
+impl ForwardedResponse {
+    /// Relay this reply to the caller unchanged.
+    pub(crate) fn into_response(self) -> actix_web::HttpResponse {
+        let status = actix_web::http::StatusCode::from_u16(self.status)
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY);
+        crate::responses::passthrough(status, &self.content_type, self.body)
+    }
+
+    /// This reply's body as JSON, when it is JSON.
+    pub(crate) fn json(&self) -> Option<serde_json::Value> {
+        serde_json::from_str(&self.body).ok()
+    }
 }
 
 /// The outcome of reading one connection record.

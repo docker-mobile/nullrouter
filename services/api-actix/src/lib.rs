@@ -19,6 +19,7 @@ mod provider_tools;
 mod providers;
 mod proxy_pool_tools;
 mod proxy_pools;
+mod pxpipe;
 mod responses;
 mod routes;
 mod settings_defaults;

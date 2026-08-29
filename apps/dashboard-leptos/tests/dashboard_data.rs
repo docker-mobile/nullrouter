@@ -7,7 +7,7 @@ use nullrouter_dashboard_wasm::dashboard::{
     basic_chat_state, cli_tool_detail_state, cli_tools, combo_summaries, console_log_state,
     media_providers_web_state, model_catalog, profile_state, provider_detail_state,
     provider_groups, provider_new_state, proxy_pools_state, quota_tracker_state, skill_summaries,
-    token_saver_state, translator_state, usage_snapshot,
+    translator_state, usage_snapshot,
 };
 use nullrouter_dashboard_wasm::ui::{DashboardRoute, DashboardSection, dashboard_sections};
 
@@ -120,7 +120,6 @@ fn parity_panel_data_is_truthful_about_unwired_backend_execution() {
     // Given: compact data slices used by the new WASM route panels.
     let combos = combo_summaries();
     let quota = quota_tracker_state();
-    let token_saver = token_saver_state();
     let tools = cli_tools();
     let skills = skill_summaries();
 
@@ -133,8 +132,6 @@ fn parity_panel_data_is_truthful_about_unwired_backend_execution() {
     assert!(combos.iter().all(|combo| !combo.persisted));
     assert!(!quota.live_limits_connected);
     assert!(quota.rows.is_empty());
-    assert!(!token_saver.rtk_wired);
-    assert!(!token_saver.headroom_wired);
     assert!(tool_names.contains(&"Codex CLI"));
     assert!(tool_names.contains(&"MITM Bridge"));
     assert!(tools.iter().all(|tool| !tool.status_checked));

@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](rust-toolchain.toml)
 [![Edition](https://img.shields.io/badge/edition-2024-blue?logo=rust)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-MIT-green)](Cargo.toml)
-[![Tests](https://img.shields.io/badge/tests-789-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-1117-brightgreen)](#development)
 
 nullrouter is a Rust microservice port of [9Router](https://github.com/decolua/9router): a local
 gateway that puts every AI provider you have credentials for behind a single OpenAI-compatible
@@ -165,7 +165,8 @@ service refuses to start against a non-loopback upstream.
 |---|---|
 | `crates/providers` | The registry: 117 providers, 850 models, 685 per-model capability rows, 59 providers with non-chat service endpoints. Wire-format detection, model/alias resolution |
 | `crates/translate` | Bidirectional translation across OpenAI Chat, OpenAI Responses, Claude, and Gemini — request and incremental streaming response |
-| `crates/execute` | Provider HTTP: auth descriptors, URL fallback, per-status retry, SSE piping, error classification, per-connection outbound proxy |
+| `crates/execute` | Provider HTTP: auth descriptors, URL fallback, per-status retry, SSE piping, error classification, per-connection outbound proxy, OAuth refresh grants |
+| `crates/pxpipe` | The PXPIPE token saver: npm install management, the Node transform worker, the eligibility gate, and the event log the dashboard aggregates |
 | `crates/contracts` | Typed response contracts shared by services and the WASM dashboard |
 
 ### How the gateway routes
@@ -380,11 +381,15 @@ large majority of the registry, including `openai`, `anthropic`, `gemini`, `groq
 `openrouter`, `mistral`, `cerebras`, `together`, `xai`, plus the dynamic `openai-compatible-*` and
 `anthropic-compatible-*` families you define yourself.
 
-Providers whose wire protocol needs a bespoke executor return an explicit **501 naming the provider
-and its protocol**, rather than a plausible wrong answer:
+`ollama` (including `ollama-local`, whose host comes from the connection), `gemini-cli` and
+`commandcode` execute too. None of them needs a distinct executor: what they need is a request
+envelope, a per-request header, or a URL suffix, and those are hooks on the shared path rather than
+three more code paths.
 
-`kiro` · `cursor` · `codex` · `antigravity` · `gemini-cli` · `commandcode` · `grok-web` ·
-`perplexity-web` · `ollama`
+Providers whose wire protocol needs genuine request signing or a binary protocol return an explicit
+**501 naming the provider and its protocol**, rather than a plausible wrong answer:
+
+`kiro` · `cursor` · `codex` · `antigravity` · `grok-web` · `perplexity-web`
 
 A test asserts that more than 75% of registry entries with a transport remain executable.
 
@@ -404,8 +409,12 @@ and are safe only because that refusal holds.
 `refreshToken` never leave through `/api/*`.
 
 **Host-only routes require a loopback peer.** MITM control, MCP, tunnel control, headroom process
-control, password reset, and the OAuth auto-import helpers return 403 to any non-loopback caller even
-with a valid session.
+control, password reset, the OAuth auto-import helpers, and PXPIPE install/start return 403 to any
+non-loopback caller even with a valid session. The PXPIPE pair is stricter than upstream, which allows
+them from any authenticated dashboard session: they run `npm install pxpipe-proxy@latest`, whose
+lifecycle scripts execute as the API service, and a session cookie taken from a browser on another
+machine should not be able to install software on this one. The package name is fixed and never read
+from the request.
 
 **Forwarded headers are stripped and re-stamped.** `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and the
 trusted `x-9r-*` pair are removed from inbound requests, then the real peer IP is stamped — a client
@@ -493,7 +502,13 @@ Embedding · Text to Image · Text To Speech · Speech To Text · Web Fetch & Se
 Skills · MITM · Console Log · Translator · Settings · Pricing · Migrate.
 
 Sections whose backend is not ported render as inactive rather than advertising a feature that does
-not work.
+not work. **Token Saver** is live: it installs and repairs the PXPIPE package, starts and stops the
+transform, turns it on for the request path, and shows every attempt with the reason it went the way
+it did. Its savings figures are labelled estimates everywhere they appear — they come from character
+counts and image pixel areas, not from provider-billed usage, and the Usage page holds the recorded
+cost of each request. When the service holding the transform is unreachable the panel reports the
+running state as **Unknown** rather than as stopped, because a claim about a process it never reached
+would send someone to fix the wrong thing.
 
 ## Migrating from 9Router
 
@@ -589,7 +604,7 @@ misleading `501`.
 
 **Refused with an explicit 501:**
 
-- **Bespoke provider executors** — the nine protocols listed [above](#what-executes-and-what-refuses).
+- **Bespoke provider executors** — the six protocols listed [above](#what-executes-and-what-refuses).
 - **Headroom process control.** Detection is real: it finds a Python ≥ 3.10, asks pip which packages
   it holds, and reads the install log. Installing extras and starting/restarting the daemon are
   refused, because this service does not own that Python environment and has no supervisor for a
@@ -598,21 +613,28 @@ misleading `501`.
 - **Tunnel / Tailscale control.** Status reports honestly; every mutation is refused.
 - **MITM control** (`/api/cli-tools/antigravity-mitm`) and its alias map. URL validation is real.
 - **CLI tool config mutation** and Cowork MCP registry/tool discovery.
-- **Provider OAuth flows** (`/api/oauth/*`) — device-code, PKCE browser flows, and vendor token
-  imports for codex/cursor/kiro/gitlab/iflow. An existing `accessToken` on a connection is used for
-  provider calls, and `refreshToken` plus the registry's refresh descriptors are stored, but nothing
-  performs a refresh grant against a provider token URL: an expired token has to be replaced by hand.
-  (Dashboard *sign-in* via OIDC is a separate subsystem and is fully implemented.)
+- **Provider OAuth *authorisation* flows** (`/api/oauth/*`) — device-code, PKCE browser flows, and
+  vendor token imports for codex/cursor/kiro/gitlab/iflow. Getting a provider token for the first time
+  has to happen outside this port. (Dashboard *sign-in* via OIDC is a separate subsystem and is fully
+  implemented, and *refreshing* an existing provider token is implemented — see below.)
 - **Proxy pool testing and relay deployment** to Cloudflare/Deno/Vercel. Pool CRUD is real; deploying
   a relay is not. Per-connection outbound proxies work.
-- **Provider connection testing** (`/api/providers/{id}/test`, `test-models`, `test-batch`),
-  suggested-model probing, and `/api/models/test`.
+- **Suggested-model probing** and `/api/models/test`. (`/api/providers/{id}/test`, `test-models`
+  and `test-batch` are implemented and make real provider calls.)
 - **Translator execution and log persistence.** Steps 1–3 validate and echo their shape; they do not
   translate. (The translation engine itself is real and used on the live `/v1` path — this is the
   dashboard's step-by-step inspector.)
 - **Service lifecycle** (`/api/shutdown`, `/api/version/update`).
 - **Database settings and proxy connectivity tests** under `/api/settings/*`.
 - **SAML assertion consumption** — see [Security model](#security-model).
+
+**Provider token refresh is real.** A token within its provider's refresh lead time is exchanged
+before the call rather than after a 401, the rotation is persisted, and concurrent requests on one
+expiring connection share a single exchange so a provider that invalidates a reused refresh token
+cannot lock the account out. A rejected refresh token puts the connection into a re-auth cooldown
+instead of retrying forever. Five providers (`kiro`, `github`, `vertex`, `vertex-partner`, `cursor`)
+declare no refresh endpoint in upstream's own registry and are reported as needing manual replacement
+rather than silently retried.
 
 **Honest-but-empty surfaces:** MCP SSE at `/api/mcp/{plugin}/sse` connects and then reports
 `backend_connected: false` with a reason; posting a message returns 503 rather than pretending to
@@ -625,8 +647,23 @@ backend.
 selection (only a provider's first `transport` is read, so `xiaomi-tokenplan`'s Claude transport is
 unreachable).
 
-**Deliberately excluded, not deferred:** `pxpipe` (8 routes) and `/v1/videos/*`. `pxpipe` is an
-external binary subsystem that upstream itself keeps commented out of its own sidebar.
+**PXPIPE (the Token Saver page, 8 routes)** is implemented, and is the one feature here that cannot
+be pure Rust. It renders bulky Claude-format context into dense PNGs, which bill by pixel rather than
+by token; the compression itself is the `pxpipe-proxy` npm package, and reimplementing PNG-packed
+context rendering would be a different program with different output, not a port. So `crates/pxpipe`
+installs that package and drives it through a long-lived `node` worker over a line-delimited pipe —
+one worker per router rather than one per request, because Node's start-up would otherwise eat the
+saving. It fails open at every step: no Node, no package, a timeout, a malformed reply, a Node below
+the package's `>=20.19` requirement — each dispatches the original request unchanged and records why.
+The worker lives in `nullrouter-runtime`, since that is where the transform runs; `nullrouter-api`
+proxies the control routes to it and reads the event log directly. Upstream ships this surface built
+but unreachable (its toggle sits behind a `{false && …}`, its sidebar entry commented out, marked
+"experimental"); it is reachable here, and off by default.
+
+`/v1/videos/*` is implemented: `generations`, `edits` and `extensions` create a job, `GET /v1/videos/{id}`
+polls it, and a poll is pinned to the account that created the job — a different account cannot see
+another's job id. Only 401/403/429 rotate to another account; a provider-side job failure is that
+job's answer and is not retried elsewhere.
 
 **Storage:** state is a JSON file with a bounded 1000-request ring, not SQLite. A 9Router SQLite
 install imports into it.
@@ -634,7 +671,7 @@ install imports into it.
 ## Development
 
 ```bash
-cargo test --workspace          # 789 tests, 123 integration files
+cargo test --workspace          # 1117 tests, 132 integration files
 cargo clippy --workspace --all-targets
 cargo fmt --all --check
 ```
@@ -643,19 +680,34 @@ Tests by area:
 
 | Area | Integration files | Tests |
 |---|---|---|
-| `apps/dashboard-leptos` | 24 | 247 |
-| `services/api-actix` | 22 | 108 |
-| `services/state-actix` | 12 | 70 |
-| `services/gateway-pingora` | 12 | 55 |
-| `crates/execute` | 2 | 51 |
-| `services/runtime-actix` | 12 | 40 |
-| `crates/translate` | 3 | 91 |
-| `crates/providers` | — | 37 |
+| `apps/dashboard-leptos` | 26 | 302 |
+| `crates/translate` | 4 | 149 |
+| `services/api-actix` | 24 | 133 |
+| `crates/execute` | 5 | 102 |
+| `services/runtime-actix` | 18 | 95 |
+| `services/state-actix` | 14 | 78 |
+| `crates/pxpipe` | 2 | 68 |
+| `services/gateway-pingora` | 12 | 57 |
+| `crates/providers` | — | 43 |
 | `services/dashboard-actix` | 10 | 34 |
 | `services/events-actix` | 7 | 20 |
-| `services/catalog-actix` | 6 | 12 |
 | `crates/contracts` | 2 | 13 |
+| `services/catalog-actix` | 6 | 12 |
 | `services/auth-actix` | 2 | 11 |
+
+Two suites need a real `node` on the `PATH` and **fail rather than skip** without one, because the
+PXPIPE transform is a JavaScript library and a suite that passed quietly would report the feature as
+covered when nothing had run: `crates/pxpipe/tests/worker.rs` drives a real worker process, and
+`services/runtime-actix/tests/pxpipe_request_path.rs` asserts that the transformed body is what the
+provider actually receives. A third, `crates/pxpipe/tests/real_package.rs`, installs `pxpipe-proxy`
+from npm and is off unless asked for:
+
+```bash
+PXPIPE_TEST_INSTALL=1 cargo test -p nullrouter-pxpipe --test real_package
+```
+
+It earns its keep: it is what caught a reason mapping written against a shape the package does not
+emit, which every stub test had passed.
 
 Beyond unit and contract coverage, the suite includes **boundary tests** (what each service must
 refuse), **characterization tests** (upstream behaviour pinned so a port cannot drift), and **regression

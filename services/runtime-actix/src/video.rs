@@ -268,6 +268,9 @@ impl Runtime {
             body: Value::Null,
             stream: false,
             source_format: nullrouter_providers::Format::OpenAi,
+            // A video call sends bytes through untouched, and its body is not a
+            // Claude message list; there is nothing for the token saver to image.
+            pxpipe: None,
             requested_model: if model.is_empty() {
                 target.provider.clone()
             } else {

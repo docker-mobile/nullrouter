@@ -11,6 +11,9 @@ async fn main() -> std::io::Result<()> {
     // Holds a connection pool, so it is built once and shared across workers.
     let state = web::Data::new(StateClient::from_env());
     let runtime = web::Data::new(RuntimeClient::from_env());
+    // Reads the install directory and the event log. Shared rather than per-worker
+    // so every worker reports the same install state.
+    let token_saver = web::Data::new(nullrouter_pxpipe::TokenSaver::discover());
 
     HttpServer::new(move || {
         App::new()
@@ -19,6 +22,7 @@ async fn main() -> std::io::Result<()> {
             // they extract `web::Data<StateClient>`.
             .app_data(state.clone())
             .app_data(runtime.clone())
+            .app_data(token_saver.clone())
             .configure(configure)
     })
     .bind((server.host.as_str(), server.port))?

@@ -22,6 +22,7 @@ mod proxy_pools;
 mod section;
 mod settings;
 mod shell;
+mod token_saver;
 mod translator;
 mod usage;
 
@@ -45,7 +46,7 @@ pub use navigation::{
     dashboard_primary_navigation, dashboard_search, dashboard_section_path,
     dashboard_system_navigation,
 };
-use parity::{QuotaTrackerPanel, SkillsPanel, TokenSaverPanel};
+use parity::{QuotaTrackerPanel, SkillsPanel};
 use pricing::PricingSettingsPanel;
 use providers::{ModelsPanel, ProviderDetailPanel, ProviderNewPanel, ProvidersPanel};
 use proxy_pools::ProxyPoolsPanel;
@@ -53,6 +54,7 @@ pub use section::{DashboardRoute, DashboardSection, dashboard_sections};
 use settings::SettingsPanel;
 pub use shell::dashboard_shell_visible_contract;
 use shell::{Header, HeaderPanel, ShellSignals, Sidebar};
+use token_saver::TokenSaverPanel;
 use translator::TranslatorPanel;
 use usage::UsagePanel;
 

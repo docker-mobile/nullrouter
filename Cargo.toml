@@ -5,6 +5,7 @@ members = [
     "crates/contracts",
     "crates/execute",
     "crates/providers",
+    "crates/pxpipe",
     "crates/translate",
     "services/auth-actix",
     "services/api-actix",
@@ -20,6 +21,7 @@ default-members = [
     "crates/contracts",
     "crates/execute",
     "crates/providers",
+    "crates/pxpipe",
     "crates/translate",
     "services/auth-actix",
     "services/api-actix",
@@ -58,6 +60,7 @@ mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
 nullrouter-execute = { path = "crates/execute" }
 nullrouter-providers = { path = "crates/providers" }
+nullrouter-pxpipe = { path = "crates/pxpipe" }
 nullrouter-translate = { path = "crates/translate" }
 futures-util = "0.3"
 # Session ids for providers that require a per-request correlation header.

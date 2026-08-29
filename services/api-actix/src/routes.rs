@@ -3,7 +3,7 @@ use actix_web::web;
 use crate::{
     catalog, cli_tools, combos, handlers, headroom, keys, lifecycle, locale, media_providers,
     migrate, model_tools, oauth, provider_nodes, provider_tools, providers, proxy_pool_tools,
-    proxy_pools, settings_defaults, translator, tunnel, usage,
+    proxy_pools, pxpipe, settings_defaults, translator, tunnel, usage,
 };
 
 pub fn configure(config: &mut web::ServiceConfig) {
@@ -76,5 +76,6 @@ pub fn configure(config: &mut web::ServiceConfig) {
     settings_defaults::configure(config);
     provider_nodes::configure(config);
     lifecycle::configure(config);
+    pxpipe::configure(config);
     config.service(web::resource("/{tail:.*}").route(web::to(handlers::not_found)));
 }

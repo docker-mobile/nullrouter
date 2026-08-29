@@ -484,6 +484,10 @@ struct SettingsRequest {
     saml_cert: Option<String>,
     saml_attribute_email: Option<String>,
     saml_attribute_name: Option<String>,
+    pxpipe_enabled: Option<bool>,
+    pxpipe_auto_install: Option<bool>,
+    pxpipe_min_chars: Option<u64>,
+    pxpipe_timeout_ms: Option<u64>,
 }
 
 async fn get_settings(store: web::Data<StateStore>) -> HttpResponse {
@@ -512,6 +516,10 @@ async fn update_settings(store: web::Data<StateStore>, body: web::Bytes) -> Http
         saml_cert: request.saml_cert,
         saml_attribute_email: request.saml_attribute_email,
         saml_attribute_name: request.saml_attribute_name,
+        pxpipe_enabled: request.pxpipe_enabled,
+        pxpipe_auto_install: request.pxpipe_auto_install,
+        pxpipe_min_chars: request.pxpipe_min_chars,
+        pxpipe_timeout_ms: request.pxpipe_timeout_ms,
     };
     store_json(
         StatusCode::OK,

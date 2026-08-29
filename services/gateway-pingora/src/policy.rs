@@ -26,6 +26,16 @@ const HOST_ONLY_PREFIXES: &[&str] = &[
     "/api/headroom/start",
     "/api/headroom/stop",
     "/api/headroom/proxy",
+    // `npm install pxpipe-proxy@latest`, whose lifecycle scripts run as the API
+    // service. The package name is fixed and never taken from the request, so it is
+    // not an arbitrary-code path, but it installs and executes third-party code on
+    // the host — the same reason `tailscale-install` is here. Upstream allows it from
+    // any authenticated dashboard session; a session cookie stolen from a browser on
+    // another machine should not be able to install software on this one.
+    "/api/pxpipe/install",
+    // `start` can install too, when `pxpipeAutoInstall` is on, so it is held to the
+    // same rule. Leaving it open would make the restriction above decorative.
+    "/api/pxpipe/start",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

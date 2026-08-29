@@ -25,13 +25,6 @@ pub struct QuotaRow {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-pub struct TokenSaverState {
-    pub rtk_wired: bool,
-    pub headroom_wired: bool,
-    pub status_label: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct CliToolSummary {
     pub id: &'static str,
     pub name: &'static str,
@@ -92,14 +85,6 @@ pub const fn quota_tracker_state() -> QuotaTrackerState {
         live_limits_connected: false,
         source_label: "Provider quota API not connected",
         rows: Vec::new(),
-    }
-}
-
-pub const fn token_saver_state() -> TokenSaverState {
-    TokenSaverState {
-        rtk_wired: false,
-        headroom_wired: false,
-        status_label: "Settings preview only",
     }
 }
 

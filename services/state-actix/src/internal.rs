@@ -628,6 +628,10 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
                 "fallbackStrategy": settings.fallback_strategy,
                 "comboStrategy": settings.combo_strategy,
                 "comboStickyRoundRobinLimit": settings.combo_sticky_round_robin_limit,
+                "pxpipeEnabled": settings.pxpipe_enabled,
+                "pxpipeAutoInstall": settings.pxpipe_auto_install,
+                "pxpipeMinChars": settings.pxpipe_min_chars,
+                "pxpipeTimeoutMs": settings.pxpipe_timeout_ms,
             },
         }),
     )

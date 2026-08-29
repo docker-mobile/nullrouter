@@ -103,6 +103,18 @@ pub(crate) struct RoutingSettings {
     /// Requests to keep on one combo model before rotating.
     #[serde(default)]
     pub combo_sticky_round_robin_limit: Option<u32>,
+    /// Whether the PXPIPE token saver is on.
+    #[serde(default)]
+    pub pxpipe_enabled: bool,
+    /// Whether a missing PXPIPE package may be installed on demand.
+    #[serde(default)]
+    pub pxpipe_auto_install: bool,
+    /// Body size below which PXPIPE compression is not attempted.
+    #[serde(default)]
+    pub pxpipe_min_chars: u64,
+    /// Budget for one PXPIPE transform.
+    #[serde(default)]
+    pub pxpipe_timeout_ms: u64,
 }
 
 /// Usage report sent after a request finishes.

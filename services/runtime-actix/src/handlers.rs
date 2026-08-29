@@ -102,6 +102,8 @@ pub(crate) async fn gemini_generation(
             // The body is already Gemini-shaped on this endpoint.
             source_format: Format::Gemini,
             requested_model: model,
+            // Read inside `execute_chat`, once per request.
+            pxpipe: None,
         })
         .await)
 }
@@ -345,6 +347,7 @@ async fn chat_entrypoint(
             stream,
             source_format,
             requested_model: model,
+            pxpipe: None,
         })
         .await)
 }
@@ -410,6 +413,8 @@ async fn passthrough_entrypoint(
             // No translation: the provider receives the client's shape.
             source_format: Format::OpenAi,
             requested_model: model.to_owned(),
+            // Passthrough sends the client's own bytes; nothing reshapes them.
+            pxpipe: None,
         })
         .await)
 }

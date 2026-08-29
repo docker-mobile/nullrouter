@@ -1,4 +1,4 @@
-use crate::dashboard::{SkillSummary, quota_tracker_state, skill_summaries, token_saver_state};
+use crate::dashboard::{SkillSummary, quota_tracker_state, skill_summaries};
 use leptos::prelude::*;
 
 const PARITY_STYLES: &str = r"
@@ -62,30 +62,6 @@ pub(super) fn QuotaTrackerPanel() -> impl IntoView {
 }
 
 #[component]
-pub(super) fn TokenSaverPanel() -> impl IntoView {
-    let state = token_saver_state();
-
-    view! {
-        <ParityStyles />
-        <div class="nr-panel-stack">
-            <article class="nr-card">
-                <div class="nr-card-head between">
-                    <div>
-                        <h2><span class="nr-card-icon">"sav"</span>"Token Saver"</h2>
-                        <p>"RTK and headroom controls mirror upstream settings, but persistence is not wired in this WASM slice."</p>
-                    </div>
-                    <span class="nr-status-pill is-degraded"><span></span>{state.status_label}</span>
-                </div>
-                <div class="nr-parity-grid">
-                    <TokenSaverTile label="RTK compression" enabled=state.rtk_wired detail="Request token compaction setting awaits host settings API." />
-                    <TokenSaverTile label="Headroom service" enabled=state.headroom_wired detail="External headroom endpoint toggle is visible but disabled." />
-                </div>
-            </article>
-        </div>
-    }
-}
-
-#[component]
 pub(super) fn SkillsPanel() -> impl IntoView {
     view! {
         <ParityStyles />
@@ -107,21 +83,6 @@ pub(super) fn SkillsPanel() -> impl IntoView {
                 </div>
             </article>
         </div>
-    }
-}
-
-#[component]
-fn TokenSaverTile(label: &'static str, enabled: bool, detail: &'static str) -> impl IntoView {
-    view! {
-        <button type="button" class="nr-setting-row" disabled>
-            <span>
-                <strong>{label}</strong>
-                <small>{detail}</small>
-            </span>
-            <span class="nr-toggle" class:is-on=move || enabled aria-hidden="true">
-                <span></span>
-            </span>
-        </button>
     }
 }
 

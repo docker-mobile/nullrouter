@@ -1,0 +1,412 @@
+/* Token Saver panel (PXPIPE).
+ *
+ * Extends the shared card vocabulary (`.nr-card`, `.nr-button`,
+ * `.nr-panel-stack`, `.nr-status-pill`, `.nr-table`) rather than restyling it, so
+ * the page still reads as part of the dashboard. Only what this surface adds is
+ * defined here: the fact grid, the two setting rows, the figure grid, and the
+ * daily savings bars.
+ *
+ * Motion comes from `motion.css` (`.nr-progress-indeterminate`, `.nr-anim-rise`);
+ * no keyframes are declared in this file.
+ *
+ * State is never carried by colour alone. Every pill and bar sits beside text
+ * saying the same thing: an outcome renders its reason as words, and each bar
+ * carries its own figure in a screen-reader label. Colour is redundant emphasis,
+ * so the panel survives greyscale, low vision, and a forced-colours mode.
+ */
+
+.nr-token-saver {
+  --token-saver-gap: 12px;
+}
+
+/* Screen-reader-only text. Defined here too because the panel is also served in
+ * the CSR build, which links no stylesheet of its own. */
+.nr-token-saver .nr-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── warnings and outcomes ───────────────────────────────────────────────── */
+
+/* One shape for every sentence the router hands back, so a refusal, an
+ * unreachable service, and a version shortfall all read the same way. */
+.nr-token-saver-warning,
+.nr-token-saver-done {
+  margin: 10px 0 0;
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--warn, #fbbf24);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-dark-2);
+}
+
+.nr-token-saver-done {
+  border-left-color: var(--ok, #4ade80);
+}
+
+.nr-token-saver-live {
+  margin-top: 10px;
+}
+
+.nr-token-saver-live > p {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-dark-2);
+}
+
+/* ── facts ───────────────────────────────────────────────────────────────── */
+
+.nr-token-saver-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--token-saver-gap);
+  margin: 16px 0 0;
+}
+
+.nr-token-saver-fact {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 10px 12px;
+}
+
+.nr-token-saver-fact dt {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dark-3, var(--text-dark-2));
+}
+
+.nr-token-saver-fact dd {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dark);
+}
+
+/* ── setting rows ────────────────────────────────────────────────────────── */
+
+.nr-token-saver-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--token-saver-gap);
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-dark);
+}
+
+.nr-token-saver-row > div:first-child {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.nr-token-saver-row-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.nr-token-saver-row-detail {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-dark-2);
+}
+
+/* ── toggle ──────────────────────────────────────────────────────────────── */
+
+/* A real button with `role="switch"`, not a styled checkbox: it carries
+ * `aria-checked`, and its label says On or Off in words beside the track. */
+.nr-token-saver .nr-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-dark-2);
+  font-size: 0.82rem;
+}
+
+.nr-token-saver .nr-toggle:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.nr-token-saver .nr-toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+  border: 1px solid var(--border-dark);
+  border-radius: 999px;
+  background: var(--surface-dark-2);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.nr-token-saver .nr-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-dark-2);
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.nr-token-saver .nr-toggle.is-on .nr-toggle-track {
+  border-color: var(--ok, #4ade80);
+  background: color-mix(in srgb, var(--ok, #4ade80) 28%, transparent);
+}
+
+.nr-token-saver .nr-toggle.is-on .nr-toggle-knob {
+  transform: translateX(18px);
+  background: var(--ok, #4ade80);
+}
+
+.nr-token-saver .nr-toggle:focus-visible .nr-toggle-track {
+  outline: 2px solid var(--accent, #60a5fa);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nr-token-saver .nr-toggle-track,
+  .nr-token-saver .nr-toggle-knob {
+    transition: none;
+  }
+}
+
+/* ── threshold ───────────────────────────────────────────────────────────── */
+
+.nr-token-saver-threshold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nr-token-saver-threshold input {
+  width: 9ch;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 6px 8px;
+  color: var(--text-dark);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.nr-token-saver-threshold input:focus-visible {
+  outline: 2px solid var(--accent, #60a5fa);
+  outline-offset: 1px;
+}
+
+/* ── controls ────────────────────────────────────────────────────────────── */
+
+.nr-token-saver-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-dark);
+}
+
+/* ── health checklist ────────────────────────────────────────────────────── */
+
+.nr-token-saver-checks {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nr-token-saver-checks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  border: 1px solid var(--border-dark);
+  border-left: 3px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
+.nr-token-saver-checks li.is-ok {
+  border-left-color: var(--ok, #4ade80);
+}
+
+.nr-token-saver-checks li.is-bad {
+  border-left-color: var(--err, #f87171);
+}
+
+/* The outcome in words, so the border colour is redundant rather than load-bearing. */
+.nr-token-saver-checks li.is-ok .nr-token-saver-check-label::after {
+  content: " — passed";
+  color: var(--text-dark-2);
+}
+
+.nr-token-saver-checks li.is-bad .nr-token-saver-check-label::after {
+  content: " — failed";
+  color: var(--text-dark-2);
+}
+
+.nr-token-saver-check-label {
+  color: var(--text-dark);
+}
+
+.nr-token-saver-check-detail {
+  display: inline-block;
+  color: var(--text-dark-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.74rem;
+}
+
+/* ── windows and figures ─────────────────────────────────────────────────── */
+
+.nr-token-saver-windows {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 2px;
+}
+
+.nr-token-saver-window {
+  border: 0;
+  border-radius: calc(var(--radius-control, 8px) - 3px);
+  background: none;
+  padding: 5px 10px;
+  color: var(--text-dark-2);
+  font-size: 0.76rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.nr-token-saver-window.is-active {
+  background: var(--surface-dark-3, var(--surface-dark));
+  color: var(--text-dark);
+}
+
+.nr-token-saver-window:focus-visible {
+  outline: 2px solid var(--accent, #60a5fa);
+  outline-offset: 1px;
+}
+
+.nr-token-saver-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--token-saver-gap);
+  margin: 16px 0 0;
+}
+
+.nr-token-saver-figure {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 10px 12px;
+}
+
+.nr-token-saver-figure dt {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dark-3, var(--text-dark-2));
+}
+
+.nr-token-saver-figure dd {
+  margin: 4px 0 0;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dark);
+}
+
+/* ── timeline ────────────────────────────────────────────────────────────── */
+
+/* Bars rather than a charting library: the shape is a month of one number. Each
+ * bar carries its figure as screen-reader text, so the chart is not the only way
+ * to read the data. */
+.nr-token-saver-timeline {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 140px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nr-token-saver-timeline li {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: flex-end;
+  height: 100%;
+  min-width: 4px;
+}
+
+.nr-token-saver-bar {
+  display: block;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--ok, #4ade80) 55%, transparent);
+}
+
+.nr-token-saver-timeline li:hover .nr-token-saver-bar {
+  background: var(--ok, #4ade80);
+}
+
+/* ── logs ────────────────────────────────────────────────────────────────── */
+
+.nr-token-saver-log {
+  max-height: 260px;
+  overflow: auto;
+  margin: 14px 0 0;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-dark-2);
+  padding: 10px 12px;
+  color: var(--text-dark-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── narrow screens ──────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .nr-token-saver-row {
+    flex-direction: column;
+  }
+
+  .nr-token-saver-windows {
+    flex-wrap: wrap;
+  }
+
+  .nr-token-saver-timeline {
+    height: 110px;
+  }
+}
