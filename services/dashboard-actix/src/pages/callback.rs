@@ -1,90 +1,43 @@
+//! The provider OAuth callback shell.
+//!
+//! This page used to carry 59 lines of inline JavaScript: the query parse, the
+//! three relay channels (`postMessage`, `BroadcastChannel`, `localStorage`), the
+//! panel switch, and the close timer. None of it was type-checked.
+//!
+//! It now serves a mount point for the same Leptos/WASM bundle the dashboard and
+//! sign-in screen use. The logic lives in `apps/dashboard-leptos`
+//! (`dashboard::callback_live` for the derivations, `ui::callback` for the markup),
+//! where the relay-origin decision is unit-tested — it hands over an authorization
+//! code, so who may receive it is worth a test.
+//!
+//! What stays here is the document shell and a `<noscript>` that still shows the
+//! URL to copy by hand, since that fallback needs no script to be useful.
+
 pub(crate) const CALLBACK_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>9Router OAuth Callback</title>
-  <meta name="description" content="Complete OAuth authorization for 9Router">
+  <title>nullrouter OAuth Callback</title>
+  <meta name="description" content="Complete OAuth authorization for nullrouter">
   <link rel="stylesheet" href="/assets/dashboard.css">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="modulepreload" href="/pkg/dashboard_leptos.js">
 </head>
 <body class="nr-top-page nr-callback-page">
-  <main class="nr-callback-panel" aria-live="polite">
-    <div id="processing" class="nr-callback-state">
-      <span class="nr-callback-icon">...</span>
-      <h1>Processing...</h1>
-      <p>Please wait while we complete the authorization.</p>
-    </div>
-    <div id="success" class="nr-callback-state nr-auth-hidden">
-      <span class="nr-callback-icon nr-callback-ok">OK</span>
-      <h1>Authorization Successful!</h1>
-      <p id="success-copy">This window will close automatically...</p>
-    </div>
-    <div id="manual" class="nr-callback-state nr-auth-hidden">
-      <span class="nr-callback-icon nr-callback-warn">URL</span>
-      <h1>Copy This URL</h1>
-      <p>Please copy the URL from the address bar and paste it in the application.</p>
-      <code id="callback-url"></code>
-    </div>
-  </main>
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const callbackData = {
-      code: params.get("code"),
-      token: params.get("token"),
-      state: params.get("state"),
-      error: params.get("error"),
-      errorDescription: params.get("error_description"),
-      fullUrl: window.location.href,
-    };
-    const expectedOrigins = [
-      window.location.origin,
-      "http://localhost:1455",
-    ];
-    const states = {
-      processing: document.getElementById("processing"),
-      success: document.getElementById("success"),
-      manual: document.getElementById("manual"),
-    };
-    function show(name) {
-      for (const [key, element] of Object.entries(states)) {
-        element.classList.toggle("nr-auth-hidden", key !== name);
-      }
-    }
-    function relayCallback() {
-      if (window.opener) {
-        for (const origin of expectedOrigins) {
-          try {
-            window.opener.postMessage({ type: "oauth_callback", data: callbackData }, origin);
-          } catch (error) {
-            console.log("postMessage failed:", error);
-          }
-        }
-      }
-      try {
-        const channel = new BroadcastChannel("oauth_callback");
-        channel.postMessage(callbackData);
-        channel.close();
-      } catch (error) {
-        console.log("BroadcastChannel failed:", error);
-      }
-      try {
-        localStorage.setItem("oauth_callback", JSON.stringify({ ...callbackData, timestamp: Date.now() }));
-      } catch (error) {
-        console.log("localStorage failed:", error);
-      }
-    }
-    relayCallback();
-    if (!(callbackData.code || callbackData.token || callbackData.error)) {
-      document.getElementById("callback-url").textContent = window.location.href;
-      show("manual");
-    } else {
-      show("success");
-      setTimeout(() => {
-        window.close();
-        document.getElementById("success-copy").textContent = "You can close this tab now.";
-      }, 1500);
-    }
+  <div id="dashboard-root"></div>
+  <noscript>
+    <main class="nr-callback-panel">
+      <div class="nr-callback-state">
+        <span class="nr-callback-icon nr-callback-warn">URL</span>
+        <h1>Copy This URL</h1>
+        <p>Please copy the URL from the address bar and paste it in the application.</p>
+      </div>
+    </main>
+  </noscript>
+  <script type="module">
+    import init from "/pkg/dashboard_leptos.js";
+    await init("/pkg/dashboard_leptos_bg.wasm");
   </script>
 </body>
 </html>

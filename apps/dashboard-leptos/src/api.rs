@@ -52,6 +52,8 @@ pub enum Method {
     Get,
     Post,
     Put,
+    /// Used by the sign-in screen's password change, which patches settings.
+    Patch,
     Delete,
 }
 
@@ -66,6 +68,7 @@ impl Method {
             Self::Get => "GET",
             Self::Post => "POST",
             Self::Put => "PUT",
+            Self::Patch => "PATCH",
             Self::Delete => "DELETE",
         }
     }
@@ -215,6 +218,94 @@ pub async fn put(path: &str, body: &str) -> Result<String, ApiError> {
 /// `DELETE` a path.
 pub async fn delete(path: &str) -> Result<String, ApiError> {
     request(Method::Delete, path, None).await
+}
+
+/// A response whose status, `Retry-After`, and body are all readable.
+///
+/// [`request`] collapses a non-2xx into [`ApiError::Status`] and discards the
+/// body, which is right for panels that only need success or failure. Sign-in
+/// needs the refusal itself: the body carries `remainingBeforeLock` and
+/// `mustChangePassword`, and a lockout's countdown is in the `Retry-After` header.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DetailedResponse {
+    pub status: u16,
+    pub ok: bool,
+    /// The raw `Retry-After` header, when present.
+    pub retry_after: Option<String>,
+    /// The body, empty when it could not be read.
+    pub body: String,
+}
+
+/// Send a request and report status, `Retry-After`, and body without collapsing
+/// a refusal into an error.
+#[cfg(target_arch = "wasm32")]
+pub async fn request_detailed(
+    method: Method,
+    path: &str,
+    body: Option<&str>,
+) -> Result<DetailedResponse, ApiError> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::{Request, RequestCache, RequestCredentials, RequestInit, Response};
+
+    let init = RequestInit::new();
+    init.set_method(method.as_str());
+    init.set_credentials(RequestCredentials::SameOrigin);
+    init.set_cache(RequestCache::NoStore);
+    if let Some(payload) = body {
+        init.set_body(&wasm_bindgen::JsValue::from_str(payload));
+    }
+
+    let request =
+        Request::new_with_str_and_init(path, &init).map_err(|_| ApiError::RequestBuild)?;
+    if body.is_some() {
+        request
+            .headers()
+            .set("content-type", "application/json")
+            .map_err(|_| ApiError::RequestBuild)?;
+    }
+
+    let window = web_sys::window().ok_or(ApiError::Environment)?;
+    let response = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|_| ApiError::Network)?
+        .dyn_into::<Response>()
+        .map_err(|_| ApiError::Body)?;
+
+    let status = response.status();
+    let ok = response.ok();
+    let retry_after = response.headers().get("Retry-After").ok().flatten();
+    // An unreadable body is not fatal here: the status alone still yields a
+    // message, so sign-in reports the refusal rather than a transport error.
+    let text = match response.text() {
+        Ok(promise) => JsFuture::from(promise)
+            .await
+            .ok()
+            .and_then(|value| value.as_string())
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    };
+
+    Ok(DetailedResponse {
+        status,
+        ok,
+        retry_after,
+        body: text,
+    })
+}
+
+/// Native builds have no browser to fetch from.
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(
+    clippy::unused_async,
+    reason = "mirrors the wasm signature so callers are target-agnostic"
+)]
+pub async fn request_detailed(
+    _method: Method,
+    _path: &str,
+    _body: Option<&str>,
+) -> Result<DetailedResponse, ApiError> {
+    Err(ApiError::Environment)
 }
 
 /// Fetch a path, parse it, and drive a [`Hydrate`] signal.

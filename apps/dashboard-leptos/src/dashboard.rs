@@ -1,9 +1,11 @@
 mod basic_chat;
 pub mod basic_chat_live;
+pub mod callback_live;
 pub mod cli_tools_live;
 pub mod combos_live;
 pub mod console_log_live;
 pub mod headroom_live;
+pub mod login_live;
 pub mod mitm_live;
 pub mod quota_live;
 pub mod translator_live;

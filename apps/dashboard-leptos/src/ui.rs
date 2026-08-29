@@ -1,6 +1,7 @@
 #![allow(unreachable_pub)]
 
 mod basic_chat;
+mod callback;
 mod cli_tools_live;
 mod combos;
 mod console_log;
@@ -8,6 +9,7 @@ mod endpoint;
 mod g003;
 mod headroom;
 mod locales;
+mod login;
 mod material_icons;
 mod media_providers;
 mod migrate;
@@ -24,6 +26,7 @@ mod translator;
 mod usage;
 
 use basic_chat::BasicChatPanel;
+pub use callback::callback_visible_contract;
 use cli_tools_live::{CliToolDetailPanel, CliToolsPanel};
 use combos::CombosPanel;
 use console_log::ConsoleLogPanel;
@@ -31,6 +34,7 @@ use endpoint::EndpointPanel;
 use g003::{MediaProvidersWebPanel, ProfilePanel};
 use leptos::prelude::*;
 pub use locales::{LocaleOption, active_locale_label, dashboard_locales, install_locale_signal};
+pub use login::login_visible_contract;
 pub use material_icons::dashboard_icon_glyph;
 use media_providers::{MediaProviderComboPanel, MediaProviderDetailPanel, MediaProviderKindPanel};
 use migrate::MigratePanel;
@@ -56,8 +60,67 @@ pub use console_log::console_log_visible_contract;
 pub use proxy_pools::proxy_pools_visible_contract;
 pub use translator::translator_visible_contract;
 
+/// Whether the current URL is the sign-in screen.
+///
+/// The dashboard and the login screen are one bundle, so the mount point decides
+/// which to render. Checked by path rather than by a flag in the served HTML, so a
+/// stale or edited shell cannot ask for the dashboard shell without a session.
+#[cfg(target_arch = "wasm32")]
+fn is_login_route() -> bool {
+    web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .is_some_and(|path| {
+            let path = path.trim_end_matches('/');
+            path == "/login" || path.ends_with("/login")
+        })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn is_login_route() -> bool {
+    false
+}
+
+/// Whether the current URL is the provider OAuth callback.
+#[cfg(target_arch = "wasm32")]
+fn is_callback_route() -> bool {
+    web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .is_some_and(|path| path.trim_end_matches('/') == "/callback")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn is_callback_route() -> bool {
+    false
+}
+
+/// The mounted root: the sign-in screen, the OAuth callback, or the dashboard.
+///
+/// One bundle serves all three, so the mount point dispatches on path rather than
+/// on anything the served HTML says — a stale or edited shell cannot ask for the
+/// dashboard without a session.
 #[component]
 pub fn App() -> impl IntoView {
+    view! {
+        <Show
+            when=is_login_route
+            fallback=|| {
+                view! {
+                    <Show
+                        when=is_callback_route
+                        fallback=|| view! { <DashboardApp /> }
+                    >
+                        <callback::CallbackPanel />
+                    </Show>
+                }
+            }
+        >
+            <login::LoginPanel />
+        </Show>
+    }
+}
+
+#[component]
+fn DashboardApp() -> impl IntoView {
     let (route, set_route) = signal(initial_route());
     let (drawer_open, set_drawer_open) = signal(false);
     let (header_panel, set_header_panel) = signal(HeaderPanel::Closed);

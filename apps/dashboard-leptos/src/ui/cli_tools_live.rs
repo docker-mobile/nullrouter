@@ -32,7 +32,7 @@ const TOOLS_LIVE_STYLES: &str =
 #[cfg(target_arch = "wasm32")]
 fn default_base_url() -> String {
     web_sys::window()
-        .map(web_sys::Window::location)
+        .map(|window| window.location())
         .and_then(|location| location.origin().ok())
         .filter(|origin| !origin.is_empty() && origin != "null")
         .map_or_else(String::new, |origin| format!("{origin}/v1"))

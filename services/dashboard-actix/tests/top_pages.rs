@@ -70,23 +70,35 @@ async fn top_level_pages_match_upstream_contract_when_requested() -> TestResult 
     assert!(!landing.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
     assert!(!landing.contains(r#"<div id="dashboard-root"></div>"#));
 
+    // The login screen is served by the WASM bundle, so the host owes only the
+    // mount point. Its copy and endpoints are asserted against the bundle's own
+    // visible contract in `apps/dashboard-leptos`, and its behaviour in
+    // `tests/login_live.rs`; checking them here would be checking a shell that no
+    // longer carries them.
     let login = html_for!(app, "/login");
-    assert!(login.contains("Enter your password"));
-    assert!(login.contains(r#"type="password""#));
-    assert!(login.contains("/api/auth/status"));
-    assert!(login.contains("/api/auth/login"));
-    assert!(login.contains("/api/auth/oidc/start"));
-    assert!(!login.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
+    assert!(login.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
+    assert!(login.contains("<title>nullrouter Login</title>"));
+    assert!(
+        !login.contains("<form"),
+        "a fallback form would bypass the bundle's redirect sanitiser"
+    );
 
+    // The callback screen is served by the WASM bundle too. Its relay channels and
+    // panels are asserted against the bundle's visible contract, and the
+    // relay-origin decision — which is the security-relevant part, since the
+    // payload is an authorization code — in `callback_live`'s own tests.
     let callback = html_for!(app, "/callback?code=ok&state=s1");
-    assert!(callback.contains("Authorization Successful"));
+    assert!(callback.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
+    assert!(callback.contains("<title>nullrouter OAuth Callback</title>"));
+    // The manual-copy fallback needs no script to be useful, so it stays in the
+    // shell. Nothing else about the flow does.
     assert!(callback.contains("Copy This URL"));
-    assert!(callback.contains("oauth_callback"));
-    assert!(callback.contains("BroadcastChannel"));
-    assert!(callback.contains("localStorage"));
-    assert!(callback.contains("http://localhost:1455"));
-    assert!(!callback.contains("postMessage(message, \"*\")"));
-    assert!(!callback.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
+    for absent in ["BroadcastChannel", "localStorage", "postMessage", "1455"] {
+        assert!(
+            !callback.contains(absent),
+            "{absent} should no longer be implemented in the shell"
+        );
+    }
 
     let dashboard = html_for!(app, "/dashboard/settings");
     assert!(dashboard.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
@@ -99,18 +111,19 @@ async fn top_level_pages_keep_boundary_states_safe_when_requested() -> TestResul
     let (_root, config) = fixture_config()?;
     let app = test::init_service(App::new().configure(config.into_configurer())).await;
 
+    // The callback screen runs from the WASM bundle, so the shell is the same bytes
+    // whatever the provider sent back. The panel states and the relay's origin
+    // restriction — the part that decides who receives an authorization code — are
+    // asserted in `apps/dashboard-leptos/tests/callback_live.rs`.
     for path in ["/callback", "/callback?error=access_denied"] {
         let callback = html_for!(app, path);
-        assert!(callback.contains("Processing"));
+        assert!(callback.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
+        // The manual-copy fallback works without script, so it stays in the shell.
         assert!(callback.contains("Copy This URL"));
-        assert!(callback.contains("errorDescription"));
-        assert!(callback.contains("expectedOrigins"));
-        assert!(callback.contains("window.location.origin"));
-        assert!(callback.contains("http://localhost:1455"));
-        assert!(
-            !callback
-                .contains("postMessage({ type: \"oauth_callback\", data: callbackData }, \"*\")")
-        );
+        // Nothing about the grant may be reflected into the served page.
+        assert!(!callback.contains("access_denied"), "{path}");
+        assert!(!callback.contains("postMessage"), "{path}");
+        assert!(!callback.contains("1455"), "{path}");
     }
 
     let api = test::call_service(
