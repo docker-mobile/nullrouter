@@ -133,13 +133,16 @@ async fn provider_proxy_model_and_usage_gap_routes_return_json_contracts() -> Te
     // Then: deterministic JSON shapes cover every upstream route family in this wave.
     assert_eq!(provider_models_status, StatusCode::OK);
     assert_eq!(field(&provider_models, "models")?, &serde_json::json!([]));
-    assert_eq!(provider_test_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&provider_test, "valid")?, false);
-    assert_eq!(test_models_status, StatusCode::NOT_IMPLEMENTED);
+    // The three test routes now perform real upstream calls, so with no state service
+    // they report an unreachable dependency rather than the old `501 unsupported`.
+    assert_eq!(provider_test_status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(field(&provider_test, "success")?, false);
+    assert_eq!(test_models_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&test_models, "results")?, &serde_json::json!([]));
     assert_eq!(free_models_status, StatusCode::OK);
     assert_eq!(field(&free_models, "models")?, &serde_json::json!([]));
-    assert_eq!(batch_status, StatusCode::OK);
+    // A batch over an unreadable connection list is 503, not an empty green run.
+    assert_eq!(batch_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&batch, "results")?, &serde_json::json!([]));
     assert_eq!(proxy_test_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&proxy_test, "ok")?, false);

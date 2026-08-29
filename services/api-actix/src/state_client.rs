@@ -129,6 +129,21 @@ impl RuntimeClient {
     }
 }
 
+/// The outcome of reading one connection record.
+///
+/// A missing connection and an unreachable state service are separate cases: the
+/// first is the caller's mistake and stays a 404, the second is this deployment's
+/// problem and must not be reported as "no such connection".
+#[derive(Debug)]
+pub(crate) enum ConnectionLookup {
+    /// The connection's public record.
+    Found(Value),
+    /// State answered, and has no such connection.
+    Missing,
+    /// State could not be read.
+    Unavailable,
+}
+
 /// Reader for state-owned usage data.
 #[derive(Debug, Clone)]
 pub struct StateClient {
@@ -264,6 +279,67 @@ impl StateClient {
             "usage aggregate",
         )
         .await
+    }
+
+    /// Read one provider connection's public record.
+    ///
+    /// Used by the connection test to learn which provider and model to probe. The
+    /// public projection is deliberate: this path needs the provider id and default
+    /// model, never the credential, which the runtime fetches for itself over
+    /// `/internal/*`.
+    pub(crate) async fn connection(&self, connection_id: &str) -> ConnectionLookup {
+        let url = format!("{}/api/providers/{}", self.base, urlencode(connection_id));
+        let Ok(response) =
+            self.client.get(&url).send().await.inspect_err(
+                |error| tracing::warn!(%error, "state unreachable reading connection"),
+            )
+        else {
+            return ConnectionLookup::Unavailable;
+        };
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return ConnectionLookup::Missing;
+        }
+        if !response.status().is_success() {
+            return ConnectionLookup::Unavailable;
+        }
+        let Ok(body) = response.json::<Value>().await else {
+            return ConnectionLookup::Unavailable;
+        };
+        // State answers either the record itself or `{"connection": …}`.
+        ConnectionLookup::Found(
+            body.get("connection")
+                .filter(|found| found.is_object())
+                .cloned()
+                .unwrap_or(body),
+        )
+    }
+
+    /// Every configured provider connection, as public records.
+    ///
+    /// `None` when state is unreachable, which is deliberately not the same as an
+    /// empty list: a batch test that answered `{total: 0, failed: 0}` because the
+    /// state service was down would read as "everything passed".
+    pub(crate) async fn connections(&self) -> Option<Vec<Value>> {
+        let url = format!("{}/api/providers", self.base);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .inspect_err(|error| tracing::warn!(%error, "provider connections unavailable"))
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let body = response.json::<Value>().await.ok()?;
+        // State answers `{"connections": [...]}`; a bare array is accepted too.
+        Some(
+            body.get("connections")
+                .unwrap_or(&body)
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        )
     }
 
     /// Recorded usage and metadata for one connection.

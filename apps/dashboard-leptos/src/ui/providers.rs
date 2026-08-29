@@ -261,7 +261,7 @@ fn dispatch_test(state: PanelState, id: String) {
             TestOutcome::Passed => Tone::Ok,
             TestOutcome::Failed(_) | TestOutcome::Rejected(_) => Tone::Error,
             // Nothing was tested, so this is neither good nor bad news.
-            TestOutcome::Unsupported => Tone::Neutral,
+            TestOutcome::NotTested(_) => Tone::Neutral,
         };
         // Only a real verdict updates the row's recorded status.
         if let Some(status) = outcome.recorded_status() {

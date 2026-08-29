@@ -14,6 +14,7 @@ mod model_tools;
 mod models;
 mod oauth;
 mod provider_nodes;
+mod provider_probe;
 mod provider_tools;
 mod providers;
 mod proxy_pool_tools;

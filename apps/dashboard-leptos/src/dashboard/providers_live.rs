@@ -24,7 +24,7 @@
 //! Kept free of `leptos` and of `fetch` so it is unit-testable on the native
 //! target; the panel in `ui/providers.rs` owns the signals.
 
-use crate::api::ApiError;
+use crate::api::{ApiError, DetailedResponse};
 use serde::{Deserialize, Serialize};
 
 /// The endpoint that owns the configured-connection list.
@@ -44,8 +44,9 @@ pub fn connection_path(id: &str) -> String {
 /// Served by `nullrouter-api`, not the state service: the gateway routes
 /// `/api/providers/{id}/test` away from state because of the extra segment
 /// (`is_collection_or_item_except` in `services/gateway-pingora/src/routing.rs`).
-/// That build answers `501` with `unsupported: true`, which is why
-/// [`TestOutcome::Unsupported`] exists as a first-class result.
+/// It performs a real one-token upstream call, so the response distinguishes a
+/// refused credential (`502`) from a test that never ran (`503`/`400`/`404`) — see
+/// [`settle_test`].
 pub fn connection_test_path(id: &str) -> String {
     format!("{}/test", connection_path(id))
 }
@@ -580,13 +581,18 @@ pub fn settle_delete(pending: PendingDelete, outcome: DeleteOutcome) -> DeleteSe
 }
 
 /// Result of `POST /api/providers/{id}/test`.
+///
+/// Three outcomes, not two. A provider that refuses the credential is a verdict
+/// worth recording; a router that could not reach its own state service, or a
+/// connection that names no model, tested nothing at all — reporting that as a
+/// failed key would send the user to replace a key that may be fine.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TestOutcome {
     Passed,
+    /// The upstream was called and refused. Carries the provider's own message.
     Failed(String),
-    /// The build answered `501 unsupported`: provider testing is not
-    /// implemented. Distinct from a failure, because nothing was tested.
-    Unsupported,
+    /// Nothing was tested. Carries the reason.
+    NotTested(String),
     /// The request itself did not complete.
     Rejected(ApiError),
 }
@@ -596,9 +602,7 @@ impl TestOutcome {
         match self {
             Self::Passed => String::from("Connection test passed."),
             Self::Failed(reason) => format!("Connection test failed: {reason}"),
-            Self::Unsupported => {
-                String::from("This build does not run provider tests. Nothing was tested.")
-            }
+            Self::NotTested(reason) => format!("Nothing was tested: {reason}"),
             Self::Rejected(error) => error.message().to_owned(),
         }
     }
@@ -608,44 +612,77 @@ impl TestOutcome {
         match self {
             Self::Passed => Some("active"),
             Self::Failed(_) => Some("error"),
-            Self::Unsupported | Self::Rejected(_) => None,
+            Self::NotTested(_) | Self::Rejected(_) => None,
         }
     }
 }
 
-/// The `{"valid":bool,...}` body returned by the test endpoint.
-#[derive(Debug, Deserialize)]
+/// The body returned by the test endpoint.
+#[derive(Debug, Default, Deserialize)]
 struct TestResponse {
     #[serde(default)]
     valid: bool,
     #[serde(default)]
-    unsupported: bool,
+    success: bool,
     #[serde(default)]
     error: Option<String>,
 }
 
+impl TestResponse {
+    /// The endpoint's message, when it sent a usable one.
+    fn reason(self) -> Option<String> {
+        self.error
+            .map(|error| error.trim().to_owned())
+            .filter(|error| !error.is_empty())
+    }
+}
+
 /// Interpret a test response.
 ///
-/// `body` is `Ok` only for a 2xx. `nullrouter-api` answers `501` for every
-/// provider, which arrives as [`ApiError::Status`] and maps to
-/// [`TestOutcome::Unsupported`] — the panel must not show that as "test failed",
-/// because no upstream was contacted.
-pub fn settle_test(response: Result<&str, ApiError>) -> TestOutcome {
-    match response {
-        Ok(body) => match serde_json::from_str::<TestResponse>(body) {
-            Ok(parsed) if parsed.unsupported => TestOutcome::Unsupported,
-            Ok(parsed) if parsed.valid => TestOutcome::Passed,
-            Ok(parsed) => TestOutcome::Failed(
-                parsed
-                    .error
-                    .map(|error| error.trim().to_owned())
-                    .filter(|error| !error.is_empty())
-                    .unwrap_or_else(|| String::from("the upstream rejected the credential")),
-            ),
-            Err(_error) => TestOutcome::Rejected(ApiError::Body),
-        },
-        Err(ApiError::Status(501)) => TestOutcome::Unsupported,
-        Err(error) => TestOutcome::Rejected(error),
+/// The endpoint's status carries the distinction the panel needs:
+///
+/// * `200` — the upstream answered successfully.
+/// * `502` — the upstream was called and refused. Its own (scrubbed) message is in
+///   the body, so it is read out rather than replaced with a generic string: "invalid
+///   key" and "model not found" send the user to different places.
+/// * `503`/`400`/`404` — nothing was tested, for a reason the body explains.
+///
+/// A non-2xx therefore has to be inspected, not collapsed into [`ApiError::Status`];
+/// that is why this takes the detailed response.
+pub fn settle_test(response: Result<DetailedResponse, ApiError>) -> TestOutcome {
+    let Ok(response) = response else {
+        // `Err` is only a transport or environment failure here.
+        return TestOutcome::Rejected(response.err().unwrap_or(ApiError::Network));
+    };
+    let parsed = serde_json::from_str::<TestResponse>(&response.body);
+    let status = response.status;
+    match parsed {
+        Ok(parsed) if response.ok => {
+            if parsed.valid || parsed.success {
+                TestOutcome::Passed
+            } else {
+                // A 2xx that reports failure: trust the body over the status.
+                TestOutcome::Failed(
+                    parsed
+                        .reason()
+                        .unwrap_or_else(|| String::from("the upstream rejected the credential")),
+                )
+            }
+        }
+        Ok(parsed) => {
+            let reason = parsed
+                .reason()
+                .unwrap_or_else(|| format!("the router answered {status}"));
+            if status == 502 {
+                TestOutcome::Failed(reason)
+            } else {
+                TestOutcome::NotTested(reason)
+            }
+        }
+        // Unreadable body: a 2xx cannot be called a pass, and a refusal cannot be
+        // attributed to the credential.
+        Err(_error) if response.ok => TestOutcome::Rejected(ApiError::Body),
+        Err(_error) => TestOutcome::NotTested(format!("the router answered {status}")),
     }
 }
 
@@ -874,7 +911,7 @@ pub fn provider_initials(provider_id: &str) -> String {
 // Thin wrappers over `crate::api`, kept here so the panel holds signals and
 // views only. Each one is a single request whose result is already interpreted by
 // the functions above, so a caller cannot forget to distinguish "empty" from
-// "failed" or "unsupported" from "invalid".
+// "failed", or "not tested" from "invalid".
 //
 // `api::request` is itself split on `target_arch`: the wasm arm performs the
 // `fetch`, and the native arm returns `ApiError::Environment` rather than
@@ -905,9 +942,18 @@ pub async fn delete_connection(id: &str) -> DeleteOutcome {
 ///
 /// The body is `{}` because the endpoint takes an optional payload and this
 /// dashboard has nothing to add to it.
+///
+/// Uses [`crate::api::request_detailed`] rather than `post`: a failed test answers
+/// `502` with the provider's own message, and `post` would discard that body in
+/// favour of a bare status code.
 pub async fn test_connection(id: &str) -> TestOutcome {
-    let response = crate::api::post(&connection_test_path(id), "{}").await;
-    settle_test(response.as_deref().map_err(|error| *error))
+    let response = crate::api::request_detailed(
+        crate::api::Method::Post,
+        &connection_test_path(id),
+        Some("{}"),
+    )
+    .await;
+    settle_test(response)
 }
 
 /// Up to two leading alphanumerics of a name, uppercased.

@@ -124,22 +124,34 @@ async fn api_sentry_routes_return_structured_json_when_state_is_empty() -> TestR
         &serde_json::json!([])
     );
 
-    assert_structured_json(&provider_test, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&provider_test.json, "provider")?, "openai");
-    assert_eq!(field(&provider_test.json, "valid")?, false);
-    assert_eq!(field(&provider_test.json, "unsupported")?, true);
-
-    assert_structured_json(&provider_test_models, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&provider_test_models.json, "provider")?, "openai");
-    assert_eq!(
-        field(&provider_test_models.json, "connectionId")?,
-        &Value::Null
+    // These two routes make a real upstream call now, so with state down they report
+    // that they could not read the connection. 501/`unsupported: true` was the old
+    // stub's answer; a 200-shaped "not valid" here would be a lie either way, and a
+    // 404 would blame the user for a dependency this deployment cannot reach.
+    assert_structured_json(&provider_test, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(field(&provider_test.json, "success")?, false);
+    assert_eq!(field(&provider_test.json, "connectionId")?, "openai");
+    assert!(
+        field(&provider_test.json, "error")?
+            .as_str()
+            .is_some_and(|error| error.contains("state service is unreachable")),
+        "{}",
+        provider_test.body_text
     );
+
+    assert_structured_json(&provider_test_models, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(field(&provider_test_models.json, "connectionId")?, "openai");
     assert_eq!(
         field(&provider_test_models.json, "results")?,
         &serde_json::json!([])
     );
-    assert_eq!(field(&provider_test_models.json, "unsupported")?, true);
+    // No `unsupported` marker: model testing is implemented, so advertising it as
+    // unsupported would send the dashboard back to hiding the control.
+    assert!(
+        provider_test_models.json.get("unsupported").is_none(),
+        "{}",
+        provider_test_models.body_text
+    );
 
     for response in [&tts_voices, &openai_tts_voices, &deepgram_tts_voices] {
         assert_structured_json(response, StatusCode::OK);

@@ -5,7 +5,7 @@
 //! property: a card may only describe a row the router returned, and the absence
 //! of rows must render as absence.
 
-use nullrouter_dashboard_wasm::api::ApiError;
+use nullrouter_dashboard_wasm::api::{ApiError, DetailedResponse};
 use nullrouter_dashboard_wasm::dashboard::providers_live::{
     AuthKind, CONNECTIONS_PATH, Connection, ConnectionDraft, DeleteOutcome, DeleteSettlement,
     DraftError, TestOutcome, TestStatus, api_key_catalog, catalog, catalog_option, connection_path,
@@ -395,47 +395,108 @@ fn a_created_connection_is_inserted_in_order_without_duplicating_it() {
     assert_eq!(list.len(), 4);
 }
 
+/// A response as `api::request_detailed` reports it.
+fn reply(status: u16, body: &str) -> DetailedResponse {
+    DetailedResponse {
+        status,
+        ok: (200..300).contains(&status),
+        retry_after: None,
+        body: body.to_owned(),
+    }
+}
+
 #[test]
-fn a_501_test_response_reports_unsupported_rather_than_a_failed_credential() {
-    // Given: `/api/providers/{id}/test` is routed to nullrouter-api, which
-    // answers 501 with `unsupported: true`.
+fn a_test_result_separates_a_refused_key_from_a_test_that_never_ran() {
+    // Given: `/api/providers/{id}/test` now makes a real one-token upstream call.
+    // It answers 200 on a pass, 502 when the provider refuses, and 503/400/404 when
+    // nothing could be tested. The old `501 unsupported` stub is gone.
+
+    // A pass.
     assert_eq!(
-        settle_test(Err(ApiError::Status(501))),
-        TestOutcome::Unsupported
+        settle_test(Ok(reply(
+            200,
+            r#"{"success":true,"valid":true,"status":200}"#
+        ))),
+        TestOutcome::Passed
     );
+    assert_eq!(TestOutcome::Passed.recorded_status(), Some("active"));
+
+    // A refusal relays the provider's own message, because "invalid key" and "model
+    // not found" send the user to different places.
     assert_eq!(
-        settle_test(Ok(
-            r#"{"provider":"openai","valid":false,"unsupported":true,"error":"Provider testing is not supported by nullrouter-api"}"#
-        )),
-        TestOutcome::Unsupported
+        settle_test(Ok(reply(
+            502,
+            r#"{"success":false,"status":401,"error":"Incorrect API key provided"}"#
+        ))),
+        TestOutcome::Failed(String::from("Incorrect API key provided"))
     );
-    // Nothing was tested, so nothing is recorded about the credential.
-    assert_eq!(TestOutcome::Unsupported.recorded_status(), None);
-    assert!(
-        TestOutcome::Unsupported
-            .message()
-            .contains("Nothing was tested"),
-        "the user must not read this as a failing key"
+    // A refusal is a verdict on the credential, so it is recorded.
+    assert_eq!(
+        TestOutcome::Failed(String::new()).recorded_status(),
+        Some("error")
     );
 
-    // A real pass and a real failure stay distinguishable from it.
-    assert_eq!(settle_test(Ok(r#"{"valid":true}"#)), TestOutcome::Passed);
-    assert_eq!(TestOutcome::Passed.recorded_status(), Some("active"));
+    // A down state service tested nothing. Recording "error" here would tell the user
+    // to replace a key that may be perfectly good.
+    let unavailable = settle_test(Ok(reply(
+        503,
+        r#"{"success":false,"error":"The state service is unreachable, so this connection could not be read"}"#,
+    )));
     assert_eq!(
-        settle_test(Ok(r#"{"valid":false,"error":"401 unauthorized"}"#)),
-        TestOutcome::Failed(String::from("401 unauthorized"))
+        unavailable,
+        TestOutcome::NotTested(String::from(
+            "The state service is unreachable, so this connection could not be read"
+        ))
+    );
+    assert_eq!(unavailable.recorded_status(), None);
+    assert!(
+        unavailable.message().contains("Nothing was tested"),
+        "got {}",
+        unavailable.message()
+    );
+
+    // Same for a connection with no model, and for one that does not exist.
+    assert_eq!(
+        settle_test(Ok(reply(
+            400,
+            r#"{"success":false,"error":"This connection names no model to test: set a default model first"}"#
+        )))
+        .recorded_status(),
+        None
     );
     assert_eq!(
-        settle_test(Ok(r#"{"valid":false}"#)),
+        settle_test(Ok(reply(
+            404,
+            r#"{"success":false,"error":"No such provider connection"}"#
+        ))),
+        TestOutcome::NotTested(String::from("No such provider connection"))
+    );
+
+    // A refusal with no message still names the status rather than inventing a cause.
+    assert_eq!(
+        settle_test(Ok(reply(502, "{}"))),
+        TestOutcome::Failed(String::from("the router answered 502"))
+    );
+    // A non-2xx whose body is not JSON at all (an HTML error page, say) tested nothing.
+    assert_eq!(
+        settle_test(Ok(reply(503, "<html>gateway</html>"))),
+        TestOutcome::NotTested(String::from("the router answered 503"))
+    );
+
+    // A 2xx that reports failure in the body is believed over its status.
+    assert_eq!(
+        settle_test(Ok(reply(200, r#"{"valid":false}"#))),
         TestOutcome::Failed(String::from("the upstream rejected the credential"))
     );
+
     // Transport failures are neither a pass nor a verdict on the credential.
     assert_eq!(
         settle_test(Err(ApiError::Network)),
         TestOutcome::Rejected(ApiError::Network)
     );
+    // A 2xx that cannot be parsed cannot be called a pass.
     assert_eq!(
-        settle_test(Ok("not json")),
+        settle_test(Ok(reply(200, "not json"))),
         TestOutcome::Rejected(ApiError::Body)
     );
     assert_eq!(

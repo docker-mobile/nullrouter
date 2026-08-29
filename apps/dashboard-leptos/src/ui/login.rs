@@ -283,10 +283,10 @@ fn start_countdown(signals: LoginSignals, seconds: u32) {
     let tick = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
         let remaining = signals.retry_after.get_untracked().saturating_sub(1);
         signals.retry_after.set(remaining);
-        if remaining == 0 {
-            if let Some(window) = web_sys::window() {
-                window.clear_interval_with_handle(owned.get());
-            }
+        if remaining == 0
+            && let Some(window) = web_sys::window()
+        {
+            window.clear_interval_with_handle(owned.get());
         }
     });
     if let Some(window) = web_sys::window()
