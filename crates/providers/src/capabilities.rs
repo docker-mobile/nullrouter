@@ -277,12 +277,70 @@ impl CapabilitiesDelta {
     }
 }
 
+/// Providers upstream gives a `PROVIDER_CAPABILITIES` override.
+///
+/// Read off `open-sse/providers/capabilities.js`. These are the only providers
+/// whose rows may disagree with the canonical model table, so they are the rows
+/// to exclude when recovering that canonical value from the flattened dump —
+/// see [`CANONICAL_BY_MODEL`].
+const OVERRIDE_PROVIDERS: [&str; 5] = ["nvidia", "codex", "kiro", "codebuddy-cn", "poolside"];
+
+/// Canonical capabilities by bare model name, recovered from the dumped table.
+///
+/// Upstream resolves capabilities through a cascade whose second step ignores the
+/// provider entirely (`MODEL_CAPABILITIES[baseModel]`). Without that step a
+/// dynamic `openai-compatible-*` / `anthropic-compatible-*` connection serving a
+/// known model resolves to [`Capabilities::DEFAULT`] — losing `reasoning`,
+/// `thinkingFormat` and the real output ceiling, so thinking is stripped and
+/// `max_tokens` clamps to the conservative floor.
+///
+/// `data/capabilities.json` flattened both of upstream's tables into
+/// `provider/model` rows, so the canonical value is not stored directly. It is
+/// recovered here by taking the rows from providers that upstream does *not*
+/// override and keeping the value only when they agree. That is derivation from
+/// upstream's own structure rather than a guess: of the 17 base models whose rows
+/// differ by provider, excluding [`OVERRIDE_PROVIDERS`] leaves exactly one value
+/// for 16. The seventeenth (`gpt-5.6-sol`) is served only by an override
+/// provider, so upstream's canonical table would not carry it either and it is
+/// deliberately absent here.
+static CANONICAL_BY_MODEL: LazyLock<BTreeMap<&'static str, Capabilities>> = LazyLock::new(|| {
+    let mut candidates: BTreeMap<&'static str, Option<Capabilities>> = BTreeMap::new();
+    for (key, delta) in &TABLE.by_provider_model {
+        let Some((provider, model)) = key.split_once('/') else {
+            continue;
+        };
+        if OVERRIDE_PROVIDERS.contains(&provider) {
+            continue;
+        }
+        let resolved = delta.apply(TABLE.default);
+        candidates
+            .entry(model)
+            .and_modify(|seen| {
+                // Disagreement between non-override providers means there is no
+                // single canonical answer, so none is offered.
+                if seen.is_some_and(|previous| previous != resolved) {
+                    *seen = None;
+                }
+            })
+            .or_insert(Some(resolved));
+    }
+    candidates
+        .into_iter()
+        .filter_map(|(model, resolved)| resolved.map(|caps| (model, caps)))
+        .collect()
+});
+
 /// Capabilities for a provider/model pair.
 ///
 /// A vendor-prefixed model id (`anthropic/claude-opus-4.7`) is reduced to its
 /// last segment before lookup, matching upstream's `baseModel` handling. The
 /// registry's own `maxOutputTokens` / `contextLength`, when present, take
 /// precedence — it is the more specific statement.
+///
+/// Resolution order mirrors upstream: the provider's own row, then the canonical
+/// model-name row ([`CANONICAL_BY_MODEL`]), then defaults. The middle step is
+/// what lets a dynamic compatible provider serving a known model keep that
+/// model's real capabilities.
 pub fn for_model(provider: &str, model: &str) -> Capabilities {
     if model.is_empty() {
         return TABLE.default;
@@ -293,7 +351,19 @@ pub fn for_model(provider: &str, model: &str) -> Capabilities {
         .by_provider_model
         .get(&format!("{provider}/{base_model}"))
         .or_else(|| TABLE.by_provider_model.get(&format!("{provider}/{model}")))
-        .map_or(TABLE.default, |delta| delta.apply(TABLE.default));
+        .map_or_else(
+            // No row for this provider. Fall back to the canonical model-name
+            // value, as upstream's cascade does, so a dynamic compatible provider
+            // serving a known model is not degraded to the floor.
+            || {
+                CANONICAL_BY_MODEL
+                    .get(base_model)
+                    .or_else(|| CANONICAL_BY_MODEL.get(model))
+                    .copied()
+                    .unwrap_or(TABLE.default)
+            },
+            |delta| delta.apply(TABLE.default),
+        );
 
     // Registry-stated limits win over the capability table.
     let key = crate::registry::entry(provider)
@@ -434,7 +504,113 @@ pub fn thinking_levels(provider: &str, model: &str) -> Option<Vec<&'static str>>
 
 #[cfg(test)]
 mod tests {
-    use super::{Capabilities, for_model, max_output};
+    use super::{
+        CANONICAL_BY_MODEL, Capabilities, OVERRIDE_PROVIDERS, ThinkingFormat, for_model, max_output,
+    };
+
+    #[test]
+    fn a_provider_with_no_row_falls_back_to_the_canonical_model_value() {
+        // The bug: `for_model` only looked up `provider/model`, while upstream's
+        // cascade also consults a canonical model-name table. A dynamic
+        // `openai-compatible-*` connection serving a known model therefore
+        // resolved to the floor — reasoning off, no thinking format — so thinking
+        // was stripped and `max_tokens` clamped to 64000.
+        let canonical = for_model("openai", "gpt-5");
+        assert!(canonical.reasoning, "gpt-5 reasons");
+
+        let dynamic = for_model("openai-compatible-mine", "gpt-5");
+        assert!(
+            dynamic.reasoning,
+            "a dynamic provider serving gpt-5 must keep its reasoning capability"
+        );
+        assert_eq!(
+            dynamic.thinking_format,
+            Some(ThinkingFormat::OpenAi),
+            "and its thinking format, or normalization silently strips instead of translating"
+        );
+        assert_eq!(
+            dynamic.max_output, canonical.max_output,
+            "and its real output ceiling, not the conservative default"
+        );
+        assert!(
+            dynamic.max_output > Capabilities::DEFAULT.max_output,
+            "gpt-5's ceiling is above the floor, so this proves the fallback fired"
+        );
+    }
+
+    #[test]
+    fn an_unknown_model_still_resolves_to_defaults() {
+        // The fallback must not invent capabilities for a model nobody declared.
+        let unknown = for_model("openai-compatible-mine", "not-a-real-model");
+        assert_eq!(unknown, Capabilities::DEFAULT);
+    }
+
+    #[test]
+    fn the_canonical_index_excludes_upstream_override_providers() {
+        // Upstream keeps provider overrides in a separate table from the canonical
+        // one. The dump flattened both into `provider/model` rows, so the canonical
+        // value is recovered by ignoring exactly the providers upstream overrides.
+        // Including them would let one vendor's narrower row become every dynamic
+        // provider's answer for that model.
+        assert!(
+            CANONICAL_BY_MODEL.len() > 400,
+            "{}",
+            CANONICAL_BY_MODEL.len()
+        );
+
+        // codebuddy-cn overrides kimi-k2.5 to the openai thinking format; the
+        // canonical value is kimi's own.
+        let overridden = for_model("codebuddy-cn", "kimi-k2.5");
+        let canonical = CANONICAL_BY_MODEL
+            .get("kimi-k2.5")
+            .copied()
+            .expect("kimi-k2.5 has a canonical row");
+        assert_eq!(canonical.thinking_format, Some(ThinkingFormat::Kimi));
+        assert_ne!(
+            overridden.thinking_format, canonical.thinking_format,
+            "this model is only interesting because the two disagree"
+        );
+        // A provider with its own row keeps it; only the fallback uses canonical.
+        assert_eq!(
+            overridden.thinking_format,
+            Some(ThinkingFormat::OpenAi),
+            "an override provider must keep its own row"
+        );
+    }
+
+    #[test]
+    fn a_model_only_served_by_override_providers_has_no_canonical_row() {
+        // `gpt-5.6-sol` is served only by codex, which upstream overrides. Its
+        // canonical table would carry no entry either, so offering one here would
+        // be inventing a value upstream does not have.
+        assert!(
+            !CANONICAL_BY_MODEL.contains_key("gpt-5.6-sol"),
+            "a value derived only from override rows must not become canonical"
+        );
+        assert!(OVERRIDE_PROVIDERS.contains(&"codex"));
+    }
+
+    #[test]
+    fn disagreeing_non_override_providers_yield_no_canonical_row() {
+        // Where providers upstream does *not* override still disagree, there is no
+        // single canonical answer, and the index must decline to pick one rather
+        // than letting map iteration order decide.
+        for (model, caps) in CANONICAL_BY_MODEL.iter() {
+            let from_providers: Vec<Capabilities> = super::TABLE
+                .by_provider_model
+                .iter()
+                .filter_map(|(key, delta)| {
+                    let (provider, name) = key.split_once('/')?;
+                    (name == *model && !OVERRIDE_PROVIDERS.contains(&provider))
+                        .then(|| delta.apply(super::TABLE.default))
+                })
+                .collect();
+            assert!(
+                from_providers.iter().all(|row| row == caps),
+                "{model} was published as canonical despite disagreement"
+            );
+        }
+    }
 
     #[test]
     fn table_parses_and_is_populated() {

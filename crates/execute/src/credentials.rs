@@ -106,7 +106,13 @@ pub fn build_url(provider: &str, credentials: &Credentials, url_index: usize) ->
             .setting("region")
             .or(transport.default_region.as_deref());
         if let Some(url) = region.and_then(|region| regions.get(region)) {
-            return Some(url.clone());
+            // A region entry is a bare base, while the default `baseUrl` carries
+            // the full endpoint. Returning the region verbatim would POST to that
+            // bare base — for `xiaomi-tokenplan`, to `/v1` instead of
+            // `/v1/chat/completions`. The endpoint is recovered from the default
+            // pair rather than hardcoded, so it stays right if the registry moves.
+            let endpoint = region_endpoint_suffix(transport, regions);
+            return Some(format!("{}{endpoint}", url.trim_end_matches('/')));
         }
     }
 
@@ -114,6 +120,32 @@ pub fn build_url(provider: &str, credentials: &Credentials, url_index: usize) ->
         Some(suffix) => format!("{base}{suffix}"),
         None => base,
     })
+}
+
+/// The endpoint path a region-scoped provider's bare region base is missing.
+///
+/// Derived by asking what the default `baseUrl` carries beyond its own region
+/// entry: for `xiaomi-tokenplan` the default is
+/// `https://token-plan-sgp.xiaomimimo.com/v1/chat/completions` and its `sgp`
+/// region is `https://token-plan-sgp.xiaomimimo.com/v1`, so the endpoint is
+/// `/chat/completions`. Falls back to the transport's declared `url_suffix`, then
+/// to nothing, so a provider whose regions already carry a full path is unchanged.
+fn region_endpoint_suffix<'a>(
+    transport: &'a registry::Transport,
+    regions: &std::collections::BTreeMap<String, String>,
+) -> &'a str {
+    let default_url = transport.base_url.as_deref().unwrap_or_default();
+    let derived = transport
+        .default_region
+        .as_deref()
+        .and_then(|name| regions.get(name))
+        .and_then(|base| default_url.strip_prefix(base.trim_end_matches('/')));
+    match derived {
+        // Only a path remainder counts. An empty remainder means the default was
+        // already bare, and anything not starting with `/` is a different host.
+        Some(suffix) if suffix.starts_with('/') => suffix,
+        _ => transport.url_suffix.as_deref().unwrap_or_default(),
+    }
 }
 
 /// How many URLs this provider can fall back across.
@@ -469,6 +501,80 @@ mod tests {
             Some("https://api.openai.com/v1/chat/completions")
         );
         assert_eq!(build_url("not-a-provider", &credentials, 0), None);
+    }
+
+    #[test]
+    fn a_region_selected_url_keeps_its_endpoint_path() {
+        // The bug: a region entry is a bare base, and it was returned verbatim. So
+        // a region-selected connection POSTed to `/v1` instead of
+        // `/v1/chat/completions` — a 404 or a silent wrong endpoint, depending on
+        // the host.
+        let mut credentials = Credentials::default();
+        credentials
+            .provider_specific_data
+            .insert("region".to_owned(), serde_json::json!("cn"));
+        assert_eq!(
+            build_url("xiaomi-tokenplan", &credentials, 0).as_deref(),
+            Some("https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+            "the endpoint path must survive the region override"
+        );
+
+        credentials
+            .provider_specific_data
+            .insert("region".to_owned(), serde_json::json!("ams"));
+        assert_eq!(
+            build_url("xiaomi-tokenplan", &credentials, 0).as_deref(),
+            Some("https://token-plan-ams.xiaomimimo.com/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn the_default_region_resolves_to_the_same_url_as_no_region() {
+        // With no region set, the transport's `defaultRegion` applies. It must
+        // agree with the declared `baseUrl`, or the default path and the
+        // explicitly-selected default path would differ.
+        let credentials = Credentials::default();
+        let implicit = build_url("xiaomi-tokenplan", &credentials, 0);
+
+        let mut explicit_credentials = Credentials::default();
+        explicit_credentials
+            .provider_specific_data
+            .insert("region".to_owned(), serde_json::json!("sgp"));
+        let explicit = build_url("xiaomi-tokenplan", &explicit_credentials, 0);
+
+        assert_eq!(implicit, explicit);
+        assert_eq!(
+            implicit.as_deref(),
+            Some("https://token-plan-sgp.xiaomimimo.com/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn an_unknown_region_falls_back_to_the_declared_base_url() {
+        // A hand-edited or stale region name must not produce a bare base or an
+        // empty URL; the declared `baseUrl` is the safe answer.
+        let mut credentials = Credentials::default();
+        credentials
+            .provider_specific_data
+            .insert("region".to_owned(), serde_json::json!("nowhere"));
+        assert_eq!(
+            build_url("xiaomi-tokenplan", &credentials, 0).as_deref(),
+            Some("https://token-plan-sgp.xiaomimimo.com/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn a_non_region_provider_is_unaffected_by_the_region_path() {
+        // The endpoint-recovery logic must not touch providers without regions.
+        let mut credentials = Credentials::default();
+        credentials
+            .provider_specific_data
+            .insert("region".to_owned(), serde_json::json!("cn"));
+        assert_eq!(
+            build_url("openai", &credentials, 0).as_deref(),
+            Some("https://api.openai.com/v1/chat/completions"),
+            "a region setting on a provider with no regions changes nothing"
+        );
     }
 
     #[test]

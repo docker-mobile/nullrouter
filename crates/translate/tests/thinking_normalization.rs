@@ -413,6 +413,33 @@ fn deepseek_collapses_the_level_range_to_its_own_two() {
 }
 
 #[test]
+fn a_dynamic_compatible_provider_still_gets_thinking_translated() {
+    // Given: a user-defined `anthropic-compatible-*` connection serving a known
+    // Claude model. There is no capability row for that provider name, so before
+    // the canonical model-name fallback existed this resolved to the floor —
+    // `reasoning: false` — and thinking was stripped rather than translated. The
+    // caller got a non-reasoning answer with no indication why.
+    let body = json!({"reasoning_effort": "high"});
+
+    // When: it is normalized for that connection.
+    let result = normalized(
+        Format::Claude,
+        "anthropic-compatible-mine",
+        "claude-sonnet-4-20250514",
+        &body,
+    );
+
+    // Then: it arrives in the Anthropic budget shape, exactly as it would for the
+    // canonical `anthropic` provider.
+    assert_eq!(
+        result.get("thinking"),
+        Some(&json!({"type": "enabled", "budget_tokens": 24576})),
+        "a dynamic provider must not lose the model's thinking format"
+    );
+    assert!(result.get("reasoning_effort").is_none());
+}
+
+#[test]
 fn apply_reads_the_body_when_handed_no_captured_intent() {
     // Given: a caller that applies thinking without having captured the intent
     // first. Depending on caller discipline here would mean a forgotten capture
