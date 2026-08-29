@@ -20,7 +20,7 @@ pub enum Frame {
 pub enum Encoding {
     /// `data: {...}` lines.
     Sse,
-    /// Bare JSON objects, one per line (Ollama).
+    /// Bare JSON objects, one per line (Ollama, `CommandCode`).
     Ndjson,
 }
 

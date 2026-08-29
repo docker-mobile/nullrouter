@@ -60,6 +60,8 @@ nullrouter-execute = { path = "crates/execute" }
 nullrouter-providers = { path = "crates/providers" }
 nullrouter-translate = { path = "crates/translate" }
 futures-util = "0.3"
+# Session ids for providers that require a per-request correlation header.
+getrandom = "0.3"
 # Bundled so a 9Router import works without a system SQLite present.
 rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = [

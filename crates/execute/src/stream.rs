@@ -54,7 +54,8 @@ fn frame_for(chunk: &Value, framing: ClientFraming, source: Format) -> String {
 /// Upstream encoding for a provider format.
 pub const fn upstream_encoding(target: Format) -> Encoding {
     match target {
-        Format::Ollama => Encoding::Ndjson,
+        // Both send bare JSON objects, one per line, with no `data:` prefix.
+        Format::Ollama | Format::CommandCode => Encoding::Ndjson,
         _ => Encoding::Sse,
     }
 }

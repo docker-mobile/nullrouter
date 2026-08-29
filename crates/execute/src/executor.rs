@@ -9,6 +9,7 @@ use nullrouter_providers::registry;
 use reqwest::{Client, Response, StatusCode};
 use serde_json::Value;
 
+use crate::bespoke;
 use crate::credentials::{Credentials, build_headers, build_url, fallback_count};
 
 /// Connect timeout when a provider declares none
@@ -105,6 +106,46 @@ pub struct RawRequest<'a> {
     /// Headers applied after the provider's own.
     pub extra_headers: &'a [(&'a str, &'a str)],
     pub credentials: &'a Credentials,
+}
+
+/// Everything a dispatch needs beyond the URL and the client.
+///
+/// Exposed so a test can assert on what the executor *would* send to a provider
+/// whose real endpoint is a fixed HTTPS host it cannot be pointed away from — the
+/// envelope, the headers, and the URL suffix are the whole substance of those
+/// providers, and asserting them any other way would mean asserting nothing.
+#[derive(Debug, Clone)]
+pub struct PreparedRequest {
+    /// Headers to send, provider-specific ones applied last.
+    pub headers: BTreeMap<String, String>,
+    /// The body as it will go out, envelope included.
+    pub body: Value,
+    /// Appended to the resolved URL. Empty for most providers.
+    pub url_suffix: &'static str,
+}
+
+/// Build the request a dispatch will send, without sending it.
+pub fn prepare(request: &ExecuteRequest<'_>) -> PreparedRequest {
+    let provider = request.provider;
+    let mut headers = build_headers(provider, request.credentials, request.stream);
+    // Provider-specific headers are applied last, so a provider that needs its own
+    // `User-Agent` or `Accept` is not overridden by the generic one.
+    let model = request
+        .body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    for (key, value) in bespoke::extra_headers(provider, model, request.stream) {
+        headers.insert(key, value);
+    }
+    PreparedRequest {
+        headers,
+        // A few providers wrap the body in an envelope the registry cannot describe.
+        body: bespoke::envelope(provider, request.body, request.credentials)
+            .unwrap_or_else(|| request.body.clone()),
+        // Some providers select the method in the URL rather than the body.
+        url_suffix: bespoke::url_suffix(provider, request.stream).unwrap_or_default(),
+    }
 }
 
 /// Builds HTTP clients, reusing a pooled default and building per-proxy
@@ -277,8 +318,13 @@ impl Executor {
                 .unwrap_or(DEFAULT_CONNECT_TIMEOUT_MS),
         );
         let client = self.client_for(request.credentials);
-        let headers = build_headers(provider, request.credentials, request.stream);
-        let payload = serde_json::to_vec(request.body)
+        let prepared = prepare(&request);
+        let PreparedRequest {
+            headers,
+            body: outgoing,
+            url_suffix: suffix,
+        } = &prepared;
+        let payload = serde_json::to_vec(outgoing)
             .map_err(|error| ExecuteError::Serialize(error.to_string()))?;
 
         let total_urls = fallback_count(provider);
@@ -287,14 +333,16 @@ impl Executor {
         let mut url_index = 0;
 
         while url_index < total_urls {
-            let Some(url) = build_url(provider, request.credentials, url_index) else {
+            let Some(url) = build_url(provider, request.credentials, url_index)
+                .map(|url| format!("{url}{suffix}"))
+            else {
                 return Err(ExecuteError::NoEndpoint {
                     provider: provider.to_owned(),
                 });
             };
 
             let mut builder = client.post(&url).timeout(timeout);
-            for (key, value) in &headers {
+            for (key, value) in headers {
                 builder = builder.header(key, value);
             }
 
@@ -319,8 +367,10 @@ impl Executor {
                     return Ok(ExecuteOutcome {
                         response,
                         url,
-                        headers,
-                        sent_body: request.body.clone(),
+                        headers: headers.clone(),
+                        // What actually went out, envelope included, so request
+                        // logging shows the body the provider received.
+                        sent_body: outgoing.clone(),
                     });
                 }
                 Err(error) => {

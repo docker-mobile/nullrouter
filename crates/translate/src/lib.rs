@@ -6,10 +6,10 @@
 //! translation is incremental and carries [`state::StreamState`] across chunks.
 //!
 //! Ported pairs: `openai <-> claude`, `openai <-> gemini` (the latter also
-//! covers `gemini-cli`, `vertex`, and `antigravity` on the response side, which
-//! share Gemini's response shape), and `openai <-> ollama`. The bespoke `kiro`,
-//! `cursor`, and `commandcode` formats belong to custom executors and are not
-//! ported; requests for them pass through untranslated.
+//! covers `gemini-cli`, `vertex`, and `antigravity`, which share Gemini's response
+//! shape), `openai <-> ollama`, and `commandcode -> openai`. The `kiro`, `cursor`,
+//! `grok-web`, and `perplexity-web` formats need provider-specific request signing
+//! and are not ported; requests for them pass through untranslated.
 
 pub mod body;
 pub mod concerns;
@@ -161,6 +161,16 @@ pub fn translate_request(
             &intermediate,
             stream,
         )),
+        // CommandCode reads OpenAI's own request shape; only its responses differ.
+        // The provider forces streaming, so `stream` is already true here.
+        Format::CommandCode => {
+            let mut result = intermediate;
+            if let Some(object) = result.as_object_mut() {
+                object.insert("model".to_owned(), Value::String(upstream_model.to_owned()));
+                object.insert("stream".to_owned(), Value::Bool(stream));
+            }
+            TranslatedRequest::plain(result)
+        }
         Format::OpenAi | Format::OpenAiResponses => {
             let mut result = intermediate;
             if let Some(object) = result.as_object_mut() {
@@ -210,6 +220,7 @@ pub fn translate_response(
             response::gemini_to_openai::translate(chunk, state)
         }
         Format::Ollama => response::ollama_to_openai::translate(chunk, state),
+        Format::CommandCode => response::commandcode_to_openai::translate(chunk, state),
         // Unported upstream format: forward as-is.
         _ => vec![chunk.clone()],
     };

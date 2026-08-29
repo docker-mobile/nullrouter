@@ -166,6 +166,12 @@ pub struct Transport {
     /// Header name carrying the token when it is not `Authorization`.
     #[serde(default)]
     pub token_auth: Option<String>,
+    /// CLI version a provider gates quota on, sent in `User-Agent`.
+    #[serde(default)]
+    pub cli_version: Option<String>,
+    /// `X-Goog-Api-Client` value for the Cloud Code Assist endpoints.
+    #[serde(default)]
+    pub api_client: Option<String>,
 }
 
 impl Transport {

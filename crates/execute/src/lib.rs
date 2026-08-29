@@ -14,6 +14,7 @@
 //! reports which, so callers can return an explicit error instead of a wrong
 //! answer.
 
+mod bespoke;
 pub mod credentials;
 pub mod errors;
 pub mod executor;
@@ -23,18 +24,19 @@ use nullrouter_providers::Format;
 
 pub use credentials::Credentials;
 pub use errors::{FallbackDecision, UpstreamError, build_error_body, check_fallback_error};
-pub use executor::{ExecuteError, ExecuteOutcome, ExecuteRequest, Executor, RawRequest};
+pub use executor::{
+    ExecuteError, ExecuteOutcome, ExecuteRequest, Executor, PreparedRequest, RawRequest, prepare,
+};
 pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_stream};
 
 /// Provider formats this port can actually execute.
 ///
-/// The excluded formats need provider-specific request signing, envelopes, or
-/// binary protocols (`kiro`, `cursor`, `commandcode`, `grok-web`,
-/// `perplexity-web`, `codex`, `antigravity`, `gemini-cli`).
+/// The excluded formats need provider-specific request signing or binary protocols
+/// (`kiro`, `cursor`, `grok-web`, `perplexity-web`, `codex`, `antigravity`).
 ///
-/// `ollama` is included: its executor is the default one with a different base URL,
-/// and the only real difference is NDJSON framing plus its own request/response
-/// shape — both of which are ported.
+/// `ollama`, `gemini-cli`, and `commandcode` are included. None of them needs a
+/// distinct executor: what they need is an envelope, a per-request header, or a URL
+/// suffix, which [`crate::bespoke`] supplies as hooks on the shared path.
 pub const fn is_format_supported(format: Format) -> bool {
     matches!(
         format,
@@ -44,6 +46,8 @@ pub const fn is_format_supported(format: Format) -> bool {
             | Format::Gemini
             | Format::Vertex
             | Format::Ollama
+            | Format::GeminiCli
+            | Format::CommandCode
     )
 }
 
@@ -79,19 +83,24 @@ mod tests {
         assert!(is_format_supported(Format::Ollama));
         assert!(is_executor_supported("ollama-local"));
         assert!(is_executor_supported("ollama"));
+        // These two need an envelope, a header, or a URL suffix — not an executor.
+        assert!(is_format_supported(Format::GeminiCli));
+        assert!(is_format_supported(Format::CommandCode));
+        assert!(is_executor_supported("gemini-cli"));
+        assert!(is_executor_supported("commandcode"));
     }
 
     #[test]
     fn bespoke_formats_are_refused() {
+        // Each of these needs provider-specific request signing or a binary
+        // protocol, which no hook on the shared path can supply.
         for format in [
             Format::Kiro,
             Format::Cursor,
-            Format::CommandCode,
             Format::GrokWeb,
             Format::PerplexityWeb,
             Format::Codex,
             Format::Antigravity,
-            Format::GeminiCli,
         ] {
             assert!(!is_format_supported(format), "{format:?} must be refused");
         }

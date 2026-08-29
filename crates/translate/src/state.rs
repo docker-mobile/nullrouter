@@ -133,6 +133,19 @@ pub struct StreamState {
     /// Tools declared `custom`, which report raw input instead of arguments.
     pub custom_tool_names: BTreeSet<String>,
 
+    // ── CommandCode -> OpenAI ──
+    /// `created`, fixed at the first event.
+    pub command_code_created: Option<u64>,
+    /// Chunks emitted so far; only the first carries `role`.
+    pub command_code_chunks: u64,
+    /// Tool calls opened so far, for the next index.
+    pub command_code_tools: u64,
+    /// Upstream tool id -> the `tool_calls[].index` it was given.
+    ///
+    /// Needed because arguments arrive as separate delta events that name the id,
+    /// while an OpenAI client accumulates them by index.
+    pub command_code_tool_index: BTreeMap<String, u64>,
+
     // ── Ollama -> OpenAI ──
     /// `created`, fixed at the first NDJSON line so every chunk agrees.
     pub ollama_created: Option<u64>,
@@ -191,6 +204,10 @@ impl StreamState {
             function_names: BTreeMap::new(),
             function_call_ids: BTreeMap::new(),
             custom_tool_names: BTreeSet::new(),
+            command_code_created: None,
+            command_code_chunks: 0,
+            command_code_tools: 0,
+            command_code_tool_index: BTreeMap::new(),
             ollama_created: None,
             ollama_had_tool_calls: false,
         }
