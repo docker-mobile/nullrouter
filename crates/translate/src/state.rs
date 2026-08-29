@@ -132,6 +132,15 @@ pub struct StreamState {
     pub function_call_ids: BTreeMap<u64, String>,
     /// Tools declared `custom`, which report raw input instead of arguments.
     pub custom_tool_names: BTreeSet<String>,
+
+    // ── Ollama -> OpenAI ──
+    /// `created`, fixed at the first NDJSON line so every chunk agrees.
+    pub ollama_created: Option<u64>,
+    /// Whether this turn emitted any tool call.
+    ///
+    /// Ollama reports `done_reason: "stop"` even on a turn that called a tool, so
+    /// the terminal chunk has to know better than the field it was handed.
+    pub ollama_had_tool_calls: bool,
 }
 
 impl StreamState {
@@ -182,6 +191,8 @@ impl StreamState {
             function_names: BTreeMap::new(),
             function_call_ids: BTreeMap::new(),
             custom_tool_names: BTreeSet::new(),
+            ollama_created: None,
+            ollama_had_tool_calls: false,
         }
     }
 

@@ -756,6 +756,10 @@ async fn a_single_model_request_keeps_its_own_error() -> TestResult {
     // Given: a request for one unexecutable provider, not a combo. The combo
     // fallback path must not replace a real 501 with a generic "all models
     // unavailable" — the caller needs to know *which* protocol is unported.
+    //
+    // `kiro` stands in for that class: it needs AWS-style request signing. This
+    // test used to name `ollama`, which is now executable, so it would have made a
+    // real call instead of exercising the refusal.
     let provider = FakeServer::start(vec![("/chat/completions", Reply::json("{}"))]).await;
     let state = fake_state(&provider.base_url()).await;
 
@@ -763,14 +767,19 @@ async fn a_single_model_request_keeps_its_own_error() -> TestResult {
     let response = post(
         &state.addr_string(),
         "/v1/chat/completions",
-        r#"{"model":"ollama/llama3","messages":[{"role":"user","content":"ping"}]}"#,
+        r#"{"model":"kiro/claude-sonnet-4-5","messages":[{"role":"user","content":"ping"}]}"#,
     )
     .await?;
 
     // Then: the explicit 501 naming the provider survives.
-    assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(
+        response.status,
+        StatusCode::NOT_IMPLEMENTED,
+        "body: {}",
+        response.body
+    );
     assert!(
-        response.body.contains("ollama"),
+        response.body.contains("kiro"),
         "the refusal must name the provider: {}",
         response.body
     );

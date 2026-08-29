@@ -225,6 +225,12 @@ pub const OPENAI_COMPAT_BASE: &str = "https://api.openai.com/v1";
 /// Default base URL for the dynamic Anthropic-compatible family.
 pub const ANTHROPIC_COMPAT_BASE: &str = "https://api.anthropic.com/v1";
 
+/// The provider id whose host comes from the connection.
+pub const OLLAMA_LOCAL_PROVIDER: &str = "ollama-local";
+/// Where a local Ollama listens when the connection names no host
+/// (upstream `OLLAMA_LOCAL_DEFAULT_HOST`).
+pub const OLLAMA_LOCAL_DEFAULT_HOST: &str = "http://localhost:11434";
+
 /// `true` for user-defined `openai-compatible-*` providers.
 pub fn is_openai_compatible(provider: &str) -> bool {
     provider.starts_with(OPENAI_COMPATIBLE_PREFIX)

@@ -1150,11 +1150,17 @@ impl Runtime {
         let upstream_model = model::upstream_model_id(&target.provider, &target.model);
 
         let body = if outcome.is_event_stream() {
+            // A collapsed stream is already in the client's format: every frame went
+            // through the streaming translator on the way.
             collapse_stream_to_json(outcome.response, target_format, &upstream_model, &mut state)
                 .await
         } else {
-            // A genuinely non-streaming provider response.
-            match outcome.response.json::<Value>().await {
+            // A genuinely non-streaming provider response, in the provider's own
+            // shape. It has no frames, so the whole body is translated here —
+            // without this an OpenAI client asking a Claude provider for
+            // `stream: false` received `content[]` where it expects `choices[]`,
+            // which reads as an empty completion rather than an error.
+            let raw = match outcome.response.json::<Value>().await {
                 Ok(body) => body,
                 Err(error) => {
                     let message = format!("upstream returned an unreadable body: {error}");
@@ -1164,7 +1170,8 @@ impl Runtime {
                         &message,
                     ));
                 }
-            }
+            };
+            nullrouter_translate::translate_body(target_format, context.source_format, &raw, &state)
         };
 
         // A collapsed stream populates `state.usage` as it translates, but a

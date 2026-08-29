@@ -17,8 +17,9 @@ pub use capabilities::{
     thinking_levels,
 };
 pub use format::{
-    ANTHROPIC_COMPAT_BASE, Format, OPENAI_COMPAT_BASE, detect_format, detect_format_by_endpoint,
-    is_anthropic_compatible, is_openai_compatible, resolve_transport, target_format,
+    ANTHROPIC_COMPAT_BASE, Format, OLLAMA_LOCAL_DEFAULT_HOST, OLLAMA_LOCAL_PROVIDER,
+    OPENAI_COMPAT_BASE, detect_format, detect_format_by_endpoint, is_anthropic_compatible,
+    is_openai_compatible, resolve_transport, target_format,
 };
 pub use model::{
     ModelTarget, ParsedModel, infer_provider_from_model_name, infer_target, model_strip_list,

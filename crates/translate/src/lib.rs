@@ -5,12 +5,13 @@
 //! (`source -> openai -> target`) unless a direct pair is registered. Response
 //! translation is incremental and carries [`state::StreamState`] across chunks.
 //!
-//! Ported pairs: `openai <-> claude` and `openai <-> gemini` (the latter also
+//! Ported pairs: `openai <-> claude`, `openai <-> gemini` (the latter also
 //! covers `gemini-cli`, `vertex`, and `antigravity` on the response side, which
-//! share Gemini's response shape). The bespoke `kiro`, `cursor`, `commandcode`,
-//! and `ollama` formats belong to custom executors and are not ported; requests
-//! for them pass through untranslated.
+//! share Gemini's response shape), and `openai <-> ollama`. The bespoke `kiro`,
+//! `cursor`, and `commandcode` formats belong to custom executors and are not
+//! ported; requests for them pass through untranslated.
 
+pub mod body;
 pub mod concerns;
 pub mod request;
 pub mod response;
@@ -24,6 +25,7 @@ use std::collections::BTreeMap;
 use nullrouter_providers::Format;
 use serde_json::Value;
 
+pub use body::translate_body;
 pub use concerns::{Usage, UsageKind};
 pub use state::{Clock, StreamState};
 
@@ -154,6 +156,11 @@ pub fn translate_request(
         Format::Gemini | Format::GeminiCli | Format::Vertex => TranslatedRequest::plain(
             request::openai_to_gemini::translate(upstream_model, &intermediate, stream),
         ),
+        Format::Ollama => TranslatedRequest::plain(request::openai_to_ollama::translate(
+            upstream_model,
+            &intermediate,
+            stream,
+        )),
         Format::OpenAi | Format::OpenAiResponses => {
             let mut result = intermediate;
             if let Some(object) = result.as_object_mut() {
@@ -202,6 +209,7 @@ pub fn translate_response(
         Format::Gemini | Format::GeminiCli | Format::Vertex | Format::Antigravity => {
             response::gemini_to_openai::translate(chunk, state)
         }
+        Format::Ollama => response::ollama_to_openai::translate(chunk, state),
         // Unported upstream format: forward as-is.
         _ => vec![chunk.clone()],
     };

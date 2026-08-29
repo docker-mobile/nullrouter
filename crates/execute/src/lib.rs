@@ -30,11 +30,20 @@ pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_str
 ///
 /// The excluded formats need provider-specific request signing, envelopes, or
 /// binary protocols (`kiro`, `cursor`, `commandcode`, `grok-web`,
-/// `perplexity-web`, `codex`, `antigravity`, `gemini-cli`, `ollama`).
+/// `perplexity-web`, `codex`, `antigravity`, `gemini-cli`).
+///
+/// `ollama` is included: its executor is the default one with a different base URL,
+/// and the only real difference is NDJSON framing plus its own request/response
+/// shape — both of which are ported.
 pub const fn is_format_supported(format: Format) -> bool {
     matches!(
         format,
-        Format::OpenAi | Format::OpenAiResponses | Format::Claude | Format::Gemini | Format::Vertex
+        Format::OpenAi
+            | Format::OpenAiResponses
+            | Format::Claude
+            | Format::Gemini
+            | Format::Vertex
+            | Format::Ollama
     )
 }
 
@@ -65,6 +74,11 @@ mod tests {
         assert!(is_format_supported(Format::Claude));
         assert!(is_format_supported(Format::Gemini));
         assert!(is_format_supported(Format::OpenAiResponses));
+        // Ollama's executor is the default one with a different base URL, and both
+        // its NDJSON framing and its wire shape are ported.
+        assert!(is_format_supported(Format::Ollama));
+        assert!(is_executor_supported("ollama-local"));
+        assert!(is_executor_supported("ollama"));
     }
 
     #[test]
@@ -78,7 +92,6 @@ mod tests {
             Format::Codex,
             Format::Antigravity,
             Format::GeminiCli,
-            Format::Ollama,
         ] {
             assert!(!is_format_supported(format), "{format:?} must be refused");
         }

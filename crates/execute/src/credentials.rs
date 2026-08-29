@@ -6,7 +6,10 @@
 
 use std::collections::BTreeMap;
 
-use nullrouter_providers::{ANTHROPIC_COMPAT_BASE, OPENAI_COMPAT_BASE, registry};
+use nullrouter_providers::{
+    ANTHROPIC_COMPAT_BASE, OLLAMA_LOCAL_DEFAULT_HOST, OLLAMA_LOCAL_PROVIDER, OPENAI_COMPAT_BASE,
+    registry,
+};
 use nullrouter_translate::schema::ANTHROPIC_API_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -90,6 +93,13 @@ pub fn build_url(provider: &str, credentials: &Credentials, url_index: usize) ->
     if nullrouter_providers::is_anthropic_compatible(provider) {
         let base = credentials.base_url().unwrap_or(ANTHROPIC_COMPAT_BASE);
         return Some(format!("{}/messages", base.trim_end_matches('/')));
+    }
+    // A local Ollama takes its host from the connection: the point of the provider
+    // is to reach the user's own instance, which is not always on this machine.
+    // Upstream's `OllamaLocalExecutor` exists solely to apply this override.
+    if provider == OLLAMA_LOCAL_PROVIDER {
+        let base = credentials.base_url().unwrap_or(OLLAMA_LOCAL_DEFAULT_HOST);
+        return Some(format!("{}/api/chat", base.trim_end_matches('/')));
     }
 
     let transport = registry::transport(provider)?;
@@ -560,6 +570,46 @@ mod tests {
         assert_eq!(
             build_url("xiaomi-tokenplan", &credentials, 0).as_deref(),
             Some("https://token-plan-sgp.xiaomimimo.com/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn a_local_ollama_takes_its_host_from_the_connection() {
+        // The whole point of the provider is to reach the user's own instance, which
+        // is not always on this machine. Ignoring the setting sends every request to
+        // localhost, where there may be nothing listening.
+        let mut credentials = Credentials::default();
+        credentials.provider_specific_data.insert(
+            "baseUrl".to_owned(),
+            serde_json::json!("http://box.lan:11434"),
+        );
+        assert_eq!(
+            build_url("ollama-local", &credentials, 0).as_deref(),
+            Some("http://box.lan:11434/api/chat")
+        );
+
+        // A trailing slash must not double up.
+        let mut trailing = Credentials::default();
+        trailing.provider_specific_data.insert(
+            "baseUrl".to_owned(),
+            serde_json::json!("http://box.lan:11434/"),
+        );
+        assert_eq!(
+            build_url("ollama-local", &trailing, 0).as_deref(),
+            Some("http://box.lan:11434/api/chat")
+        );
+
+        // With no setting, the documented default host.
+        assert_eq!(
+            build_url("ollama-local", &Credentials::default(), 0).as_deref(),
+            Some("http://localhost:11434/api/chat")
+        );
+
+        // The hosted `ollama` provider is a fixed endpoint, not the local one.
+        assert_eq!(
+            build_url("ollama", &credentials, 0).as_deref(),
+            Some("https://ollama.com/api/chat"),
+            "a baseUrl setting must not redirect the hosted provider"
         );
     }
 
