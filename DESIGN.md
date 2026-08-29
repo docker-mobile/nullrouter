@@ -99,9 +99,10 @@ Remaining debt:
 - MITM, headroom compression, token savers, tunnel/tailscale, MCP backend bridging, and proxy-pool
   testing and relay deployment have route surfaces that validate input and then return an explicit
   `501` with `"unsupported": true`. Headroom detection is the exception: it probes for real.
-- Combo `fallback` and `round-robin` strategies route for real, including sticky limits and
-  cross-model fallback. The `fusion` strategy is not ported: a fusion combo is routed as `fallback`
-  rather than fanning out to a panel and judge.
+- Combo `fallback`, `round-robin`, and `fusion` strategies all route for real, including sticky
+  limits, cross-model fallback, and the fusion panel/judge fan-out with quorum-grace collection.
+  Per-combo strategy overrides (`comboStrategies[name]`) are not ported: the global
+  `comboStrategy` setting applies to every combo.
 - SAML assertion consumption is refused rather than deferred: verifying a signature needs exclusive
   XML canonicalisation, and a subtly wrong implementation is an authentication bypass. Metadata and
   outbound `AuthnRequest` generation are complete.

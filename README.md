@@ -69,7 +69,9 @@ dispatched to whichever provider in the registry actually exposes that service.
 [`wasm-bindgen-cli`](https://crates.io/crates/wasm-bindgen-cli) and the
 `wasm32-unknown-unknown` target for the dashboard.
 
-**1. Build the dashboard WASM bundle once:**
+**1. Build the dashboard WASM bundle once.** This is not optional — the dashboard,
+the sign-in screen, and the OAuth callback are all served by it, so without it every
+page is an empty shell:
 
 ```bash
 rustup target add wasm32-unknown-unknown
@@ -240,7 +242,26 @@ this walks *models*. Both apply: each model exhausts its own accounts before the
 - Rotation is per combo, and a combo whose model list was edited starts over: a cursor recorded against
   a different list points at an arbitrary model.
 
-A `fusion` combo is currently routed as `fallback`; the panel-and-judge fan-out is not ported.
+- **`fusion`** asks every model at once and has a judge write one answer from all of them.
+
+### Fusion combos
+
+A fusion combo fans the prompt out to the whole panel in parallel, then a judge model
+writes the final reply from their answers:
+
+- Panel calls are forced **non-streaming with tools stripped**, and tool turns in the
+  history are flattened to prose. A panel model that could still emit `tool_calls`
+  would hand the judge a half-finished turn, and the client never sees panel output.
+- The judge keeps the client's **original stream flag and tools**, so streaming and
+  downstream tool use still work.
+- Panel answers reach the judge as **"Source 1", "Source 2"** — never model names, so
+  it weighs substance rather than vendor reputation.
+- Collection is **quorum-graced**: once two answers arrive the rest get 8s, capped by
+  a 90s hard timeout, so the slowest model does not set the request's latency.
+- Degrades honestly: **zero** answers is a 503, and **exactly one** is returned
+  directly rather than paying for a judge call to paraphrase a single response.
+- Every panel call is recorded in usage, so a fusion combo does not under-report by
+  the size of its panel.
 
 ### Per-model output ceilings
 
@@ -436,7 +457,31 @@ everything else shares a pooled one.
 
 ## Dashboard
 
-A Leptos client-side-rendered WASM app served by `nullrouter-dashboard-host`, in **35 locales** (34
+**The frontend is entirely Rust.** One Leptos CSR/WASM bundle serves every screen —
+the dashboard, the sign-in page, and the OAuth callback — and the actix host serves
+only document shells that mount it. There is no application JavaScript: the shells
+carry a two-line ES module that boots the bundle, and a `<noscript>` explaining why
+the page is otherwise empty. A boundary test greps each shell's `<script>` blocks and
+fails if fetch calls, event listeners, or redirect handling reappear there.
+
+The sign-in shell deliberately has **no fallback `<form>`**. One would work without
+WASM and would skip the redirect sanitiser and lockout countdown entirely; a silently
+degraded sign-in is worse than a page that says what it needs.
+
+Two consequences worth knowing:
+
+- Every screen needs the bundle built (see [Quick start](#quick-start)). Without it
+  you get empty shells, not a degraded-but-working dashboard.
+  `/pkg/*` is public at the gateway, which is what lets the bundle load on `/login`
+  before a session exists.
+- The redirect sanitiser and the OAuth relay's origin restriction are unit-tested
+  Rust rather than script in a string literal. Both handle untrusted input — a
+  `?next=` from a link and an authorization code destined for another window — so
+  they are tested directly: hostile `?next=` values (scheme-relative, `javascript:`,
+  prefix-matching origins, backslash tricks) and a `postMessage` target that is never
+  `"*"`.
+
+The dashboard is served by `nullrouter-dashboard-host` in **35 locales** (34
 bundles fetched at runtime, plus built-in English) covering Arabic, Bengali, Chinese (Simplified and
 Traditional), Czech, Danish, Dutch, Farsi, Finnish, French, German, Greek, Hebrew, Hindi, Hungarian,
 Indonesian, Italian, Japanese, Khmer, Korean, Norwegian, Polish, Portuguese (BR and PT), Romanian,
@@ -575,8 +620,10 @@ deliver it. Console-log streams connect and emit an empty init frame — there i
 backend.
 
 **Not ported at all:** remote `/models` probing for dynamic compatible providers (set
-`providerSpecificData.enabledModels` instead) and the `fusion` combo strategy — a fusion combo is
-routed as `fallback` rather than fanning out to a judge.
+`providerSpecificData.enabledModels` instead), per-combo strategy overrides
+(`comboStrategies[name]` — the global `comboStrategy` applies to every combo), and multi-transport
+selection (only a provider's first `transport` is read, so `xiaomi-tokenplan`'s Claude transport is
+unreachable).
 
 **Deliberately excluded, not deferred:** `pxpipe` (8 routes) and `/v1/videos/*`. `pxpipe` is an
 external binary subsystem that upstream itself keeps commented out of its own sidebar.

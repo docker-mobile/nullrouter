@@ -1,5 +1,6 @@
 mod combo;
 mod errors;
+mod fusion;
 mod handlers;
 mod models;
 mod pipeline;

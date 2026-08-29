@@ -28,6 +28,7 @@ use nullrouter_translate::{RequestRoute, StreamState, translate_request};
 use serde_json::Value;
 
 use crate::combo::{self, ComboStrategy, RotationState};
+use crate::fusion;
 use crate::responses;
 use crate::state_client::{Selection, StateClient, UsageReport};
 
@@ -209,13 +210,17 @@ impl Runtime {
 
     /// Resolve, execute, and respond.
     ///
-    /// A combo yields several targets; each is tried in turn, and a failure only
-    /// advances to the next model when it is one worth retrying elsewhere. A
+    /// A combo yields several targets. `fusion` asks all of them at once and has a
+    /// judge write the answer; the other strategies try them in turn, and a failure
+    /// only advances to the next model when it is one worth retrying elsewhere. A
     /// refusal that would recur on every model — a malformed request, say — is
     /// returned immediately rather than replayed against the whole combo.
     pub(crate) async fn execute_chat(&self, context: ChatContext<'_>) -> HttpResponse {
-        let targets = self.resolve_targets(&context.requested_model).await;
-        let Some((last, leading)) = targets.split_last() else {
+        let resolved = self.resolve_targets(&context.requested_model).await;
+        if resolved.strategy == ComboStrategy::Fusion && resolved.targets.len() > 1 {
+            return self.execute_fusion(&context, &resolved.targets).await;
+        }
+        let Some((last, leading)) = resolved.targets.split_last() else {
             return responses::json(
                 StatusCode::BAD_REQUEST,
                 &build_error_body(400, "Invalid model format"),
@@ -235,6 +240,234 @@ impl Runtime {
         match self.execute_for_target(&context, last).await {
             TargetOutcome::Responded(response) | TargetOutcome::Failed { response } => response,
         }
+    }
+
+    /// Ask every panel model at once, then have a judge write the answer.
+    ///
+    /// Collection is quorum-graced: once `min_panel` answers arrive the rest get a
+    /// bounded window, so the slowest model does not set the request's latency.
+    /// A hard timeout caps the whole fan-out regardless.
+    ///
+    /// Degrades the way upstream does. No answers is a 503 — there is nothing to
+    /// judge. Exactly one answer is returned directly: asking a judge to
+    /// "synthesise" a single response would spend a second call to paraphrase it.
+    async fn execute_fusion(
+        &self,
+        context: &ChatContext<'_>,
+        panel: &[model::ModelTarget],
+    ) -> HttpResponse {
+        // Only reached with a panel of two or more, so a first model always exists.
+        let Some(first) = panel.first() else {
+            return responses::json(
+                StatusCode::BAD_REQUEST,
+                &build_error_body(400, "Fusion combo has no models"),
+            );
+        };
+        let tuning = fusion::FusionTuning::default();
+        let quorum = tuning.quorum(panel.len());
+        let panel_body = fusion::panel_body(&context.body);
+
+        let answers = self
+            .collect_panel(context, panel, &panel_body, quorum, tuning)
+            .await;
+
+        match answers.len() {
+            0 => {
+                self.fail(
+                    context,
+                    first,
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "All fusion panel models failed",
+                )
+                .await
+            }
+            // One answer is the answer. Re-running it through the normal path keeps
+            // the client's streaming and tool settings, which the panel call dropped.
+            1 => {
+                let only = answers
+                    .first()
+                    .and_then(|answer| {
+                        panel
+                            .iter()
+                            .find(|target| Self::target_label(target) == answer.model)
+                    })
+                    .unwrap_or(first);
+                match self.execute_for_target(context, only).await {
+                    TargetOutcome::Responded(response) | TargetOutcome::Failed { response } => {
+                        response
+                    }
+                }
+            }
+            _ => {
+                // The judge keeps the client's original stream flag and tools; only
+                // the panel calls were forced to prose. The judge is the first panel
+                // model, as upstream defaults when no judge is configured.
+                let judge_context = ChatContext {
+                    endpoint: context.endpoint,
+                    body: fusion::judge_body(&context.body, &answers),
+                    stream: context.stream,
+                    source_format: context.source_format,
+                    requested_model: context.requested_model.clone(),
+                };
+                match self.execute_for_target(&judge_context, first).await {
+                    TargetOutcome::Responded(response) | TargetOutcome::Failed { response } => {
+                        response
+                    }
+                }
+            }
+        }
+    }
+
+    /// Run every panel model concurrently and collect whatever answered in time.
+    async fn collect_panel(
+        &self,
+        context: &ChatContext<'_>,
+        panel: &[model::ModelTarget],
+        panel_body: &Value,
+        quorum: usize,
+        tuning: fusion::FusionTuning,
+    ) -> Vec<fusion::PanelAnswer> {
+        use futures_util::stream::{FuturesUnordered, StreamExt};
+
+        let mut calls: FuturesUnordered<_> = panel
+            .iter()
+            .map(|target| async move {
+                let text = self.panel_text(context, target, panel_body).await;
+                (Self::target_label(target), text)
+            })
+            .collect();
+
+        let mut answers: Vec<fusion::PanelAnswer> = Vec::with_capacity(panel.len());
+        let hard_deadline = tokio::time::sleep(std::time::Duration::from_millis(
+            tuning.panel_hard_timeout_ms,
+        ));
+        tokio::pin!(hard_deadline);
+        // Only armed once quorum is reached; before that there is nothing to be
+        // late for.
+        let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+
+        loop {
+            tokio::select! {
+                biased;
+                () = &mut hard_deadline => break,
+                () = async {
+                    match grace.as_mut() {
+                        Some(timer) => timer.await,
+                        // No grace armed yet: never completes, so the other
+                        // branches drive the loop.
+                        None => std::future::pending().await,
+                    }
+                } => break,
+                next = calls.next() => {
+                    let Some((model, text)) = next else {
+                        // Every model has reported.
+                        break;
+                    };
+                    if let Some(text) = text.filter(|text| !text.trim().is_empty()) {
+                        answers.push(fusion::PanelAnswer { model, text });
+                        if answers.len() >= quorum && grace.is_none() {
+                            grace = Some(Box::pin(tokio::time::sleep(
+                                std::time::Duration::from_millis(tuning.straggler_grace_ms),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        answers
+    }
+
+    /// Execute one panel call and return its assistant text.
+    ///
+    /// `None` when the model did not answer usefully — no credentials, an upstream
+    /// refusal, an unreadable body. A panel model that fails is dropped rather than
+    /// failing the request: that is what the other panel models are for.
+    async fn panel_text(
+        &self,
+        context: &ChatContext<'_>,
+        target: &model::ModelTarget,
+        panel_body: &Value,
+    ) -> Option<String> {
+        if !is_executor_supported(&target.provider) {
+            return None;
+        }
+        let selection = self
+            .state
+            .select_credentials(&target.provider, Some(&target.model), &[])
+            .await;
+        let Selection::Selected(credentials) = selection else {
+            return None;
+        };
+        let credentials = *credentials;
+
+        let target_format = target_format(&target.provider);
+        let upstream_model = model::upstream_model_id(&target.provider, &target.model);
+        let ceiling = nullrouter_providers::max_output(&target.provider, &target.model);
+        // Panels are always non-streaming: the judge needs the whole answer, and a
+        // provider that only streams has its stream collapsed below.
+        let provider_forces_stream =
+            nullrouter_execute::credentials::forces_stream(&target.provider);
+        let translated = translate_request(
+            RequestRoute {
+                source: context.source_format,
+                target: target_format,
+                provider: &target.provider,
+                model: &upstream_model,
+            },
+            panel_body,
+            provider_forces_stream,
+            ceiling,
+        );
+
+        let started = Instant::now();
+        let outcome = self
+            .executor
+            .execute(ExecuteRequest {
+                provider: &target.provider,
+                body: &translated.body,
+                stream: provider_forces_stream,
+                credentials: &credentials,
+            })
+            .await
+            .ok()?;
+        if !outcome.is_success() {
+            return None;
+        }
+
+        let mut state = StreamState::new(Clock::System);
+        state.tool_name_map = translated.tool_name_map;
+        let body = if outcome.is_event_stream() {
+            collapse_stream_to_json(outcome.response, target_format, &upstream_model, &mut state)
+                .await
+        } else {
+            outcome.response.json::<Value>().await.ok()?
+        };
+
+        // A panel call is a real provider request and is recorded as one, or the
+        // usage page would under-report a fusion combo by the size of its panel.
+        let usage = state
+            .usage
+            .or_else(|| usage_from_body(&body))
+            .unwrap_or_default();
+        self.record(
+            context,
+            target,
+            Some(&credentials),
+            "success",
+            Some(200),
+            usage,
+            started,
+            None,
+        )
+        .await;
+
+        let text = fusion::extract_panel_text(&body);
+        (!text.trim().is_empty()).then_some(text)
+    }
+
+    /// A stable label for a target, used to match an answer back to its model.
+    fn target_label(target: &model::ModelTarget) -> String {
+        format!("{}/{}", target.provider, target.model)
     }
 
     /// Run one resolved target through account selection and execution.
@@ -527,7 +760,12 @@ impl Runtime {
     /// combo naming several models contributes only its first.
     async fn resolve_service_target(&self, requested: &str) -> Option<model::ModelTarget> {
         if requested.contains('/') {
-            return self.resolve_targets(requested).await.into_iter().next();
+            return self
+                .resolve_targets(requested)
+                .await
+                .targets
+                .into_iter()
+                .next();
         }
         let canonical = nullrouter_providers::resolve_provider_id(requested);
         if nullrouter_providers::entry(canonical).is_some() {
@@ -537,25 +775,34 @@ impl Runtime {
                 model: String::new(),
             });
         }
-        self.resolve_targets(requested).await.into_iter().next()
+        self.resolve_targets(requested)
+            .await
+            .targets
+            .into_iter()
+            .next()
     }
 
     /// Resolve a client model string to the ordered list of targets to try.
     ///
     /// A plain `provider/model` yields one target. A combo name yields one per
     /// configured model, in the order its strategy chose — so every model in the
-    /// combo is a fallback for the ones before it.
-    async fn resolve_targets(&self, requested: &str) -> Vec<model::ModelTarget> {
+    /// combo is a fallback for the ones before it. The strategy comes back too,
+    /// because `fusion` asks all of them at once rather than in turn.
+    async fn resolve_targets(&self, requested: &str) -> ResolvedTargets {
         let parsed = model::parse_model(requested);
         if !parsed.is_alias {
-            return parsed
-                .provider
-                .map(|provider| model::ModelTarget {
-                    provider,
-                    model: parsed.model,
-                })
-                .into_iter()
-                .collect();
+            return ResolvedTargets {
+                targets: parsed
+                    .provider
+                    .map(|provider| model::ModelTarget {
+                        provider,
+                        model: parsed.model,
+                    })
+                    .into_iter()
+                    .collect(),
+                // A single model is not a combo, so no strategy applies.
+                strategy: ComboStrategy::Fallback,
+            };
         }
 
         let context = self.state.routing_context().await;
@@ -586,12 +833,15 @@ impl Runtime {
                 })
                 .collect();
             if !targets.is_empty() {
-                return targets;
+                return ResolvedTargets { targets, strategy };
             }
         }
 
         // Fall back to prefix inference, as upstream does for bare aliases.
-        vec![model::infer_target(&parsed.model)]
+        ResolvedTargets {
+            targets: vec![model::infer_target(&parsed.model)],
+            strategy: ComboStrategy::Fallback,
+        }
     }
 
     /// One account attempt.
@@ -969,6 +1219,14 @@ impl Runtime {
 }
 
 /// Result of one account attempt.
+/// The targets a model string resolved to, and how to use them.
+struct ResolvedTargets {
+    /// In the order the strategy chose. Empty only for an unparseable model.
+    targets: Vec<model::ModelTarget>,
+    /// `Fusion` means ask all of them; anything else means try them in turn.
+    strategy: ComboStrategy,
+}
+
 /// What running one combo model produced.
 enum TargetOutcome {
     /// A terminal response: the provider answered, and no other model is asked.
