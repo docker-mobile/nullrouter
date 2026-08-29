@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use nullrouter_execute::Credentials;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// Default loopback address of `nullrouter-state`.
 const DEFAULT_STATE_ADDR: &str = "127.0.0.1:20134";
@@ -271,6 +271,22 @@ impl StateClient {
         let payload = json!({ "connectionId": connection_id, "model": model });
         if let Err(error) = self.client.post(&url).json(&payload).send().await {
             tracing::warn!(%error, connection_id, "failed to clear account error");
+        }
+    }
+
+    /// Persist a refreshed OAuth credential.
+    ///
+    /// `false` when the write did not land, so the caller can say the new token is
+    /// in memory only — the next process to serve this connection will refresh
+    /// again rather than reuse a token it never saw.
+    pub(crate) async fn store_refreshed(&self, payload: &Value) -> bool {
+        let url = format!("{}/internal/v1/credentials/refresh", self.base);
+        match self.client.post(&url).json(payload).send().await {
+            Ok(response) => response.status().is_success(),
+            Err(error) => {
+                tracing::warn!(%error, "failed to persist refreshed credentials");
+                false
+            }
         }
     }
 

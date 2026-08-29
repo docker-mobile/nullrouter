@@ -284,10 +284,39 @@ impl RetryEntry {
 pub struct OAuth {
     #[serde(default)]
     pub client_id: Option<String>,
+    /// Present only where the provider's own CLI ships one publicly.
+    #[serde(default)]
+    pub client_secret: Option<String>,
     #[serde(default)]
     pub token_url: Option<String>,
+    /// Refresh endpoint when it differs from `token_url`.
+    #[serde(default)]
+    pub refresh_url: Option<String>,
+    /// How long before expiry to refresh. Providers vary by four orders of
+    /// magnitude here — Codex wants five days' lead, Kimi five minutes.
+    #[serde(default)]
+    pub refresh_lead_ms: Option<u64>,
+    /// Refresh proactively once a token has gone this long without one, even if
+    /// it has not expired. Codex invalidates a refresh token left unused.
+    #[serde(default)]
+    pub max_refresh_age_ms: Option<u64>,
     #[serde(default)]
     pub refresh: Option<OAuthRefresh>,
+}
+
+impl OAuth {
+    /// Where to POST a refresh grant, preferring an explicit refresh endpoint.
+    pub fn effective_refresh_url(&self) -> Option<&str> {
+        self.refresh_url.as_deref().or(self.token_url.as_deref())
+    }
+
+    /// `true` when the grant body is JSON rather than form-encoded.
+    pub fn refresh_is_json(&self) -> bool {
+        self.refresh
+            .as_ref()
+            .and_then(|refresh| refresh.encoding.as_deref())
+            == Some("json")
+    }
 }
 
 /// Refresh-grant encoding for a provider that supports token refresh.

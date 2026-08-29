@@ -11,10 +11,14 @@ use serde_json::Value;
 
 use crate::bespoke;
 use crate::credentials::{Credentials, build_headers, build_url, fallback_count};
+use crate::refresh;
 
 /// Connect timeout when a provider declares none
 /// (upstream `FETCH_CONNECT_TIMEOUT_MS`).
 const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 60 * 1000;
+/// A token exchange is a short request; it must not inherit a provider's long
+/// completion timeout, because a stalled refresh stalls the request behind it.
+const REFRESH_TIMEOUT_MS: u64 = 30 * 1000;
 /// Retry delay when an entry specifies none (upstream `RETRY_CONFIG.delayMs`).
 const DEFAULT_RETRY_DELAY_MS: u64 = 2000;
 
@@ -236,6 +240,93 @@ impl Executor {
                 message: error.to_string(),
             }),
         }
+    }
+
+    /// Exchange a refresh token for a new access token.
+    ///
+    /// De-duplicated through `cache`: two concurrent requests on one expiring
+    /// connection must not both spend the token, because a provider that
+    /// invalidates a reused refresh token would lock the account out.
+    ///
+    /// The connection's own proxy is honoured — a deployment that can only reach
+    /// the internet through a proxy cannot reach the token endpoint either.
+    pub async fn refresh_credentials(
+        &self,
+        provider: &str,
+        credentials: &Credentials,
+        cache: &refresh::RefreshCache,
+    ) -> Result<refresh::Refreshed, refresh::RefreshError> {
+        let Some(token) = credentials.refresh_token.as_deref() else {
+            return Err(refresh::RefreshError::NotConfigured);
+        };
+        if !refresh::supports_refresh(provider) {
+            return Err(refresh::RefreshError::Unsupported);
+        }
+        if let Some(cached) = cache.get(provider, token) {
+            return cached;
+        }
+
+        let result = self.perform_refresh(provider, credentials, token).await;
+        cache.put(provider, token, &result);
+        result
+    }
+
+    /// The uncached exchange, against the provider's registered endpoint.
+    async fn perform_refresh(
+        &self,
+        provider: &str,
+        credentials: &Credentials,
+        token: &str,
+    ) -> Result<refresh::Refreshed, refresh::RefreshError> {
+        let Some(url) = registry::entry(provider)
+            .and_then(|entry| entry.oauth.as_ref())
+            .and_then(|oauth| oauth.effective_refresh_url())
+        else {
+            return Err(refresh::RefreshError::NotConfigured);
+        };
+        self.refresh_at(url, provider, credentials, token).await
+    }
+
+    /// Exchange a refresh token at an explicit endpoint.
+    ///
+    /// The same split as [`Self::execute`] and [`Self::execute_at`]: the grant body
+    /// and headers are the provider's, but the URL is supplied. Uncached and
+    /// unconditional — callers serving a request should use
+    /// [`Self::refresh_credentials`], which resolves the registered endpoint and
+    /// de-duplicates.
+    pub async fn refresh_at(
+        &self,
+        url: &str,
+        provider: &str,
+        credentials: &Credentials,
+        token: &str,
+    ) -> Result<refresh::Refreshed, refresh::RefreshError> {
+        let Some(grant) = refresh::grant_body(provider, token) else {
+            return Err(refresh::RefreshError::NotConfigured);
+        };
+
+        let mut builder = self
+            .client_for(credentials)
+            .post(url)
+            .timeout(Duration::from_millis(REFRESH_TIMEOUT_MS))
+            .header(reqwest::header::CONTENT_TYPE, grant.content_type);
+        for (key, value) in refresh::grant_headers(provider, credentials) {
+            builder = builder.header(key, value);
+        }
+
+        let response = match builder.body(grant.body).send().await {
+            Ok(response) => response,
+            Err(error) => {
+                // A network failure says nothing about the token's validity, so it
+                // must not be reported as a revoked credential.
+                return Err(refresh::RefreshError::Transient {
+                    message: format!("token endpoint unreachable: {error}"),
+                });
+            }
+        };
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        refresh::settle(status, &body, token, refresh::now_millis())
     }
 
     /// Dispatch to an explicit URL, forwarding bytes exactly as received.

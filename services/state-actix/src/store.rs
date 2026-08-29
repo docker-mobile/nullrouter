@@ -195,6 +195,13 @@ pub(crate) struct CredentialUpdate {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub expires_at: Option<String>,
+    /// Keys to merge into the connection's settings, not replace them with.
+    ///
+    /// A refresh carries `lastRefreshAt` and sometimes an `idToken`. Replacing the
+    /// whole map would drop the connection's `baseUrl`, region, and proxy
+    /// configuration on the first token rotation.
+    #[serde(default)]
+    pub provider_specific_data: Option<BTreeMap<String, Value>>,
 }
 
 /// Milliseconds since the Unix epoch.
@@ -1253,6 +1260,14 @@ impl StateStore {
             }
             if update.expires_at.is_some() {
                 connection.expires_at.clone_from(&update.expires_at);
+            }
+            if let Some(incoming) = update.provider_specific_data.as_ref() {
+                let settings = connection
+                    .provider_specific_data
+                    .get_or_insert_with(BTreeMap::new);
+                for (key, value) in incoming {
+                    settings.insert(key.clone(), value.clone());
+                }
             }
             connection.updated_at = timestamp();
             true

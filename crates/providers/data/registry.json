@@ -213,6 +213,7 @@
   "oauth": {
    "clientId": null,
    "tokenUrl": "https://oauth2.googleapis.com/token",
+   "refreshLeadMs": 300000,
    "refresh": null
   },
   "models": [
@@ -840,6 +841,7 @@
   "oauth": {
    "clientId": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
    "tokenUrl": "https://api.anthropic.com/v1/oauth/token",
+   "refreshLeadMs": 14400000,
    "refresh": {
     "encoding": "json"
    }
@@ -902,6 +904,7 @@
   "oauth": {
    "clientId": null,
    "tokenUrl": null,
+   "refreshUrl": "https://api.cline.bot/api/v1/auth/refresh",
    "refresh": null
   },
   "models": [
@@ -976,6 +979,7 @@
   "oauth": {
    "clientId": null,
    "tokenUrl": "https://api.cline.bot/api/v1/auth/token",
+   "refreshUrl": "https://api.cline.bot/api/v1/auth/refresh",
    "refresh": null
   },
   "models": [
@@ -1250,6 +1254,7 @@
   "oauth": {
    "clientId": null,
    "tokenUrl": "https://copilot.tencent.com/v2/plugin/auth/token",
+   "refreshUrl": "https://copilot.tencent.com/v2/plugin/auth/token/refresh",
    "refresh": null
   },
   "models": [
@@ -1355,6 +1360,8 @@
   "oauth": {
    "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
    "tokenUrl": "https://auth.openai.com/oauth/token",
+   "refreshLeadMs": 432000000,
+   "maxRefreshAgeMs": 691200000,
    "refresh": {
     "encoding": "form",
     "scope": "openid profile email offline_access"
@@ -2876,6 +2883,8 @@
   "oauth": {
    "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
    "tokenUrl": "https://auth.x.ai/oauth2/token",
+   "refreshUrl": "https://auth.x.ai/oauth2/token",
+   "refreshLeadMs": 300000,
    "refresh": null
   },
   "models": [
@@ -3214,7 +3223,9 @@
   "transports": null,
   "oauth": {
    "clientId": "10009311001",
+   "clientSecret": "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW",
    "tokenUrl": "https://iflow.cn/oauth/token",
+   "refreshLeadMs": 86400000,
    "refresh": null
   },
   "models": [
@@ -3578,6 +3589,8 @@
   "oauth": {
    "clientId": "17e5f671-d194-4dfb-9706-5516cb48c098",
    "tokenUrl": "https://auth.kimi.com/api/oauth/token",
+   "refreshUrl": "https://auth.kimi.com/api/oauth/token",
+   "refreshLeadMs": 300000,
    "refresh": null
   },
   "models": [
@@ -5364,6 +5377,7 @@
   "oauth": {
    "clientId": null,
    "tokenUrl": null,
+   "refreshUrl": "https://center.qoder.sh/algo/api/v3/user/refresh_token",
    "refresh": null
   },
   "models": [
@@ -6667,6 +6681,7 @@
   "oauth": {
    "clientId": null,
    "tokenUrl": "https://www.codebuddy.ai/v2/plugin/auth/token",
+   "refreshUrl": "https://www.codebuddy.ai/v2/plugin/auth/token/refresh",
    "refresh": null
   },
   "models": [

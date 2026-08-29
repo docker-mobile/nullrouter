@@ -19,7 +19,7 @@ use actix_web::HttpResponse;
 use actix_web::http::StatusCode;
 use nullrouter_execute::errors::{format_provider_error, parse_upstream_error};
 use nullrouter_execute::{
-    Credentials, ExecuteRequest, Executor, build_error_body, check_fallback_error,
+    Credentials, ExecuteRequest, Executor, RefreshCache, build_error_body, check_fallback_error,
     collapse_stream_to_json, is_executor_supported, pipe_stream, unsupported_executor_message,
 };
 use nullrouter_providers::{Format, ServiceKind, model, target_format};
@@ -123,6 +123,12 @@ const fn service_label(kind: ServiceKind) -> &'static str {
 /// misconfigured provider cannot spin indefinitely.
 const MAX_ACCOUNT_ATTEMPTS: usize = 10;
 
+/// How long a connection is locked out after its refresh token is rejected.
+///
+/// Long, because only the user can fix it: retrying a revoked token every request
+/// spends requests against a provider that has already refused.
+const REAUTH_COOLDOWN_MS: u64 = 60 * 60 * 1000;
+
 /// Upstream's `comboStickyRoundRobinLimit` default, used when state does not
 /// report one (an older state service, say).
 const DEFAULT_COMBO_STICKY_LIMIT: u32 = 1;
@@ -151,6 +157,10 @@ pub struct Runtime {
     executor: Executor,
     state: StateClient,
     rotation: RotationState,
+    /// Shared so two concurrent requests on one expiring connection do not both
+    /// spend its refresh token. A provider that invalidates a reused refresh token
+    /// would otherwise lock the account out.
+    refreshes: RefreshCache,
 }
 
 impl Default for Runtime {
@@ -166,6 +176,7 @@ impl Runtime {
             executor: Executor::new(),
             state: StateClient::from_env(),
             rotation: RotationState::new(),
+            refreshes: RefreshCache::new(),
         }
     }
 
@@ -175,6 +186,7 @@ impl Runtime {
             executor: Executor::new(),
             state: StateClient::new(addr),
             rotation: RotationState::new(),
+            refreshes: RefreshCache::new(),
         }
     }
 
@@ -943,6 +955,12 @@ impl Runtime {
         target: &model::ModelTarget,
         credentials: &Credentials,
     ) -> Attempt {
+        // An access token near its expiry is exchanged before the call rather than
+        // after a 401: the refresh token was stored and never used, so an OAuth
+        // connection worked until its token expired and then failed until the user
+        // re-authorised by hand.
+        let refreshed = self.refresh_if_due(&target.provider, credentials).await;
+        let credentials = refreshed.as_ref().unwrap_or(credentials);
         let started = Instant::now();
         let target_format = target_format(&target.provider);
         let upstream_model = model::upstream_model_id(&target.provider, &target.model);
@@ -1196,6 +1214,77 @@ impl Runtime {
         .await;
 
         Attempt::Responded(responses::json(StatusCode::OK, &body))
+    }
+
+    /// Refresh this connection's access token when it is due.
+    ///
+    /// Returns the updated credentials, or `None` when nothing was refreshed —
+    /// which is the common case, and also what happens on a transient failure: the
+    /// existing token may still work, and refusing the request because a token
+    /// endpoint was briefly unreachable would be worse than trying it.
+    async fn refresh_if_due(
+        &self,
+        provider: &str,
+        credentials: &Credentials,
+    ) -> Option<Credentials> {
+        if !nullrouter_execute::refresh::should_refresh(
+            provider,
+            credentials,
+            nullrouter_execute::refresh::now_millis(),
+        ) {
+            return None;
+        }
+
+        match self
+            .executor
+            .refresh_credentials(provider, credentials, &self.refreshes)
+            .await
+        {
+            Ok(refreshed) => {
+                let payload = nullrouter_execute::refresh::persist_body(
+                    &credentials.connection_id,
+                    &refreshed,
+                );
+                // Persisted before use so a restart does not lose the rotation: the
+                // old refresh token may already be invalid upstream.
+                if !self.state.store_refreshed(&payload).await {
+                    tracing::warn!(
+                        provider,
+                        connection_id = %credentials.connection_id,
+                        "refreshed token could not be persisted; using it for this request only"
+                    );
+                }
+                let mut updated = credentials.clone();
+                updated.access_token = Some(refreshed.access_token);
+                updated.refresh_token = Some(refreshed.refresh_token);
+                updated.expires_at = refreshed.expires_at;
+                Some(updated)
+            }
+            Err(error) => {
+                if error.is_permanent() {
+                    // The user has to re-authorise. Recorded on the connection so
+                    // the dashboard says so instead of showing a generic failure.
+                    let message = format!("OAuth refresh failed: {error:?}");
+                    self.state
+                        .mark_unavailable(&crate::state_client::Cooldown {
+                            connection_id: &credentials.connection_id,
+                            model: None,
+                            status: 401,
+                            reason: &message,
+                            duration_ms: REAUTH_COOLDOWN_MS,
+                            backoff_level: None,
+                        })
+                        .await;
+                } else {
+                    tracing::warn!(
+                        provider,
+                        ?error,
+                        "token refresh failed; trying the existing token"
+                    );
+                }
+                None
+            }
+        }
     }
 
     /// Report a terminal failure, recording it as usage first.

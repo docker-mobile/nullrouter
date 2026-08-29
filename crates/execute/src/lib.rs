@@ -18,6 +18,7 @@ mod bespoke;
 pub mod credentials;
 pub mod errors;
 pub mod executor;
+pub mod refresh;
 pub mod stream;
 
 use nullrouter_providers::Format;
@@ -27,6 +28,7 @@ pub use errors::{FallbackDecision, UpstreamError, build_error_body, check_fallba
 pub use executor::{
     ExecuteError, ExecuteOutcome, ExecuteRequest, Executor, PreparedRequest, RawRequest, prepare,
 };
+pub use refresh::{RefreshCache, RefreshError, Refreshed};
 pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_stream};
 
 /// Provider formats this port can actually execute.
