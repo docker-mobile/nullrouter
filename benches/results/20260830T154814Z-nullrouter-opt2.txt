@@ -13,3 +13,33 @@ duration-per-cell: 20s  trials: 3  warmup: 200
 
 scenarios (overhead = through - direct, both p50 ms)
 
+S1-proxy-nonstream           c=1   through=26.691    direct=25.230    overhead=1.479 ms  [1.304..1.645 over 3 trials]
+S2-translate-nonstream       c=1   through=26.648    direct=25.219    overhead=1.436 ms  [1.364..1.652 over 3 trials]
+S3-proxy-stream-200          c=1   through=28.284    direct=25.259    overhead=2.977 ms  [2.964..3.075 over 3 trials]
+  S3-proxy-stream-200        c=1   keep-alive=28.284    none=28.790    ratio=0.98
+S4-translate-stream-200      c=1   through=28.384    direct=25.252    overhead=3.152 ms  [3.003..3.209 over 3 trials]
+  S4-translate-stream-200    c=1   keep-alive=28.384    none=28.766    ratio=0.99
+S5-translate-stream-2000     c=1   through=58.086    direct=25.413    overhead=32.653 ms  [31.589..32.803 over 3 trials]
+  S5-translate-stream-2000   c=1   keep-alive=58.086    none=58.747    ratio=0.99
+S6-claude-native-nonstream   c=1   through=26.722    direct=25.221    overhead=1.501 ms  [1.334..1.501 over 3 trials]
+S1-proxy-nonstream           c=8   through=27.009    direct=25.204    overhead=1.803 ms  [1.798..1.834 over 3 trials]
+S2-translate-nonstream       c=8   through=26.984    direct=25.211    overhead=1.773 ms  [1.734..1.958 over 3 trials]
+S3-proxy-stream-200          c=8   through=28.466    direct=25.219    overhead=3.249 ms  [3.247..3.292 over 3 trials]
+  S3-proxy-stream-200        c=8   keep-alive=28.466    none=29.906    ratio=0.95
+S4-translate-stream-200      c=8   through=28.572    direct=25.223    overhead=3.346 ms  [3.332..3.399 over 3 trials]
+  S4-translate-stream-200    c=8   keep-alive=28.572    none=30.068    ratio=0.95
+S5-translate-stream-2000     c=8   through=83.149    direct=25.326    overhead=57.823 ms  [45.369..61.028 over 3 trials]
+  S5-translate-stream-2000   c=8   keep-alive=83.149    none=77.357    ratio=1.07
+S6-claude-native-nonstream   c=8   through=27.012    direct=25.202    overhead=1.811 ms  [1.440..1.832 over 3 trials]
+
+written to benches/results/20260830T154814Z-nullrouter-opt2.txt
+
+Reading this:
+  * `overhead` is the router's cost. `direct` is the mock's own service time and should
+    sit near --mock-sleep-ms; if it does not, the mock or the machine is the problem and
+    the overhead column is not trustworthy.
+  * If overhead lands on a round fraction of --mock-sleep-ms, suspect the harness rather
+    than celebrating the result: it is probably timing the mock.
+  * A wide [min..max] means a noisy machine, not a fast router. Re-run before quoting.
+  * S5 is the headline: per-frame cost multiplies, and it is the shape real agent traffic
+    takes.
