@@ -1,0 +1,25 @@
+[package]
+name = "hop-probe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Attributes router overhead to reqwest, translation, or the pipeline"
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "hop-probe"
+path = "src/main.rs"
+
+# Deliberately the same client and translator the runtime uses. The point is to measure what
+# *those* cost, so substituting anything lighter would answer a different question.
+[dependencies]
+nullrouter-providers.workspace = true
+nullrouter-translate.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

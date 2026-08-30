@@ -1618,6 +1618,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hop-probe"
+version = "0.5.20"
+dependencies = [
+ "nullrouter-providers",
+ "nullrouter-translate",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "hostname"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
