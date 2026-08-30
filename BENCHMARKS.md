@@ -7,14 +7,22 @@ comparison honest rather than flattering.
 ## Where it stands
 
 Twelve cells, both legs of each in the same run against the same mock. Full files in
-`benches/results/`; the numbers below are `20260830T180729Z-nullrouter-opt5` against
+`benches/results/`; the numbers below are `20260830T185309Z-nullrouter-fair` against
 `20260830T132648Z-9router`.
 
 | | router overhead | end-to-end |
 |---|---|---|
-| best cell | 66.5× (S3, c=8) | 18.6× (S5, c=8) |
-| median | 14.5× | 2.1× |
-| worst cell | 6.95× (S5, c=1) | 1.30× (S1, c=1) |
+| best cell | 61.2× (S3, c=8) | 17.7× (S5, c=8) |
+| median | 9.5× | 2.0× |
+| worst cell | 6.41× (S2, c=1) | 1.29× (S1, c=1) |
+
+**Use the `fair` run, not `opt5`, and here is why.** `opt5` reports slightly better figures — 1.23 ms
+against 1.38 ms on S1 c=1 — because the runtime was not enforcing API keys during it. `requireApiKey`
+could not be persisted at all (`PUT /api/settings` accepted it and silently dropped it; fixed in
+510b6f1), so the gateway enforced from its environment variable while the runtime skipped its own
+check, saving one state round trip per request. One key check per request on each side, which is
+what 9Router does too — fair by accident, and not the configuration the harness claimed. `fair` is
+the run where both layers enforce.
 
 **Both figures matter and they answer different questions.** Router overhead is
 `p50(through) − p50(direct)` — a fact about the router, and the number to watch when optimising it.
@@ -288,25 +296,41 @@ bypass key enforcement entirely.
 
 ### What the remaining overhead is, measured rather than reasoned about
 
-1.23 ms at c=1 non-streaming, attributed with `benches/hop-probe`:
+1.38 ms at c=1 non-streaming, attributed with `benches/hop-probe` and per-endpoint `oha` runs.
+
+**Measure the hops against a zero-latency mock, not the 25 ms one.** Subtracting two numbers that
+both contain a 25 ms sleep leaves the difference dominated by scheduling and wake-up latency, which
+inflates it: the runtime hop reads 0.772 ms that way and 0.425 ms with `--sleep-ms 0`. The first
+version of this table used the inflated figure and attributed 0.575 ms to the actix cycle. A
+`/health` request through the same actix stack takes 0.073 ms, which was the clue that the
+attribution was wrong rather than the framework being slow.
+
+Against `--sleep-ms 0`:
 
 | Piece | Cost |
 |---|---|
-| runtime hop | 0.772 ms |
-|  ├ `state keys/validate` | 0.076 ms |
-|  ├ `state credentials/select` | 0.078 ms |
+| mock control | 0.061 ms |
+| runtime hop | **0.425 ms** |
+|  ├ actix request/response cycle (`/health` floor) | 0.073 ms |
+|  ├ `state keys/validate` | 0.079 ms |
+|  ├ `state credentials/select` | 0.084 ms |
 |  ├ `reqwest` over a minimal client | 0.038 ms |
 |  ├ translation, both directions | 0.004 ms |
 |  ├ serde parse + serialise | 0.001 ms |
-|  └ **unattributed** | **0.575 ms** — actix request/response cycle and pipeline control flow |
-| gateway hop | 0.562 ms |
-|  ├ `auth authorize` | 0.074 ms (was 0.230) |
-|  └ **unattributed** | **0.332 ms** — Pingora proxying |
+|  └ **unattributed** | **~0.15 ms** — pipeline control flow between those calls |
+| gateway hop | **0.353 ms** |
+|  ├ `auth authorize` | 0.079 ms (was 0.230 before the cache) |
+|  └ **unattributed** | **~0.27 ms** — Pingora's own proxying |
 
-The two unattributed figures are the honest limit of this sandbox: `perf`, `valgrind` and
-`flamegraph` are all absent, so the cost is locatable to the actix cycle and Pingora's proxying but
-not to a function within them. Recorded as unattributed rather than guessed at, so the next attempt
-starts from a measurement.
+The two unattributed figures are the limit of what this sandbox can resolve: `perf`, `valgrind` and
+`flamegraph` are all absent, so the cost is locatable to the pipeline's control flow and Pingora's
+proxying but not to a function inside them. Recorded as unattributed rather than guessed at.
+
+One cheap win is visible without a profiler: `chat_entrypoint` parses the request body **twice**,
+once as `serde_json::Value` and once as a typed `ChatPayload`, from the same bytes. At 0.001 ms per
+parse that is not where the 0.15 ms is, which is exactly why it is recorded here rather than fixed in
+a hurry — it would be a change with no measurable effect, and this document already contains one of
+those.
 
 The `translate` row is the point worth keeping: 0.004 ms, against 0.5 µs of thinking-pipeline
 reordering in the micro-benchmarks above. Both are three orders of magnitude below where the cost
@@ -487,9 +511,14 @@ tried, and no run establishes it. What *can* be stated, and what this document t
   to be flat on the cell it was aimed at (frame coalescing on S5) and the diagnosis that was wrong
   (round trips rather than the snapshot clone behind them).
 
-The next attempt should start from the two unattributed figures above — 0.575 ms in the actix cycle
-and 0.332 ms in Pingora's proxying — which together are 74% of what is left at c=1 non-streaming, and
-neither of which can be narrowed further without a profiler.
+The next attempt should start from the two unattributed figures above — ~0.15 ms in the pipeline's
+control flow and ~0.27 ms in Pingora's proxying — which together are a little over half of what is
+left at c=1 non-streaming, and neither of which can be narrowed further on a box without a profiler.
+
+And it should measure the hops against a zero-latency mock. The first version of that table did not,
+and reported a runtime hop of 0.772 ms where the real figure is 0.425 ms: subtracting two numbers
+that each contain the same 25 ms sleep leaves scheduling noise in the remainder. That error made
+the actix cycle look like 0.575 ms of the cost when it is 0.073 ms.
 
 ## Environment notes
 

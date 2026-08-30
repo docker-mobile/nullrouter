@@ -15,3 +15,48 @@ scenarios (overhead = through - direct, both p50 ms)
 
 S1-proxy-nonstream           c=1   through=26.629    direct=25.252    overhead=1.377 ms  [1.266..1.508 over 3 trials]
 S2-translate-nonstream       c=1   through=26.854    direct=25.280    overhead=1.557 ms  [1.457..1.809 over 3 trials]
+S3-proxy-stream-200          c=1   through=27.697    direct=25.286    overhead=2.370 ms  [2.243..2.848 over 3 trials]
+  S3-proxy-stream-200        c=1   keep-alive=27.697    none=28.198    ratio=0.98
+S4-translate-stream-200      c=1   through=27.844    direct=25.257    overhead=2.633 ms  [2.354..2.868 over 3 trials]
+  S4-translate-stream-200    c=1   keep-alive=27.844    none=28.244    ratio=0.99
+S5-translate-stream-2000     c=1   through=37.081    direct=25.328    overhead=11.662 ms  [11.584..12.417 over 3 trials]
+  S5-translate-stream-2000   c=1   keep-alive=37.081    none=38.273    ratio=0.97
+S6-claude-native-nonstream   c=1   through=26.547    direct=25.251    overhead=1.296 ms  [1.289..1.674 over 3 trials]
+S1-proxy-nonstream           c=8   through=26.817    direct=25.207    overhead=1.606 ms  [1.604..1.676 over 3 trials]
+S2-translate-nonstream       c=8   through=26.857    direct=25.201    overhead=1.656 ms  [1.488..1.663 over 3 trials]
+S3-proxy-stream-200          c=8   through=27.506    direct=25.213    overhead=2.276 ms  [2.220..2.465 over 3 trials]
+  S3-proxy-stream-200        c=8   keep-alive=27.506    none=27.779    ratio=0.99
+S4-translate-stream-200 c=8: direct leg measured 0.000ms against a 25ms mock
+  outside [12.5, 85] -- the harness is mis-measuring; overhead not reported
+S5-translate-stream-2000     c=8   through=40.057    direct=25.322    overhead=14.735 ms  [12.107..14.971 over 3 trials]
+  S5-translate-stream-2000   c=8   keep-alive=40.057    none=38.140    ratio=1.05
+S6-claude-native-nonstream   c=8   through=26.881    direct=25.234    overhead=1.637 ms  [1.615..1.806 over 3 trials]
+
+written to benches/results/20260830T185309Z-nullrouter-fair.txt
+
+Reading this:
+  * `overhead` is the router's cost. `direct` is the mock's own service time and should
+    sit near --mock-sleep-ms; if it does not, the mock or the machine is the problem and
+    the overhead column is not trustworthy.
+  * If overhead lands on a round fraction of --mock-sleep-ms, suspect the harness rather
+    than celebrating the result: it is probably timing the mock.
+  * A wide [min..max] means a noisy machine, not a fast router. Re-run before quoting.
+  * S5 is the headline: per-frame cost multiplies, and it is the shape real agent traffic
+    takes.
+
+S4-translate-stream-200 c=8: re-measured by hand after the run
+--------------------------------------------------------------
+The harness refused this cell: its direct leg came back 0.000ms against a 25ms mock, which is
+outside the [12.5, 85] sanity bound, so it reported the refusal instead of an overhead figure. The
+mock had died between cells -- the same run's other eleven cells are unaffected, and the guard is
+the reason a wrong number was not published.
+
+Re-measured immediately afterwards with the same tool, payloads and concurrency, mock verified up
+first via /health:
+
+  direct   25.2268 ms
+  through  27.6467 ms
+  overhead  2.4199 ms   (9Router 104.75 ms -> 43.29x)
+
+Recorded here rather than edited into the table above, because it was not measured in the same run
+as the rest and the difference should be visible.

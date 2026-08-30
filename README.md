@@ -71,16 +71,21 @@ service time, both legs of every cell in the same run. Twelve cells; full method
 
 | | nullrouter | 9Router |
 |---|---|---|
-| Overhead added, non-streaming, 1 connection | **1.23 ms** | 9.21 ms |
-| Overhead added, streamed 200 frames, 8 connections | **2.09 ms** | 139.26 ms |
-| Overhead added, streamed 2000 frames, 1 connection | **11.86 ms** | 82.39 ms |
+| Overhead added, non-streaming, 1 connection | **1.38 ms** | 9.21 ms |
+| Overhead added, streamed 200 frames, 8 connections | **2.28 ms** | 139.26 ms |
+| Overhead added, streamed 2000 frames, 1 connection | **11.66 ms** | 82.39 ms |
 | Memory, idle, all services | **108.8 MiB** (8 processes) | 228.3 MiB (1 process) |
 | CPU, idle, 15s | 0.19 s | **0.01 s** |
 
-Router overhead ranges from 6.95× to 66.5× better depending on the request shape, median 14.5×. On
+Router overhead ranges from 6.41× to 61.2× better depending on the request shape, median 9.5×. On
 the *whole request* — which is what a caller actually waits for, including the provider's own
-latency — that is 1.30× to 18.6×, median 2.1×. The second number is the one to have in mind: a real
+latency — that is 1.29× to 17.7×, median 2.0×. The second number is the one to have in mind: a real
 provider takes hundreds of milliseconds, and no router can make that part faster.
+
+Both routers validate a managed API key on every request in these runs, which is worth stating
+because an earlier run did not: nullrouter's key gate could not be persisted at all, so the runtime
+was skipping a check 9Router performed. That run looked about 0.15 ms better per request and its
+numbers are not the ones above.
 
 The idle CPU row goes the other way: eight event loops ticking over cost more than one, 0.95% of a
 core against 0.05%. It is in the table because leaving it out would make the comparison a
