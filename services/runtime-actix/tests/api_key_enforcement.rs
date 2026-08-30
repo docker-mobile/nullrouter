@@ -271,6 +271,31 @@ async fn serve(
     stream.flush().await
 }
 
+async fn failing_gate_stub() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let addr = listener.local_addr().expect("addr").to_string();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buffer = [0_u8; 4096];
+                let _ = stream.read(&mut buffer).await;
+                let response = if String::from_utf8_lossy(&buffer).contains("/keys/gate") {
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    r#"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{"status":"no_credentials","message":"selection reached"}"#
+                };
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    addr
+}
+
 struct Response {
     status: StatusCode,
     body: String,
@@ -427,6 +452,20 @@ async fn enforcement_fails_closed_when_state_is_unreachable() -> TestResult {
         "{}",
         dead.body
     );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn gate_failure_denies_before_credential_selection() -> TestResult {
+    let addr = failing_gate_stub().await;
+    let response = post_with_key(&addr, None).await?;
+    assert_eq!(
+        response.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        response.body
+    );
+    assert!(response.body.contains("API-key gate unavailable"));
     Ok(())
 }
 

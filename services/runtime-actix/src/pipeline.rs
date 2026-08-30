@@ -431,10 +431,12 @@ impl Runtime {
     pub(crate) async fn enforce_api_key(&self, api_key: Option<&str>) -> Option<HttpResponse> {
         let presented = api_key.map(str::trim).filter(|key| !key.is_empty());
         let Some(gate) = self.state.api_key_gate(presented).await else {
-            // Preserve the existing state-outage behavior: state also supplies credentials, so the
-            // request cannot reach a provider and will return its normal selection failure. We
-            // must not fabricate a requirement setting when its authority is unavailable.
-            return None;
+            // State is the authority for admission. A gate-route failure cannot be treated as a
+            // public setting: credential selection is a separate route and may still be available.
+            return Some(responses::json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                &build_error_body(503, "API-key gate unavailable"),
+            ));
         };
         if !gate.require_api_key {
             return None;
