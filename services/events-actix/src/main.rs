@@ -14,6 +14,15 @@ async fn main() -> std::io::Result<()> {
             .app_data(usage.clone())
             .configure(configure)
     })
+    // TCP_NODELAY, for the same reason as `nullrouter-runtime` — see the long note in
+    // `services/runtime-actix/src/main.rs`. This service is entirely SSE, so it is the one
+    // most exposed to it: without nodelay, every frame after the headers can wait on the
+    // client's delayed-ACK timer once the connection is warm.
+    .on_connect(|connection, _extensions| {
+        if let Some(stream) = connection.downcast_ref::<actix_web::rt::net::TcpStream>() {
+            let _ = stream.set_nodelay(true);
+        }
+    })
     .bind((server.host.as_str(), server.port))?
     .run()
     .await

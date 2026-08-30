@@ -142,6 +142,42 @@ against a 25 ms upstream call 2.30 µs is 0.009% — so the mutex is not worth r
 recorded because it is the one place where contention exists at all, and a future regression that made
 `fill_first` or `fusion` start locking would show up as their cost climbing toward this row.
 
+## The bug this whole exercise paid for: streamed responses cost twice their latency
+
+Found while chasing a bimodal streaming cell. Fixed in `services/{runtime,events,api}-actix/src/main.rs`.
+
+Every streamed response cost a client using keep-alive **roughly double** its real latency:
+
+| | keep-alive on | keep-alive off |
+|---|---|---|
+| nullrouter, streamed, before | **79.97 ms** | 40.35 ms |
+| nullrouter, streamed, after | **39.16 ms** | 39.98 ms |
+| 9Router, streamed | 49.83 ms | 49.03 ms |
+
+The accept socket had no `TCP_NODELAY`. A response leaves as a small header write followed by
+the body; once a connection has settled out of Linux's initial quickack mode, the client's ACK is
+delayed, Nagle holds the body behind the unacknowledged header segment, and the body lands when the
+client's ~40 ms timer fires. Timed on loopback with a raw socket:
+
+```
+request 1: recv 349B @48.2ms, recv 11008B @49.1ms, ... @49.9ms     ← fresh connection, fine
+request 2: recv 349B @46.5ms, recv 34574B @87.8ms                  ← 41 ms of nothing
+request 3: recv 349B @44.3ms, recv 34574B @88.0ms
+```
+
+**Every way of looking at it except one said the router was fine.** Functional tests pass — the
+bytes are all correct, just late. The first request on any connection is unaffected, so anything
+that opens a connection per request sees nothing. The non-streaming cells see nothing. `curl` one
+request at a time sees nothing. It needed a streamed response, on a reused connection, measured
+end to end. 9Router never had it: Node sets nodelay on HTTP sockets by default.
+
+Pingora already sets nodelay on both accept and connect, so the gateway was clean and was merely
+inheriting the runtime's defect through its upstream connection.
+
+`run.sh` now measures every streaming cell both with and without keep-alive and prints the ratio,
+because that divergence is the only signal that showed this. A ratio much above 1 means reused
+connections are paying for something.
+
 ## The overhead is state round trips, not translation
 
 The first thing the harness found, and it is worth more than every micro-benchmark above: nullrouter
@@ -305,9 +341,20 @@ publish one-sided numbers.**
 1. Same mock, same fixed service time, both directions.
 2. Both warmed identically before measurement.
 3. Production builds on both sides.
-4. No feature enabled on one side and not the other.
-5. Publish the full command lines and the mock's source.
-6. **Publish losing cells.** A table with one embarrassing row is credible; one with rows missing is
+4. No feature enabled on one side and not the other. `benches/serve.sh` therefore sets
+   `NULLROUTER_REQUIRE_API_KEY`: 9Router validates a Bearer key on `/v1` and nullrouter does not by
+   default, so leaving it off hands nullrouter a free pass on work the baseline is doing.
+5. **One router up at a time.** Two idle routers still hold thread pools and run background timers,
+   and on a shared CPU that lands in the other one's tail. `run.sh` refuses to start if the other
+   port is listening.
+6. **Nothing else running on the machine.** No `cargo build`, no test run, no second benchmark. A
+   16-core sandbox absorbs a compile without obviously stalling, and the cost shows up as tail
+   latency in whichever cell was unlucky — indistinguishable from a real regression.
+7. Both configured from the *same* source. `benches/configure.sh` imports 9Router's own config via
+   `/api/migrate/9router` rather than hand-building an equivalent, because hand-writing "the same"
+   two providers twice is how a comparison quietly stops being one.
+8. Publish the full command lines and the mock's source.
+9. **Publish losing cells.** A table with one embarrassing row is credible; one with rows missing is
    not.
 
 ## Definition of done

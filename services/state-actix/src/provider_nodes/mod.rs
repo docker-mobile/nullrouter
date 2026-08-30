@@ -11,7 +11,7 @@ use self::types::{
     ValidationResponse, has_http_scheme, provider_node_input_from_request,
 };
 
-pub(crate) use self::types::ProviderNode;
+pub(crate) use self::types::{ProviderNode, is_compatible_llm_provider};
 
 pub(crate) fn configure(config: &mut web::ServiceConfig) {
     config

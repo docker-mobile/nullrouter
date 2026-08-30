@@ -8,6 +8,7 @@
 //! - [`executor`] — dispatch with URL fallback and retry (`executors/base.js`)
 //! - [`stream`] — response translation and framing (`handlers/chatCore/*`)
 //! - [`errors`] — error classification and cooldown policy (`utils/error.js`)
+//! - [`probe`] — asking a user-added provider which models it serves (`services/model.js`)
 //!
 //! Providers whose upstream protocol is not OpenAI-, Claude-, or Gemini-shaped
 //! require bespoke executors that are not ported; [`is_executor_supported`]
@@ -18,6 +19,7 @@ mod bespoke;
 pub mod credentials;
 pub mod errors;
 pub mod executor;
+pub mod probe;
 pub mod refresh;
 pub mod stream;
 
@@ -28,6 +30,7 @@ pub use errors::{FallbackDecision, UpstreamError, build_error_body, check_fallba
 pub use executor::{
     ExecuteError, ExecuteOutcome, ExecuteRequest, Executor, PreparedRequest, RawRequest, prepare,
 };
+pub use probe::{ProbeCache, ProbeError, ProbedModel, probe_models};
 pub use refresh::{RefreshCache, RefreshError, Refreshed};
 pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_stream};
 

@@ -370,4 +370,43 @@ impl StateClient {
             }
         }
     }
+
+    /// Credentials for the connections whose model list must be asked for.
+    ///
+    /// One call for all of them, and read-only: `credentials/select` advances
+    /// round-robin under a write lock, so probing through it would let listing models
+    /// change which connection the next real request uses.
+    ///
+    /// An empty list on failure means `/v1/models` reports what it can from the
+    /// registry instead of failing outright.
+    pub(crate) async fn probe_targets(&self) -> Vec<ProbeTarget> {
+        let url = format!("{}/internal/v1/probe-targets", self.base);
+        match self.client.get(&url).send().await {
+            Ok(response) => response
+                .json::<ProbeTargetsResponse>()
+                .await
+                .map(|parsed| parsed.targets)
+                .unwrap_or_default(),
+            Err(error) => {
+                tracing::warn!(%error, "failed to read probe targets; not probing");
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// The probe targets state reported.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct ProbeTargetsResponse {
+    #[serde(default)]
+    pub targets: Vec<ProbeTarget>,
+}
+
+/// One connection whose provider can be asked for a model list.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProbeTarget {
+    pub connection_id: String,
+    pub provider: String,
+    pub credentials: Credentials,
 }

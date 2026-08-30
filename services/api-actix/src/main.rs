@@ -25,6 +25,13 @@ async fn main() -> std::io::Result<()> {
             .app_data(token_saver.clone())
             .configure(configure)
     })
+    // TCP_NODELAY, for the same reason as `nullrouter-runtime` — see the long note in
+    // `services/runtime-actix/src/main.rs`.
+    .on_connect(|connection, _extensions| {
+        if let Some(stream) = connection.downcast_ref::<actix_web::rt::net::TcpStream>() {
+            let _ = stream.set_nodelay(true);
+        }
+    })
     .bind((server.host.as_str(), server.port))?
     .run()
     .await

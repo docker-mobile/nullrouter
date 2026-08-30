@@ -23,6 +23,26 @@ async fn main() -> std::io::Result<()> {
             .app_data(runtime.clone())
             .configure(configure)
     })
+    // TCP_NODELAY on every accepted socket. Without it a streamed response costs a
+    // client roughly *twice* its real latency.
+    //
+    // The response goes out as a small header write followed by the body. On a
+    // freshly-opened connection Linux is in quickack mode and ACKs at once, so nothing
+    // stalls -- which is why the first request on a connection looks fine and hides this.
+    // Once the connection settles into delayed ACK, Nagle holds the body behind the
+    // unacknowledged header segment until the client's ACK timer fires, ~40 ms later.
+    //
+    // Measured on loopback with a raw socket: headers at 45 ms, then nothing for 42 ms,
+    // then the whole body at once. Streamed p50 was 80 ms with client keep-alive and
+    // 40 ms without; 9Router, which is Node and sets nodelay on HTTP sockets by default,
+    // showed 49 ms either way. Real clients all use keep-alive, so this was the case that
+    // mattered and the only one the benchmark's non-streaming cells could not see.
+    .on_connect(|connection, _extensions| {
+        if let Some(stream) = connection.downcast_ref::<actix_web::rt::net::TcpStream>() {
+            // A failure here costs latency, not correctness, so it is not fatal.
+            let _ = stream.set_nodelay(true);
+        }
+    })
     .bind((server.host.as_str(), server.port))?
     .run()
     .await

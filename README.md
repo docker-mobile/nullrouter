@@ -212,6 +212,13 @@ provider's own latency rather than the full completion time. The pipe runs throu
 backpressure to the upstream read instead of dropping frames. Frames are never dropped on a full
 channel — a truncated frame would corrupt the client's JSON parse.
 
+Every service that streams sets `TCP_NODELAY` on accepted sockets. Without it a streamed response
+cost a client that reuses connections — which is every real client — roughly **twice** its actual
+latency: the headers go out as one small write, and once the connection has left Linux's initial
+quickack mode, Nagle holds the body until the client's delayed-ACK timer fires. It was worth 40 ms
+per streamed response and no functional test could see it, since the bytes were all correct and only
+late. See [BENCHMARKS.md](BENCHMARKS.md).
+
 A provider that only streams (`forceStream` in the registry) is still called with `stream=true` when
 the client asked for JSON; the stream is then collapsed back into a single body.
 
@@ -663,8 +670,18 @@ rather than silently retried.
 deliver it. Console-log streams connect and emit an empty init frame — there is no live capture
 backend.
 
-**Not ported at all:** remote `/models` probing for dynamic compatible providers (set
-`providerSpecificData.enabledModels` instead).
+**Remote `/models` probing is implemented.** A user-added `openai-compatible-*` or
+`anthropic-compatible-*` connection points at a host its owner chose, so the registry cannot know its
+models: `/v1/models` asks the provider. A configured `providerSpecificData.enabledModels` still wins —
+probing only fills the gap where there would otherwise be nothing to show. Results are cached for five
+minutes, because editors poll this route on startup and sometimes per completion.
+
+A failed probe leaves the configured list alone rather than emptying it: a provider that is briefly
+slow should not take a working model picker away. Probes carry
+`x-9r-internal-models-fetch: 1`, and a request arriving with that header is answered from
+configuration without probing — a compatible node's base URL can point at another router, or at this
+one, and without the guard the two would probe each other on every call. Upstream sets and honours the
+same header, so the guard holds in a mixed deployment.
 
 **PXPIPE (the Token Saver page, 8 routes)** is implemented, and is the one feature here that cannot
 be pure Rust. It renders bulky Claude-format context into dense PNGs, which bill by pixel rather than

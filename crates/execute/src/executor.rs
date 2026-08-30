@@ -178,6 +178,27 @@ impl Executor {
         }
     }
 
+    /// Ask a provider which models it serves.
+    ///
+    /// On the executor rather than on the caller so it goes through `client_for`: a
+    /// connection that dispatches through an outbound proxy must probe through the same
+    /// one, or the probe tests a network path the real requests never take — and would
+    /// report a model list that then fails to dispatch, or fail while dispatch works.
+    pub async fn probe_models(
+        &self,
+        provider: &str,
+        credentials: &Credentials,
+        timeout: Duration,
+    ) -> Result<Vec<crate::probe::ProbedModel>, crate::probe::ProbeError> {
+        crate::probe::probe_models(
+            &self.client_for(credentials),
+            provider,
+            credentials,
+            timeout,
+        )
+        .await
+    }
+
     /// Client for a call, honoring any per-connection outbound proxy.
     fn client_for(&self, credentials: &Credentials) -> Client {
         let Some(proxy_url) = credentials.proxy_url() else {

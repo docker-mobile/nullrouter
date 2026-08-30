@@ -90,6 +90,11 @@ pub(crate) fn configure(config: &mut web::ServiceConfig) {
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         )
         .service(
+            web::resource("/internal/v1/probe-targets")
+                .route(web::get().to(probe_targets))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
             web::resource("/internal/v1/auth-settings")
                 .route(web::get().to(auth_settings))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
@@ -575,6 +580,46 @@ fn now_millis() -> u64 {
 
 /// Everything the runtime needs to resolve a model string, in one call:
 /// combos and the settings that affect routing.
+/// Credentials for the connections whose model list can only be learned by asking
+/// the provider.
+///
+/// Separate from `credentials/select` for two reasons, both of which would be bugs if
+/// probing reused it:
+///
+/// * **Selection mutates.** It writes `lastUsedAt` under a write lock to advance
+///   round-robin, so probing through it would let *listing models* change which
+///   connection the next real request goes to.
+/// * **One call, not one per connection.** Selection is per provider. A route that
+///   probes every compatible connection would otherwise make N state round trips
+///   before it made any provider calls, and state round trips are already the largest
+///   component of this router's per-request overhead.
+///
+/// Only the dynamic families are returned. A registry provider's model list is in the
+/// registry, so probing it would be asking a question already answered.
+async fn probe_targets(store: web::Data<StateStore>) -> HttpResponse {
+    // Unredacted deliberately: a probe must present the credentials a completion would.
+    // `list_connections` strips secrets, which is the right default — see
+    // `list_connections_with_secrets`. This route lives under `/internal/*`, which the
+    // gateway refuses outright.
+    let targets: Vec<serde_json::Value> = store
+        .list_connections_with_secrets()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|connection| {
+            crate::provider_nodes::is_compatible_llm_provider(&connection.provider)
+        })
+        .map(|connection| {
+            json!({
+                "connectionId": connection.id.clone(),
+                "provider": connection.provider.clone(),
+                "credentials": CredentialsResponse::from_connection(&connection),
+            })
+        })
+        .collect();
+
+    responses::json(StatusCode::OK, &json!({ "targets": targets }))
+}
+
 async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
     let Ok(settings) = store.settings() else {
         return internal_error();

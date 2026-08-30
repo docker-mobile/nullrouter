@@ -49,13 +49,37 @@ pub(crate) async fn no_content() -> HttpResponse {
     responses::empty(StatusCode::NO_CONTENT)
 }
 
-pub(crate) async fn openai_models(runtime: web::Data<Runtime>) -> HttpResponse {
-    responses::json(StatusCode::OK, &runtime.models_list(&["llm"]).await)
+/// Whether this request is another router's model probe.
+///
+/// A compatible provider's base URL is typed by its owner and can point at another
+/// router, or at this one. If both probe on `/v1/models`, they probe each other on every
+/// call, forever. Answering a marked request from configuration alone terminates the
+/// chain at one hop. Upstream sets and honours the same header, so the guard holds in a
+/// mixed deployment too — which is why the name keeps its `9r` spelling.
+fn is_internal_probe(request: &actix_web::HttpRequest) -> bool {
+    request
+        .headers()
+        .get(nullrouter_execute::probe::INTERNAL_PROBE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.trim() == "1")
+}
+
+pub(crate) async fn openai_models(
+    runtime: web::Data<Runtime>,
+    request: actix_web::HttpRequest,
+) -> HttpResponse {
+    responses::json(
+        StatusCode::OK,
+        &runtime
+            .models_list_with(&["llm"], !is_internal_probe(&request))
+            .await,
+    )
 }
 
 pub(crate) async fn openai_models_by_kind(
     runtime: web::Data<Runtime>,
     kind: web::Path<String>,
+    request: actix_web::HttpRequest,
 ) -> HttpResponse {
     let kind = kind.into_inner();
     // `image-to-text` is spelled `imageToText` in the registry's serviceKinds.
@@ -63,7 +87,12 @@ pub(crate) async fn openai_models_by_kind(
         "image-to-text" => "imageToText",
         other => other,
     };
-    responses::json(StatusCode::OK, &runtime.models_list(&[resolved]).await)
+    responses::json(
+        StatusCode::OK,
+        &runtime
+            .models_list_with(&[resolved], !is_internal_probe(&request))
+            .await,
+    )
 }
 
 pub(crate) async fn model_info(

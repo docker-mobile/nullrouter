@@ -177,6 +177,19 @@ fn is_valid_node_type(node_type: &str) -> bool {
     )
 }
 
+/// Whether a *provider id* belongs to a user-added LLM node.
+///
+/// Ids are the node type plus a dash and a uuid (`openai-compatible-chat-<uuid>`), so
+/// this is a prefix test rather than the exact-match [`is_valid_node_type`] above.
+///
+/// Lives here because this module owns those two constants; a caller writing the
+/// literal itself would drift the day a family is renamed. Embedding nodes are
+/// excluded: they answer `/embeddings`, not a chat model list.
+pub(crate) fn is_compatible_llm_provider(provider: &str) -> bool {
+    provider.starts_with(&format!("{OPENAI_COMPATIBLE}-"))
+        || provider.starts_with(&format!("{ANTHROPIC_COMPATIBLE}-"))
+}
+
 fn bad_request(message: &'static str) -> HttpResponse {
     responses::json(StatusCode::BAD_REQUEST, &responses::error(message))
 }

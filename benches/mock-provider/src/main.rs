@@ -133,6 +133,12 @@ struct Bodies {
     claude_json: Vec<u8>,
     openai_stream: Vec<u8>,
     claude_stream: Vec<u8>,
+    /// `GET /v1/models`, which a real provider serves and a router probes.
+    ///
+    /// Without it the mock answered a probe with a chat completion, which the router
+    /// correctly rejected as an unreadable model list — so the failure path got
+    /// exercised and the success path never did.
+    models: Vec<u8>,
     health: Vec<u8>,
 }
 
@@ -163,9 +169,15 @@ fn main() -> std::process::ExitCode {
         config.workers
     );
 
-    // A thread pool rather than a thread per connection: at concurrency 8 with
-    // keep-alive off, spawning per connection would put thread-creation cost inside
-    // the measurement.
+    // A thread pool rather than a thread per connection, so thread-creation cost stays
+    // out of the measurement.
+    //
+    // With keep-alive a worker now holds its connection until the client closes, which
+    // makes the pool size a ceiling on concurrent connections rather than on concurrent
+    // requests. The ceiling has to exceed the load tool's concurrency plus whatever the
+    // router pools upstream, or requests queue behind a busy worker and the queueing is
+    // reported as router latency. `--workers` defaults to available parallelism (16 here)
+    // against a benchmark concurrency of 8; raise it if either side grows.
     let (sender, receiver) = std::sync::mpsc::channel::<TcpStream>();
     let receiver = Arc::new(std::sync::Mutex::new(receiver));
     for _ in 0..config.workers {
@@ -244,18 +256,34 @@ fn render(config: &Config) -> Bodies {
         config.workers
     );
 
+    // The OpenAI `{"data":[{"id":…}]}` shape, which Anthropic's /v1/models also uses.
+    let models = r#"{"object":"list","data":[{"id":"bench-model","object":"model"},{"id":"bench-model-mini","object":"model"}]}"#;
+
     Bodies {
         openai_json: http_json(&openai_json),
         claude_json: http_json(&claude_json),
         openai_stream: http_sse(&openai_stream),
         claude_stream: http_sse(&claude_stream),
+        models: http_json(models),
         health: http_json(&health),
     }
 }
 
+// `Connection: keep-alive`, because every real provider supports it and a mock that
+// closes every connection is not a neutral control.
+//
+// It was `close`, and that quietly penalised whichever router pools upstream
+// connections. A pooled client keeps the closed socket, tries to reuse it on the next
+// request, finds it dead and re-dials -- and nullrouter's streamed responses came out
+// at 80 ms against 9Router's 50 ms because of it. With keep-alive the same measurement
+// puts nullrouter ahead. A control that changes which router looks faster is not
+// measuring the routers.
+//
+// Both bodies carry Content-Length, so a client knows where each response ends without
+// needing the close to delimit it.
 fn http_json(body: &str) -> Vec<u8> {
     format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\nKeep-Alive: timeout=60\r\n\r\n{body}",
         body.len()
     )
     .into_bytes()
@@ -263,7 +291,7 @@ fn http_json(body: &str) -> Vec<u8> {
 
 fn http_sse(body: &str) -> Vec<u8> {
     format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: keep-alive\r\nKeep-Alive: timeout=60\r\n\r\n{body}",
         body.len()
     )
     .into_bytes()
@@ -274,9 +302,34 @@ fn serve(mut stream: TcpStream, bodies: &Bodies, config: &Config) -> std::io::Re
     stream.set_nodelay(true)?;
     let mut reader = BufReader::new(stream.try_clone()?);
 
+    // One connection, many requests: the responses advertise keep-alive, so a client that
+    // takes them at their word and pipelines further requests down the same socket must be
+    // answered. Returning after one would leave the client waiting on a socket this mock
+    // had already abandoned, which reads as router latency.
+    loop {
+        match serve_one(&mut stream, &mut reader, bodies, config)? {
+            Served::Again => {}
+            Served::Done => return Ok(()),
+        }
+    }
+}
+
+/// Whether the connection should stay open for another request.
+enum Served {
+    Again,
+    Done,
+}
+
+fn serve_one(
+    stream: &mut TcpStream,
+    reader: &mut BufReader<TcpStream>,
+    bodies: &Bodies,
+    config: &Config,
+) -> std::io::Result<Served> {
     let mut request_line = String::new();
     if reader.read_line(&mut request_line)? == 0 {
-        return Ok(());
+        // The client closed. Normal with keep-alive; not an error.
+        return Ok(Served::Done);
     }
     let path = request_line
         .split_whitespace()
@@ -284,17 +337,22 @@ fn serve(mut stream: TcpStream, bodies: &Bodies, config: &Config) -> std::io::Re
         .unwrap_or("/")
         .to_owned();
 
-    // Headers, to find the body length.
+    // Headers, to find the body length and whether the client wants the socket closed.
     let mut content_length = 0_usize;
+    let mut client_wants_close = false;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 || line == "\r\n" || line == "\n" {
             break;
         }
-        if let Some((name, value)) = line.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            content_length = value.trim().parse().unwrap_or(0);
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse().unwrap_or(0);
+            } else if name.eq_ignore_ascii_case("connection")
+                && value.trim().eq_ignore_ascii_case("close")
+            {
+                client_wants_close = true;
+            }
         }
     }
 
@@ -302,14 +360,30 @@ fn serve(mut stream: TcpStream, bodies: &Bodies, config: &Config) -> std::io::Re
     // client's write block, which would show up as router latency.
     let mut body = vec![0_u8; content_length];
     if content_length > 0 {
-        std::io::Read::read_exact(&mut reader, &mut body)?;
+        std::io::Read::read_exact(reader, &mut body)?;
     }
     let streaming = memchr_stream_true(&body);
 
+    // Health and the model list answer immediately: neither is a completion, so the
+    // configured service time does not apply to them. A probe that paid the sleep would
+    // put provider latency into /v1/models, which is not what --sleep-ms means.
     if path.starts_with("/health") {
-        return stream
-            .write_all(&bodies.health)
-            .and_then(|()| stream.flush());
+        stream.write_all(&bodies.health)?;
+        stream.flush()?;
+        return Ok(if client_wants_close {
+            Served::Done
+        } else {
+            Served::Again
+        });
+    }
+    if path.contains("/models") {
+        stream.write_all(&bodies.models)?;
+        stream.flush()?;
+        return Ok(if client_wants_close {
+            Served::Done
+        } else {
+            Served::Again
+        });
     }
 
     // Fixed, not jittered: variance here becomes variance in the result.
@@ -325,7 +399,12 @@ fn serve(mut stream: TcpStream, bodies: &Bodies, config: &Config) -> std::io::Re
         (false, false) => &bodies.openai_json,
     };
     stream.write_all(response)?;
-    stream.flush()
+    stream.flush()?;
+    Ok(if client_wants_close {
+        Served::Done
+    } else {
+        Served::Again
+    })
 }
 
 /// Whether the body asks for a stream.

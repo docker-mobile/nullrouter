@@ -555,6 +555,28 @@ impl StateStore {
             .collect())
     }
 
+    /// Active connections **with their secrets**, for the internal probe-targets route.
+    ///
+    /// [`Self::list_connections`] redacts via [`ProviderConnection::public`], which is the
+    /// right default and is why this needs its own name: a probe has to present the same
+    /// credentials a completion would, or it reports a model list the router cannot then
+    /// use. Named so that a reader can see at the call site that secrets are leaving the
+    /// store, and reachable only under `/internal/*`, which the gateway always refuses.
+    ///
+    /// Takes a read lock only — unlike credential *selection*, which writes `lastUsedAt`
+    /// to advance round-robin. Probing must not move that cursor: listing models would
+    /// otherwise change which connection the next real request uses.
+    pub(crate) fn list_connections_with_secrets(
+        &self,
+    ) -> Result<Vec<ProviderConnection>, StoreError> {
+        let mut connections = self.read_snapshot()?.provider_connections;
+        connections.sort_by_key(|connection| connection.priority);
+        Ok(connections
+            .into_iter()
+            .filter(|connection| connection.is_active)
+            .collect())
+    }
+
     pub(crate) fn get_connection(
         &self,
         id: &str,

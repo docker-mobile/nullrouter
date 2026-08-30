@@ -215,6 +215,23 @@ measure() {
     }'
 }
 
+# The same measurement with connection reuse disabled, for the keep-alive guard below.
+measure_no_keepalive() {
+  local url="$1" body="$2" concurrency="$3"
+  local args=(-z "$DURATION" -c "$concurrency" --disable-keepalive -m POST
+              -T application/json -D "$body" --no-tui)
+  [[ -n "$API_KEY" ]] && args+=(-H "Authorization: Bearer $API_KEY")
+  "$LOAD_TOOL" "${args[@]}" "$url" 2>/dev/null | awk '
+    /50\.00% in/ {
+      value = $3
+      unit = $4
+      if (unit ~ /^s(ecs?)?$/) value = value * 1000
+      else if (unit ~ /^us|^µs/)  value = value / 1000
+      printf "%.3f", value
+      exit
+    }'
+}
+
 # Warm the target: cold-start noise otherwise swamps the cheapest scenario.
 warm() {
   local url="$1" body="$2"
@@ -332,6 +349,30 @@ cell() {
   local lo hi
   lo="$(printf '%s\n' "${overhead[@]}" | sort -n | head -1)"
   hi="$(printf '%s\n' "${overhead[@]}" | sort -n | tail -1)"
+
+  # Keep-alive guard, streaming cells only.
+  #
+  # A streamed response used to cost ~2x its real latency to any client using keep-alive,
+  # because the accept socket had no TCP_NODELAY: the headers went out as one small write
+  # and Nagle then held the body until the client's delayed-ACK timer fired. It was
+  # invisible in every functional test, invisible on a freshly-opened connection (Linux
+  # quickacks early), and invisible in the non-streaming cells. What made it visible was
+  # the same cell measured both ways diverging.
+  #
+  # So the harness measures both and reports the ratio. Anything much above 1 means a
+  # client that reuses connections -- which is every real client -- is paying for it.
+  if [[ "$want" == "stream" ]]; then
+    local no_ka
+    no_ka="$(measure_no_keepalive "$router_url" "$body" "$concurrency")"
+    if [[ -n "$no_ka" && -n "$median_through" ]]; then
+      local ratio
+      ratio="$(awk -v a="$median_through" -v b="$no_ka" 'BEGIN{printf "%.2f", (b > 0) ? a / b : 0}')"
+      printf '%-28s c=%-2s  keep-alive=%s vs none=%s  ratio=%s%s\n' \
+        "  $name" "$concurrency" "$median_through" "$no_ka" "$ratio" \
+        "$(awk -v r="$ratio" 'BEGIN{print (r > 1.5) ? "  <-- streamed responses cost reused connections extra; check TCP_NODELAY" : ""}')" \
+        | tee -a "$RESULT"
+    fi
+  fi
 
   # All three columns are medians. Printing trial 1's `through` beside a median `overhead`
   # made a bimodal cell look like a stable one with an odd spread.

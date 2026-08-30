@@ -19,8 +19,9 @@ use actix_web::HttpResponse;
 use actix_web::http::StatusCode;
 use nullrouter_execute::errors::{format_provider_error, parse_upstream_error};
 use nullrouter_execute::{
-    Credentials, ExecuteRequest, Executor, RefreshCache, build_error_body, check_fallback_error,
-    collapse_stream_to_json, is_executor_supported, pipe_stream, unsupported_executor_message,
+    Credentials, ExecuteRequest, Executor, ProbeCache, RefreshCache, build_error_body,
+    check_fallback_error, collapse_stream_to_json, is_executor_supported, pipe_stream,
+    unsupported_executor_message,
 };
 use nullrouter_providers::{Format, ServiceKind, model, target_format};
 use nullrouter_pxpipe::TokenSaver;
@@ -183,6 +184,12 @@ pub struct Runtime {
     /// the request path: a worker anywhere else would report itself running while
     /// every request here bypassed.
     pxpipe: TokenSaver,
+    /// Remote `/models` results for user-added compatible providers.
+    ///
+    /// Shared and TTL'd because editors call `/v1/models` on startup and sometimes per
+    /// completion; an uncached probe would put a provider round trip on a route that is
+    /// expected to be cheap.
+    probes: ProbeCache,
 }
 
 impl Default for Runtime {
@@ -200,6 +207,7 @@ impl Runtime {
             rotation: RotationState::new(),
             refreshes: RefreshCache::new(),
             pxpipe: TokenSaver::discover(),
+            probes: ProbeCache::new(),
         }
     }
 
@@ -211,6 +219,7 @@ impl Runtime {
             rotation: RotationState::new(),
             refreshes: RefreshCache::new(),
             pxpipe: TokenSaver::discover(),
+            probes: ProbeCache::new(),
         }
     }
 
@@ -225,6 +234,7 @@ impl Runtime {
             rotation: RotationState::new(),
             refreshes: RefreshCache::new(),
             pxpipe: TokenSaver::new(nullrouter_pxpipe::Paths::new(data_dir)),
+            probes: ProbeCache::new(),
         }
     }
 
@@ -799,7 +809,21 @@ impl Runtime {
     /// Backed by the registry and the caller's configured connections, so
     /// `/v1/models` reflects what is actually reachable.
     pub(crate) async fn models_list(&self, kinds: &[&str]) -> Value {
+        self.models_list_with(kinds, true).await
+    }
+
+    /// The model list, with probing optionally suppressed.
+    ///
+    /// `probe: false` is for a request carrying another router's probe header: answering
+    /// from configuration alone is what stops two routers pointed at each other from
+    /// probing back and forth on every call.
+    pub(crate) async fn models_list_with(&self, kinds: &[&str], probe: bool) -> Value {
         let context = self.state.routing_context().await;
+        let probed = if probe {
+            self.probed_models(&context).await
+        } else {
+            std::collections::BTreeMap::new()
+        };
         let input = nullrouter_providers::ModelsListInput {
             connections: context
                 .connections
@@ -807,7 +831,18 @@ impl Runtime {
                 .map(|connection| nullrouter_providers::ConnectionView {
                     provider: connection.provider.clone(),
                     prefix: connection.prefix.clone(),
-                    enabled_models: connection.enabled_models.clone(),
+                    // A configured list is the owner's own choice and wins. Probing only
+                    // fills the gap where there is nothing to show: a compatible node has
+                    // no registry models, so without this the route reports the connection
+                    // and none of its models.
+                    enabled_models: if connection.enabled_models.is_empty() {
+                        probed
+                            .get(&connection.provider)
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        connection.enabled_models.clone()
+                    },
                 })
                 .collect(),
             combos: context
@@ -822,6 +857,97 @@ impl Runtime {
         };
         let rows = nullrouter_providers::build_models_list(&input, kinds);
         serde_json::json!({ "object": "list", "data": rows })
+    }
+
+    /// Model ids per provider, asked of the providers themselves.
+    ///
+    /// Only for connections the routing context shows with no configured model list, and
+    /// only for the compatible families — a registry provider's models are in the
+    /// registry, so probing one would be asking a question already answered.
+    ///
+    /// Probes run concurrently: they are independent network calls, and doing them in
+    /// turn would make `/v1/models` as slow as the sum of every provider's latency.
+    ///
+    /// **A failed probe contributes nothing rather than an empty list.** The caller
+    /// keeps whatever was configured, so a provider that is briefly slow does not empty
+    /// a working model picker.
+    async fn probed_models(
+        &self,
+        context: &crate::state_client::RoutingContext,
+    ) -> std::collections::BTreeMap<String, Vec<String>> {
+        // Only the first connection per provider decides, because only the first
+        // contributes rows to `build_models_list`. Asking "does *any* connection for this
+        // provider lack a list" would probe on behalf of a connection whose models the
+        // route then ignores — a real provider call for nothing.
+        let mut first_seen = std::collections::BTreeSet::new();
+        let needs_probe: std::collections::BTreeSet<&str> = context
+            .connections
+            .iter()
+            .filter(|connection| first_seen.insert(connection.provider.as_str()))
+            .filter(|connection| connection.enabled_models.is_empty())
+            .map(|connection| connection.provider.as_str())
+            .collect();
+        if needs_probe.is_empty() {
+            return std::collections::BTreeMap::new();
+        }
+
+        // One target per provider, the first, matching `build_models_list`'s own
+        // first-connection-per-provider rule. A compatible node can hold several
+        // connections as a key pool; probing each would make N provider calls to answer a
+        // question about one host, and collecting the results by provider would then keep
+        // whichever finished last.
+        let mut seen = std::collections::BTreeSet::new();
+        let targets: Vec<_> = self
+            .state
+            .probe_targets()
+            .await
+            .into_iter()
+            .filter(|target| needs_probe.contains(target.provider.as_str()))
+            .filter(|target| seen.insert(target.provider.clone()))
+            .collect();
+        if targets.is_empty() {
+            return std::collections::BTreeMap::new();
+        }
+
+        let futures = targets.into_iter().map(|target| async move {
+            let models = match self.probes.get(&target.connection_id) {
+                Some(cached) => cached,
+                None => {
+                    let fresh = self
+                        .executor
+                        .probe_models(
+                            &target.provider,
+                            &target.credentials,
+                            nullrouter_execute::probe::DEFAULT_TIMEOUT,
+                        )
+                        .await;
+                    self.probes.put(&target.connection_id, &fresh);
+                    fresh
+                }
+            };
+            match models {
+                Ok(models) => Some((
+                    target.provider,
+                    models.into_iter().map(|model| model.id).collect::<Vec<_>>(),
+                )),
+                Err(error) => {
+                    // Logged at info, not warn: a user-added provider that rejects a key
+                    // or times out is the owner's configuration to fix, and this route is
+                    // polled often enough that warn would drown the log.
+                    tracing::info!(
+                        provider = %target.provider,
+                        "model probe failed: {}", error.describe()
+                    );
+                    None
+                }
+            }
+        });
+
+        futures_util::future::join_all(futures)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// Execute a non-chat provider call (embeddings, audio, images, search,

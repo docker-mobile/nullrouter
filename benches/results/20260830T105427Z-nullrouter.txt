@@ -1,3 +1,23 @@
+SUPERSEDED -- kept because it is the run that found the TCP_NODELAY bug.
+=========================================================================
+Measured before the fix in services/{runtime,events,api}-actix/src/main.rs, and with a
+harness that was still wrong in two ways (the mock closed every connection, and streaming
+cells were not measured both with and without keep-alive).
+
+Do not quote the streaming rows. S3's spread of [14.505..58.525] over 5 trials is the
+artefact that started the investigation: a streamed response cost a keep-alive client
+about twice its real latency, so trials landed in one mode or the other depending on
+whether the connection was fresh. The median of that is not a latency.
+
+The non-streaming rows (S1 14.588, S2 14.829) held up: the same figures came back after
+the fix, which is consistent with the defect being specific to streamed responses.
+
+Run stopped early on purpose rather than spending another 50 minutes producing rows that
+were already known to be untrustworthy.
+
+Original output follows.
+=========================================================================
+
 run: 20260830T105427Z-nullrouter
 label: nullrouter
 date: 2026-08-30T10:54:27Z
@@ -13,3 +33,6 @@ duration-per-cell: 30s  trials: 5  warmup: 200
 
 scenarios (overhead = through - direct, both p50 ms)
 
+S1-proxy-nonstream           c=1   through=39.972    direct=25.384    overhead=14.588 ms  [13.518..15.728 over 5 trials]
+S2-translate-nonstream       c=1   through=40.213    direct=25.401    overhead=14.829 ms  [14.437..15.165 over 5 trials]
+S3-proxy-stream-200          c=1   through=83.953    direct=25.465    overhead=58.475 ms  [14.505..58.525 over 5 trials]
