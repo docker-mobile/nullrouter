@@ -1,0 +1,20 @@
+[package]
+name = "mock-provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Fixed-latency mock provider used as the control in router benchmarks"
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "mock-provider"
+path = "src/main.rs"
+
+# No dependencies on purpose. The mock is the control in every measurement, so it must
+# not pull in a runtime or a JSON library whose cost could land inside the result.
+[dependencies]
+
+[lints]
+workspace = true

@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "nullrouter-runtime"
 path = "src/main.rs"
 
+[features]
+# Exposes combo rotation for `benches/combo.rs`. Never enabled by a normal build.
+bench-internals = []
+
 [dependencies]
 actix-web.workspace = true
 futures-util.workspace = true
@@ -32,6 +36,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 tempfile.workspace = true
 actix-rt.workspace = true
 futures-util.workspace = true
@@ -39,3 +44,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "combo"
+harness = false
+required-features = ["bench-internals"]

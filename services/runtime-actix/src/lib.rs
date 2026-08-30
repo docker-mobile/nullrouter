@@ -28,3 +28,11 @@ pub const fn app_config() -> AppConfig {
         service_name: SERVICE_NAME,
     }
 }
+
+/// Internals exposed for benchmarking only.
+///
+/// Behind a feature rather than public outright: a default build has no reason to offer
+/// this, and widening the real API to make a benchmark compile would be the benchmark
+/// changing the program it measures.
+#[cfg(feature = "bench-internals")]
+pub use combo::RotationBench;

@@ -251,7 +251,11 @@ fn request_translation(criterion: &mut Criterion) {
     // same-format check, and `apply` does a per-model capability lookup. Both run on a
     // request that mentions no reasoning at all, which is the common case.
     group.bench_function("extract_thinking_absent", |bencher| {
-        bencher.iter(|| black_box(nullrouter_translate::thinking::extract_thinking(black_box(&body))));
+        bencher.iter(|| {
+            black_box(nullrouter_translate::thinking::extract_thinking(black_box(
+                &body,
+            )))
+        });
     });
     group.bench_function("apply_thinking_absent", |bencher| {
         bencher.iter_batched(

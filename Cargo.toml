@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "apps/dashboard-leptos",
+    "benches/mock-provider",
     "crates/contracts",
     "crates/execute",
     "crates/providers",
@@ -18,6 +19,7 @@ members = [
 ]
 default-members = [
     "apps/dashboard-leptos",
+    "benches/mock-provider",
     "crates/contracts",
     "crates/execute",
     "crates/providers",

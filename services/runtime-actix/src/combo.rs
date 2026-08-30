@@ -142,6 +142,75 @@ pub(crate) fn ordered_models(
     rotate_from(models, index)
 }
 
+/// Rotation work for one combo, for `benches/combo.rs`.
+///
+/// A purpose-built entry point rather than making [`RotationState`] and
+/// [`ordered_models`] public: combo rotation takes a lock on shared state, so its cost
+/// under contention is worth measuring, but widening the real API to make a benchmark
+/// compile would be the benchmark changing the program it measures.
+///
+/// Owns its own [`RotationState`] so the bench cannot accidentally share a cursor
+/// between iterations and measure lock-free repeats.
+#[cfg(feature = "bench-internals")]
+pub struct RotationBench {
+    rotation: RotationState,
+    models: Vec<String>,
+}
+
+#[cfg(feature = "bench-internals")]
+impl RotationBench {
+    /// A bench over `count` synthetic models.
+    #[must_use]
+    pub fn new(count: usize) -> Self {
+        Self {
+            rotation: RotationState::new(),
+            models: (0..count)
+                .map(|index| format!("openai-compatible-{index}/model-{index}"))
+                .collect(),
+        }
+    }
+
+    /// One `fill-first` ordering. Should not take the lock at all.
+    #[must_use]
+    pub fn fill_first(&self) -> usize {
+        ordered_models(
+            &self.models,
+            "panel",
+            ComboStrategy::Fallback,
+            3,
+            &self.rotation,
+        )
+        .len()
+    }
+
+    /// One `fusion` ordering. Also should not take the lock: fusion asks every model,
+    /// so rotating would only shuffle which one judges.
+    #[must_use]
+    pub fn fusion(&self) -> usize {
+        ordered_models(
+            &self.models,
+            "panel",
+            ComboStrategy::Fusion,
+            3,
+            &self.rotation,
+        )
+        .len()
+    }
+
+    /// One `round-robin` ordering, which takes the lock and advances the cursor.
+    #[must_use]
+    pub fn round_robin(&self, sticky_limit: u32) -> usize {
+        ordered_models(
+            &self.models,
+            "panel",
+            ComboStrategy::RoundRobin,
+            sticky_limit,
+            &self.rotation,
+        )
+        .len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ComboStrategy, RotationState, ordered_models, rotate_from};

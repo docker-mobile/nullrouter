@@ -100,6 +100,13 @@ already found something.
 | `sse_frame/openai_to_claude` | 3.50 µs |
 | `sse_frame/with_tool_call` | 3.72 µs |
 | `sse_stream/2000_frames` | 2.27 ms (≈880k frames/s) |
+| `lookup/explicit_row` | 348 ns |
+| `lookup/capability_miss` | 674 ns |
+| `combo/fill_first_5` | 103 ns |
+| `combo/fusion_5` | 102 ns |
+| `combo/round_robin_5_sticky_3` | 464 ns |
+| `combo/round_robin_5_sticky_1` | 468 ns |
+| `combo/contended_8_threads` | 4.60 ms / 2000 selections = **2.30 µs each** (435k/s) |
 
 **What the control found.** Same-format passthrough is 1.68 µs, not near-zero, and the three floors
 above account for it: 760 + 116 + 631 = 1507 ns. The clone is unavoidable — `model` has to be rewritten
@@ -116,6 +123,24 @@ checking the body first would skip the lookup when there is provably nothing to 
 not done yet.** It saves ~0.5 µs on a request that makes a network round trip, and the end-to-end
 numbers below should decide whether that is worth touching a correctness-critical path for. Recorded
 here so the option is not lost.
+
+**Lookup misses cost more than hits.** `capability_miss` (674 ns) is nearly twice `explicit_row`
+(348 ns), because a name with no registry row exhausts every path — explicit table, prefix rules,
+family fallback — before returning the default. That is the *common* case, not the exotic one: every
+`openai-compatible-*` provider a user adds by hand misses. It is 674 ns against a network round trip,
+so it is not urgent, but it is the wrong way round and worth knowing if provider lookup ever appears
+in a profile.
+
+**Round-robin is the only per-request lock.** 464 ns versus fill-first's 103 ns is the cost of taking
+the rotation mutex and advancing a cursor; a cursor is meaningless without shared state, so this is
+inherent rather than sloppy. Sticky-3 and sticky-1 are indistinguishable (464 vs 468 ns) — the counter
+increments either way and only the modulo differs, so tightening stickiness costs nothing.
+
+Under 8 threads on one combo's cursor it degrades to 2.30 µs per selection, 4.95× the uncontended
+figure, saturating at ~435k selections/s. That ceiling is far above any real router's request rate, and
+against a 25 ms upstream call 2.30 µs is 0.009% — so the mutex is not worth replacing. The number is
+recorded because it is the one place where contention exists at all, and a future regression that made
+`fill_first` or `fusion` start locking would show up as their cost climbing toward this row.
 
 ## End-to-end overhead
 
@@ -159,6 +184,31 @@ what it claims.
 - ≥5 independent trials per cell; report the median of per-run p50s **and the spread**.
 - Concurrency 1 and 8.
 - Use `oha`/`k6`/`wrk` — a hand-rolled client becomes the bottleneck and measures itself.
+
+### The harness
+
+`benches/run.sh` implements the above. It measures whichever router is listening on `--router-port`
+and does not start one, nor know which it is talking to — deliberately, so the same script drives both
+sides and the comparison is between two routers rather than two harnesses.
+
+```bash
+cargo build -p mock-provider --release
+benches/run.sh --label nullrouter --router-port 20128 \
+  --model-openai bench-openai --model-claude bench-claude --api-key sk-...
+benches/run.sh --label 9router --router-port 3000 \
+  --model-openai bench-openai --model-claude bench-claude --api-key sk-...
+```
+
+Each cell runs both legs in the same run against the same mock and reports
+`overhead = p50(through) − p50(direct)` as the median of per-trial differences, with `[min..max]`
+beside it. Model names are flags because they resolve differently in each router's config. Results land
+in `benches/results/<timestamp>-<label>.txt`, environment header first, and every run records `node`,
+`rustc`, CPU count, and memory before it measures anything.
+
+It refuses to run without `oha` on PATH rather than falling back to a curl loop. Two sanity checks are
+written into the output rather than left to the reader: `direct` must land near `--mock-sleep-ms`, and
+an overhead that is a round fraction of it means the harness is timing the mock. Failed cells print
+`FAILED`/`NO RESULT` and are kept in the file.
 
 ## Resource cost
 
