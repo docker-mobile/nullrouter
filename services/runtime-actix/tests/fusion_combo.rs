@@ -193,6 +193,18 @@ fn completion(content: &str) -> Reply {
 
 /// State declaring one fusion combo over `models`.
 async fn fusion_state(provider_base: &str, models: &[&str]) -> FakeServer {
+    fusion_state_with_settings(provider_base, models, json!({ "comboStrategy": "fusion" })).await
+}
+
+/// State declaring one combo named `panel` over `models`, with explicit settings.
+///
+/// Separate so a test can set a per-combo override against a different global, which
+/// is the only way to tell the two apart.
+async fn fusion_state_with_settings(
+    provider_base: &str,
+    models: &[&str],
+    settings: Value,
+) -> FakeServer {
     let credentials = json!({
         "status": "selected",
         "credentials": {
@@ -205,7 +217,7 @@ async fn fusion_state(provider_base: &str, models: &[&str]) -> FakeServer {
     let routing = json!({
         "combos": [{ "id": "c1", "name": "panel", "kind": null, "models": models }],
         "connections": [],
-        "settings": { "comboStrategy": "fusion" },
+        "settings": settings,
     });
     FakeServer::start(vec![
         (
@@ -445,5 +457,169 @@ async fn panel_history_has_its_tool_turns_flattened_to_prose() -> TestResult {
         !text.contains(r#""role":"tool""#),
         "no tool role should reach a panel model: {text}"
     );
+    Ok(())
+}
+
+// ── per-combo strategy overrides ─────────────────────────────────────────────
+
+#[actix_web::test]
+async fn a_per_combo_override_wins_over_the_global_strategy() -> TestResult {
+    // Global says fallback; this combo says fusion. Upstream reads
+    // `comboStrategies[name].fallbackStrategy` first, so the combo must fan out.
+    let provider = FakeServer::start(vec![("/chat/completions", completion("answer"))]).await;
+    let state = fusion_state_with_settings(
+        &provider.base_url(),
+        &["openai-compatible-a/one", "openai-compatible-b/two"],
+        json!({
+            "comboStrategy": "fallback",
+            "comboStrategies": { "panel": { "fallbackStrategy": "fusion" } },
+        }),
+    )
+    .await;
+
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"panel","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await?;
+    assert_eq!(response.status, StatusCode::OK);
+    // Fusion asks every panel model and then a judge: strictly more calls than the
+    // one a fallback combo would have made.
+    let calls = provider
+        .requests()
+        .iter()
+        .filter(|(path, _)| path.contains("/chat/completions"))
+        .count();
+    assert!(
+        calls > 2,
+        "expected a panel fan-out plus a judge, saw {calls} provider calls"
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_per_combo_override_can_turn_fusion_off_for_one_combo() -> TestResult {
+    // The reverse: global fusion, this combo overridden to fallback. One call, because
+    // the first model answered and a fallback combo stops there.
+    let provider = FakeServer::start(vec![("/chat/completions", completion("answer"))]).await;
+    let state = fusion_state_with_settings(
+        &provider.base_url(),
+        &["openai-compatible-a/one", "openai-compatible-b/two"],
+        json!({
+            "comboStrategy": "fusion",
+            "comboStrategies": { "panel": { "fallbackStrategy": "fallback" } },
+        }),
+    )
+    .await;
+
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"panel","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await?;
+    assert_eq!(response.status, StatusCode::OK);
+    let calls = provider
+        .requests()
+        .iter()
+        .filter(|(path, _)| path.contains("/chat/completions"))
+        .count();
+    assert_eq!(
+        calls, 1,
+        "a fallback combo whose first model answered calls once"
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_override_naming_another_combo_does_not_affect_this_one() -> TestResult {
+    // Keyed by combo name, so an entry for a combo that is not the one being asked
+    // must leave the global in force.
+    let provider = FakeServer::start(vec![("/chat/completions", completion("answer"))]).await;
+    let state = fusion_state_with_settings(
+        &provider.base_url(),
+        &["openai-compatible-a/one", "openai-compatible-b/two"],
+        json!({
+            "comboStrategy": "fusion",
+            "comboStrategies": { "some-other-combo": { "fallbackStrategy": "fallback" } },
+        }),
+    )
+    .await;
+
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"panel","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await?;
+    assert_eq!(response.status, StatusCode::OK);
+    let calls = provider
+        .requests()
+        .iter()
+        .filter(|(path, _)| path.contains("/chat/completions"))
+        .count();
+    assert!(
+        calls > 2,
+        "the global fusion still applies, saw {calls} calls"
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_unrecognised_override_degrades_to_the_global_rather_than_failing() -> TestResult {
+    // A strategy name this build does not know must not fail the request. Upstream's
+    // own resolution falls through to the global, and so does this.
+    let provider = FakeServer::start(vec![("/chat/completions", completion("answer"))]).await;
+    let state = fusion_state_with_settings(
+        &provider.base_url(),
+        &["openai-compatible-a/one", "openai-compatible-b/two"],
+        json!({
+            "comboStrategy": "fusion",
+            "comboStrategies": { "panel": { "fallbackStrategy": "quantum-entanglement" } },
+        }),
+    )
+    .await;
+
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"panel","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await?;
+    // The request succeeds. It routes as `fallback` — an unknown name is not fusion —
+    // which is the safe reading: one call rather than a fan-out nobody asked for.
+    assert_eq!(response.status, StatusCode::OK);
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_override_carrying_only_tuning_leaves_the_strategy_alone() -> TestResult {
+    // `comboStrategies["panel"] = { minPanel: 3 }` with a global of fusion: still
+    // fusion, because an absent `fallbackStrategy` means "not overridden".
+    let provider = FakeServer::start(vec![("/chat/completions", completion("answer"))]).await;
+    let state = fusion_state_with_settings(
+        &provider.base_url(),
+        &["openai-compatible-a/one", "openai-compatible-b/two"],
+        json!({
+            "comboStrategy": "fusion",
+            "comboStrategies": { "panel": { "minPanel": 2, "stragglerGraceMs": 500 } },
+        }),
+    )
+    .await;
+
+    let response = post(
+        &state.addr_string(),
+        "/v1/chat/completions",
+        r#"{"model":"panel","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await?;
+    assert_eq!(response.status, StatusCode::OK);
+    let calls = provider
+        .requests()
+        .iter()
+        .filter(|(path, _)| path.contains("/chat/completions"))
+        .count();
+    assert!(calls > 2, "fusion still applies, saw {calls} calls");
     Ok(())
 }

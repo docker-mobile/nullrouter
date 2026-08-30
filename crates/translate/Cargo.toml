@@ -18,3 +18,10 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "translation"
+harness = false

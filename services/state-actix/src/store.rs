@@ -341,6 +341,15 @@ pub(crate) struct Settings {
     /// Requests to keep on one combo model before rotating (upstream default 1).
     #[serde(default = "default_combo_sticky_limit")]
     pub combo_sticky_round_robin_limit: u32,
+    /// Per-combo strategy overrides, keyed by the combo's own name.
+    ///
+    /// Upstream `settings.comboStrategies`. A combo with no entry uses
+    /// [`Self::combo_strategy`]; an entry overrides it for that combo alone, and may
+    /// also carry fusion tuning. Upstream's dashboard prunes an entry back to nothing
+    /// when it returns to the default, so an absent key and a key naming the default
+    /// mean the same thing.
+    #[serde(default)]
+    pub combo_strategies: BTreeMap<String, ComboStrategyOverride>,
     /// Require a managed API key on `/v1` calls.
     #[serde(default)]
     pub require_api_key: bool,
@@ -378,6 +387,8 @@ pub(crate) struct SettingsView {
     pub pxpipe_auto_install: bool,
     pub pxpipe_min_chars: u64,
     pub pxpipe_timeout_ms: u64,
+    /// Per-combo strategy overrides, as upstream reports them on `/api/settings`.
+    pub combo_strategies: BTreeMap<String, ComboStrategyOverride>,
 }
 
 impl From<Settings> for SettingsView {
@@ -403,8 +414,30 @@ impl From<Settings> for SettingsView {
             pxpipe_auto_install: settings.pxpipe_auto_install,
             pxpipe_min_chars: settings.pxpipe_min_chars,
             pxpipe_timeout_ms: settings.pxpipe_timeout_ms,
+            combo_strategies: settings.combo_strategies,
         }
     }
+}
+
+/// One combo's strategy override.
+///
+/// Every field is optional: upstream writes only what the user changed, and a patch
+/// that leaves fusion tuning alone must not reset it to the defaults.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ComboStrategyOverride {
+    /// `fallback`, `round-robin` or `fusion` for this combo alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_strategy: Option<String>,
+    /// Answers needed before stragglers are put on a clock (fusion only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_panel: Option<u32>,
+    /// How long the remaining panel models get once quorum is reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub straggler_grace_ms: Option<u64>,
+    /// Absolute cap on the panel, so one hung model cannot stall the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel_hard_timeout_ms: Option<u64>,
 }
 
 const fn default_true() -> bool {
@@ -465,6 +498,7 @@ impl Default for Settings {
             sticky_round_robin_limit: default_sticky_limit(),
             combo_strategy: default_combo_strategy(),
             combo_sticky_round_robin_limit: default_combo_sticky_limit(),
+            combo_strategies: BTreeMap::new(),
             require_api_key: false,
         }
     }
@@ -898,6 +932,9 @@ impl StateStore {
             }
             if let Some(pxpipe_timeout_ms) = update.pxpipe_timeout_ms {
                 snapshot.settings.pxpipe_timeout_ms = pxpipe_timeout_ms;
+            }
+            if let Some(combo_strategies) = update.combo_strategies {
+                snapshot.settings.combo_strategies = combo_strategies;
             }
             snapshot.settings.clone()
         })
@@ -1472,6 +1509,12 @@ pub(crate) struct SettingsUpdate {
     pub pxpipe_auto_install: Option<bool>,
     pub pxpipe_min_chars: Option<u64>,
     pub pxpipe_timeout_ms: Option<u64>,
+    /// A whole-map replacement, as upstream's dashboard sends it.
+    ///
+    /// Replaced rather than merged deliberately: the dashboard prunes an entry when a
+    /// combo returns to the default strategy, and a merge would make deletion
+    /// impossible — a combo could be given an override but never have it removed.
+    pub combo_strategies: Option<BTreeMap<String, ComboStrategyOverride>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

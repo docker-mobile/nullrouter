@@ -632,6 +632,7 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
                 "pxpipeAutoInstall": settings.pxpipe_auto_install,
                 "pxpipeMinChars": settings.pxpipe_min_chars,
                 "pxpipeTimeoutMs": settings.pxpipe_timeout_ms,
+                "comboStrategies": settings.combo_strategies,
             },
         }),
     )

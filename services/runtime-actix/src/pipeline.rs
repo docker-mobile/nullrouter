@@ -432,7 +432,9 @@ impl Runtime {
         }
         let resolved = self.resolve_targets(&context.requested_model).await;
         if resolved.strategy == ComboStrategy::Fusion && resolved.targets.len() > 1 {
-            return self.execute_fusion(&context, &resolved.targets).await;
+            return self
+                .execute_fusion(&context, &resolved.targets, resolved.tuning)
+                .await;
         }
         let Some((last, leading)) = resolved.targets.split_last() else {
             return responses::json(
@@ -469,6 +471,7 @@ impl Runtime {
         &self,
         context: &ChatContext<'_>,
         panel: &[model::ModelTarget],
+        tuning: fusion::FusionTuning,
     ) -> HttpResponse {
         // Only reached with a panel of two or more, so a first model always exists.
         let Some(first) = panel.first() else {
@@ -477,7 +480,6 @@ impl Runtime {
                 &build_error_body(400, "Fusion combo has no models"),
             );
         };
-        let tuning = fusion::FusionTuning::default();
         let quorum = tuning.quorum(panel.len());
         let panel_body = fusion::panel_body(&context.body);
 
@@ -1017,6 +1019,7 @@ impl Runtime {
                     .collect(),
                 // A single model is not a combo, so no strategy applies.
                 strategy: ComboStrategy::Fallback,
+                tuning: fusion::FusionTuning::default(),
             };
         }
 
@@ -1027,11 +1030,28 @@ impl Runtime {
             .find(|combo| combo.name == parsed.model)
             && !combo.models.is_empty()
         {
-            let strategy = ComboStrategy::from_settings(context.settings.combo_strategy.as_deref());
+            // A per-combo override governs that combo alone; the global setting is the
+            // default for every combo without one. Upstream's dashboard deletes an
+            // entry when a combo returns to `fallback`, so an absent entry and one
+            // naming the default are the same thing — which falls out of reading the
+            // override first and the global second.
+            let override_entry = context.settings.combo_strategies.get(&combo.name);
+            let strategy = ComboStrategy::from_settings(
+                override_entry
+                    .and_then(|entry| entry.fallback_strategy.as_deref())
+                    .or(context.settings.combo_strategy.as_deref()),
+            );
             let sticky = context
                 .settings
                 .combo_sticky_round_robin_limit
                 .unwrap_or(DEFAULT_COMBO_STICKY_LIMIT);
+            let tuning = override_entry.map_or_else(fusion::FusionTuning::default, |entry| {
+                fusion::FusionTuning::from_override(
+                    entry.min_panel,
+                    entry.straggler_grace_ms,
+                    entry.panel_hard_timeout_ms,
+                )
+            });
             let ordered =
                 combo::ordered_models(&combo.models, &combo.name, strategy, sticky, &self.rotation);
             let targets: Vec<model::ModelTarget> = ordered
@@ -1048,7 +1068,11 @@ impl Runtime {
                 })
                 .collect();
             if !targets.is_empty() {
-                return ResolvedTargets { targets, strategy };
+                return ResolvedTargets {
+                    targets,
+                    strategy,
+                    tuning,
+                };
             }
         }
 
@@ -1056,6 +1080,7 @@ impl Runtime {
         ResolvedTargets {
             targets: vec![model::infer_target(&parsed.model)],
             strategy: ComboStrategy::Fallback,
+            tuning: fusion::FusionTuning::default(),
         }
     }
 
@@ -1073,8 +1098,31 @@ impl Runtime {
         let refreshed = self.refresh_if_due(&target.provider, credentials).await;
         let credentials = refreshed.as_ref().unwrap_or(credentials);
         let started = Instant::now();
-        let target_format = target_format(&target.provider);
         let upstream_model = model::upstream_model_id(&target.provider, &target.model);
+
+        // A provider fronting several endpoints on one host is addressed in the
+        // client's own format where it can be, which removes the translation hop
+        // entirely: deepseek answers Claude requests at `/anthropic/v1/messages`, so a
+        // Claude client should not have its body rewritten to OpenAI and back.
+        //
+        // Gated per model, because `opencode-go` fronts several vendors and its
+        // kimi/glm models serve `/chat/completions` only — routing a Claude request
+        // there to `/messages` would 404 a provider that works.
+        let direct = nullrouter_providers::runtime_transport(
+            &target.provider,
+            &target.model,
+            context.source_format,
+        );
+        let target_format = if direct.is_some() {
+            context.source_format
+        } else {
+            target_format(&target.provider)
+        };
+        // Carried on the credentials, which is where the URL and header builders
+        // already look. `attempt` owns a clone for the duration of the call.
+        let mut credentials = credentials.clone();
+        credentials.runtime_format = direct.map(|_| context.source_format);
+        let credentials = &credentials;
         // A provider that only streams is called with stream=true regardless of
         // what the client asked for; the response is collapsed if needed.
         let provider_forces_stream =
@@ -1535,6 +1583,8 @@ struct ResolvedTargets {
     targets: Vec<model::ModelTarget>,
     /// `Fusion` means ask all of them; anything else means try them in turn.
     strategy: ComboStrategy,
+    /// Fusion tuning for this combo, after any per-combo override.
+    tuning: fusion::FusionTuning,
 }
 
 /// What running one combo model produced.

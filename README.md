@@ -264,6 +264,20 @@ writes the final reply from their answers:
 - Every panel call is recorded in usage, so a fusion combo does not under-report by
   the size of its panel.
 
+### Per-combo strategy overrides
+
+`comboStrategies[name]` on `/api/settings` overrides the global `comboStrategy` for one combo. Global
+`fallback` with `{"panel": {"fallbackStrategy": "fusion"}}` makes exactly that combo fan out; the
+reverse turns fusion off for one combo while leaving it on everywhere else. An entry may also carry
+fusion tuning (`minPanel`, `stragglerGraceMs`, `panelHardTimeoutMs`), and anything it leaves unset
+keeps the default rather than being reset.
+
+Two details that are easy to get wrong and are pinned by tests: a write that names `comboStrategies`
+**replaces** the map, because upstream's dashboard prunes an entry when a combo returns to the default
+and a merge would make an override impossible to remove — while a settings write that does not mention
+the map leaves every override alone. And an unrecognised strategy name degrades to the global rather
+than failing the request.
+
 ### Per-model output ceilings
 
 `max_tokens` is clamped to the model's real ceiling from the capability table (685 per-model rows),
@@ -373,6 +387,14 @@ upstream `v0.5.55` (`699edac3273e13d4744bc46f6082618f08560702`).
 Each entry carries base URL (or an ordered list of fallback URLs tried on 429), wire format, auth
 descriptor (combined or split API-key/OAuth headers), per-status retry policy, timeouts, regional
 endpoints, and request-shaping quirks such as `preserveCacheControl` and `cloakToolsOnOauth`.
+
+**Multi-transport providers are addressed in the client's own format.** Eight providers front more
+than one endpoint on one host — `deepseek` answers OpenAI requests at `/chat/completions` and Claude
+requests at `/anthropic/v1/messages`. A Claude client reaching one of those goes straight to the
+Claude endpoint, with that endpoint's own headers and auth descriptor, and its body is **not
+translated at all**. The selection is gated per model: `opencode-go` fronts several vendors and its
+`kimi`/`glm` models serve `/chat/completions` only, so a Claude request for those is translated as
+before rather than 404'd against `/messages`.
 
 ### What executes, and what refuses
 
@@ -642,10 +664,7 @@ deliver it. Console-log streams connect and emit an empty init frame — there i
 backend.
 
 **Not ported at all:** remote `/models` probing for dynamic compatible providers (set
-`providerSpecificData.enabledModels` instead), per-combo strategy overrides
-(`comboStrategies[name]` — the global `comboStrategy` applies to every combo), and multi-transport
-selection (only a provider's first `transport` is read, so `xiaomi-tokenplan`'s Claude transport is
-unreachable).
+`providerSpecificData.enabledModels` instead).
 
 **PXPIPE (the Token Saver page, 8 routes)** is implemented, and is the one feature here that cannot
 be pure Rust. It renders bulky Claude-format context into dense PNGs, which bill by pixel rather than

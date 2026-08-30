@@ -53,6 +53,9 @@ anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env", "wrap_help", "color"] }
 color-eyre = "0.6"
+# Benchmarks. `html_reports` off: the harness is read from stdout and committed as
+# text, and the generated report directory is large enough to matter on a 32G disk.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 console_error_panic_hook = "0.1"
 http = "1"
 leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
@@ -88,6 +91,11 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 tempfile = "3"
+
+[profile.bench]
+inherits = "release"
+# So a profiler can symbolise without carrying full debug info.
+debug = "line-tables-only"
 
 [profile.release]
 opt-level = 3

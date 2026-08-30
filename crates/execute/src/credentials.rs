@@ -35,6 +35,21 @@ pub struct Credentials {
     /// Free-form per-connection settings (`baseUrl`, proxy config, region, ...).
     #[serde(default)]
     pub provider_specific_data: BTreeMap<String, Value>,
+    /// The wire format this request is being dispatched in, when it differs from the
+    /// provider's primary transport (upstream's `credentials.runtimeTransport`).
+    ///
+    /// Set by the pipeline once per attempt, after it has decided that this provider
+    /// and model can take the client's own format directly. Carried here rather than
+    /// threaded through every signature because it reaches the same places the
+    /// credentials already do: the URL builder and the header builder.
+    ///
+    /// A format rather than a borrowed transport: the registry is `'static` behind a
+    /// lazy, and holding a reference in a `Serialize` type would put a lifetime on
+    /// every caller. Both consumers re-resolve from this, which is a map lookup.
+    ///
+    /// `None` means "the provider's primary transport", i.e. translate as before.
+    #[serde(skip)]
+    pub runtime_format: Option<nullrouter_providers::Format>,
 }
 
 impl Credentials {
@@ -102,6 +117,15 @@ pub fn build_url(provider: &str, credentials: &Credentials, url_index: usize) ->
         return Some(format!("{}/api/chat", base.trim_end_matches('/')));
     }
 
+    // A multi-transport provider addressed in the client's own format goes to that
+    // format's endpoint. Checked before the primary transport, and only ever set when
+    // the pipeline has confirmed the provider and model serve the format.
+    if let Some(transport) = runtime_transport(provider, credentials)
+        && let Some(url) = runtime_transport_url(provider, transport, credentials)
+    {
+        return Some(url);
+    }
+
     let transport = registry::transport(provider)?;
     let urls = transport.urls();
     let base = urls
@@ -130,6 +154,60 @@ pub fn build_url(provider: &str, credentials: &Credentials, url_index: usize) ->
         Some(suffix) => format!("{base}{suffix}"),
         None => base,
     })
+}
+
+/// The transport this request is dispatched on, when it is not the primary one.
+///
+/// `None` whenever the pipeline did not set a runtime format, so a provider with no
+/// alternative transports behaves exactly as before.
+pub fn runtime_transport(
+    provider: &str,
+    credentials: &Credentials,
+) -> Option<&'static registry::Transport> {
+    let format = credentials.runtime_format?;
+    nullrouter_providers::resolve_transport(provider, format)
+}
+
+/// The URL for a resolved alternative transport.
+///
+/// Its own `baseUrl` when it declares one — which is the common case, and where the
+/// whole point lies: `deepseek`'s Claude transport names
+/// `/anthropic/v1/messages` outright.
+///
+/// A transport with no `baseUrl` is not an error. `xiaomi-tokenplan` declares two
+/// transports carrying only headers and auth, because its host comes from the
+/// connection's region; the endpoint path is then derived by asking what the primary
+/// transport's own URL carries past its region base, and swapping the OpenAI path for
+/// the Anthropic one. Derived rather than hardcoded so it stays correct if the
+/// registry moves the paths.
+fn runtime_transport_url(
+    provider: &str,
+    transport: &'static registry::Transport,
+    credentials: &Credentials,
+) -> Option<String> {
+    if let Some(base) = transport.base_url.as_deref() {
+        return Some(match transport.url_suffix.as_deref() {
+            Some(suffix) => format!("{base}{suffix}"),
+            None => base.to_owned(),
+        });
+    }
+
+    // No URL of its own: fall back to the primary transport's host, region-resolved.
+    let primary = registry::transport(provider)?;
+    let regions = primary.regions.as_ref()?;
+    let region = credentials
+        .setting("region")
+        .or(primary.default_region.as_deref())?;
+    let base = regions.get(region)?.trim_end_matches('/');
+    let format = credentials.runtime_format?;
+    if format == nullrouter_providers::Format::Claude {
+        // The Anthropic endpoint sits beside the versioned base rather than under it:
+        // `.../v1` becomes `.../anthropic/v1/messages`.
+        let host = base.strip_suffix("/v1").unwrap_or(base);
+        return Some(format!("{host}/anthropic/v1/messages"));
+    }
+    let endpoint = region_endpoint_suffix(primary, regions);
+    Some(format!("{base}{endpoint}"))
 }
 
 /// The endpoint path a region-scoped provider's bare region base is missing.
@@ -175,7 +253,13 @@ pub fn build_headers(
     let mut headers = BTreeMap::new();
     headers.insert("Content-Type".to_owned(), "application/json".to_owned());
 
-    if let Some(transport) = registry::transport(provider) {
+    // The alternative transport's headers *replace* the primary's rather than merging
+    // with them, as upstream's `...(rt ? rt.headers : this.config.headers)` does. They
+    // are per-endpoint: deepseek's Claude endpoint wants `Anthropic-Version`, and
+    // carrying the OpenAI endpoint's headers alongside would send both.
+    let effective =
+        runtime_transport(provider, credentials).or_else(|| registry::transport(provider));
+    if let Some(transport) = effective {
         for (key, value) in &transport.headers {
             headers.insert(key.clone(), value.clone());
         }
@@ -200,12 +284,21 @@ enum FallbackAuth {
     Bearer,
 }
 
-fn fallback_auth(provider: &str) -> FallbackAuth {
+fn fallback_auth(provider: &str, credentials: &Credentials) -> FallbackAuth {
     if nullrouter_providers::is_anthropic_compatible(provider) {
         return FallbackAuth::AnthropicCompatibleSplit;
     }
-    let is_claude_format = registry::transport(provider)
-        .is_some_and(|transport| transport.format_or_default() == "claude");
+    // Dispatching on a Claude *transport* means Claude's auth shape, even when the
+    // provider's primary transport is OpenAI.
+    //
+    // Read from the resolved transport rather than from `runtime_format` directly: a
+    // format the provider does not serve resolves to nothing, and trusting the field
+    // alone would have put `x-api-key` on every provider a Claude client happened to
+    // reach — authenticating the wrong way round on a working key.
+    let dispatch_format = runtime_transport(provider, credentials)
+        .map(registry::Transport::format_or_default)
+        .or_else(|| registry::transport(provider).map(registry::Transport::format_or_default));
+    let is_claude_format = dispatch_format == Some("claude");
     if is_claude_format {
         return FallbackAuth::ClaudeApiKey;
     }
@@ -215,9 +308,14 @@ fn fallback_auth(provider: &str) -> FallbackAuth {
 /// Apply credentials to headers per the registry auth descriptor, falling back
 /// to `DefaultExecutor.resolveAuthDescriptor` behavior when none is declared.
 fn apply_auth(provider: &str, credentials: &Credentials, headers: &mut BTreeMap<String, String>) {
-    let descriptor = registry::transport(provider).and_then(|transport| transport.auth.as_ref());
+    // The alternative transport's own descriptor first: deepseek's two endpoints take
+    // different auth — raw `x-api-key` on the Anthropic one, bearer on the OpenAI one —
+    // so using the primary's descriptor would authenticate the wrong way round.
+    let descriptor = runtime_transport(provider, credentials)
+        .and_then(|transport| transport.auth.as_ref())
+        .or_else(|| registry::transport(provider).and_then(|transport| transport.auth.as_ref()));
     let Some(auth) = descriptor else {
-        match fallback_auth(provider) {
+        match fallback_auth(provider, credentials) {
             FallbackAuth::AnthropicCompatibleSplit => {
                 // Split: the key branch wins, else the OAuth branch.
                 if let Some(key) = credentials.api_key.as_deref() {
@@ -651,5 +749,130 @@ mod tests {
             .provider_specific_data
             .insert("connectionProxyEnabled".to_owned(), json!(true));
         assert_eq!(credentials.proxy_url(), Some("http://127.0.0.1:7897"));
+    }
+
+    // ── multi-transport providers ────────────────────────────────────────────
+
+    /// A key-bearing connection dispatching in `format`.
+    fn dispatching_in(key: &str, format: nullrouter_providers::Format) -> Credentials {
+        Credentials {
+            api_key: Some(key.to_owned()),
+            runtime_format: Some(format),
+            ..Credentials::default()
+        }
+    }
+
+    #[test]
+    fn a_claude_dispatch_targets_the_providers_anthropic_endpoint() {
+        // deepseek fronts both endpoints on one host. Reading only the primary
+        // transport sent every Claude client through /chat/completions, translating
+        // the body twice for a provider that would have taken the original.
+        let credentials = dispatching_in("sk-ds", nullrouter_providers::Format::Claude);
+        assert_eq!(
+            build_url("deepseek", &credentials, 0).as_deref(),
+            Some("https://api.deepseek.com/anthropic/v1/messages")
+        );
+        // And the primary is still what an OpenAI dispatch gets.
+        let openai = dispatching_in("sk-ds", nullrouter_providers::Format::OpenAi);
+        assert_eq!(
+            build_url("deepseek", &openai, 0).as_deref(),
+            Some("https://api.deepseek.com/chat/completions")
+        );
+        // With nothing set, behaviour is unchanged from before this existed.
+        assert_eq!(
+            build_url("deepseek", &with_key("sk-ds"), 0).as_deref(),
+            Some("https://api.deepseek.com/chat/completions")
+        );
+    }
+
+    #[test]
+    fn the_selected_transports_own_auth_and_headers_apply() {
+        // deepseek's two endpoints authenticate differently: raw `x-api-key` on the
+        // Anthropic one, bearer on the OpenAI one. Using the primary's descriptor for
+        // both would authenticate the wrong way round and 401 on a working key.
+        let claude = build_headers(
+            "deepseek",
+            &dispatching_in("sk-ds", nullrouter_providers::Format::Claude),
+            false,
+        );
+        assert_eq!(claude.get("x-api-key").map(String::as_str), Some("sk-ds"));
+        assert_eq!(claude.get("Authorization"), None);
+        // The Anthropic endpoint's own headers travel with it.
+        assert_eq!(
+            claude.get("Anthropic-Version").map(String::as_str),
+            Some("2023-06-01")
+        );
+
+        let openai = build_headers(
+            "deepseek",
+            &dispatching_in("sk-ds", nullrouter_providers::Format::OpenAi),
+            false,
+        );
+        assert_eq!(
+            openai.get("Authorization").map(String::as_str),
+            Some("Bearer sk-ds")
+        );
+        assert_eq!(openai.get("x-api-key"), None);
+        // The OpenAI endpoint declares no Anthropic headers, and must not inherit the
+        // other endpoint's: sending both would be a request claiming two protocols.
+        assert_eq!(openai.get("Anthropic-Version"), None);
+    }
+
+    #[test]
+    fn a_transport_with_no_url_of_its_own_derives_one_from_the_region() {
+        // xiaomi-tokenplan's transports carry only headers and auth, because its host
+        // comes from the connection's region. The Anthropic endpoint sits beside the
+        // versioned base rather than under it.
+        let mut credentials = dispatching_in("tp-key", nullrouter_providers::Format::Claude);
+        credentials
+            .provider_specific_data
+            .insert("region".to_owned(), json!("ams"));
+        assert_eq!(
+            build_url("xiaomi-tokenplan", &credentials, 0).as_deref(),
+            Some("https://token-plan-ams.xiaomimimo.com/anthropic/v1/messages")
+        );
+        // Its Claude transport's auth applies too, which is what made this provider's
+        // Claude endpoint unreachable before: the OpenAI bearer on an x-api-key route.
+        let headers = build_headers("xiaomi-tokenplan", &credentials, false);
+        assert_eq!(headers.get("x-api-key").map(String::as_str), Some("tp-key"));
+        assert_eq!(headers.get("Authorization"), None);
+
+        // The default region, with no region set.
+        let default_region = dispatching_in("tp-key", nullrouter_providers::Format::Claude);
+        assert_eq!(
+            build_url("xiaomi-tokenplan", &default_region, 0).as_deref(),
+            Some("https://token-plan-sgp.xiaomimimo.com/anthropic/v1/messages")
+        );
+        // And an OpenAI dispatch still gets the region's chat path.
+        let openai = dispatching_in("tp-key", nullrouter_providers::Format::OpenAi);
+        assert_eq!(
+            build_url("xiaomi-tokenplan", &openai, 0).as_deref(),
+            Some("https://token-plan-sgp.xiaomimimo.com/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn a_url_suffix_on_the_selected_transport_is_applied() {
+        // opencode-go declares three transports; the responses one is the case a
+        // suffix would ride on, and this pins that the suffix is not dropped.
+        let credentials = dispatching_in("sk-oc", nullrouter_providers::Format::Claude);
+        let url = build_url("opencode-go", &credentials, 0).unwrap_or_default();
+        assert!(url.ends_with("/messages"), "{url}");
+    }
+
+    #[test]
+    fn a_provider_with_one_transport_is_unaffected_by_a_runtime_format() {
+        // openai declares no alternatives. A runtime format it cannot serve must not
+        // change its URL or its auth — the resolution simply finds nothing.
+        let credentials = dispatching_in("sk-o", nullrouter_providers::Format::Claude);
+        assert_eq!(
+            build_url("openai", &credentials, 0),
+            build_url("openai", &with_key("sk-o"), 0)
+        );
+        let headers = build_headers("openai", &credentials, false);
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer sk-o")
+        );
     }
 }

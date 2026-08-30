@@ -7,8 +7,9 @@ use serde_json::Value;
 use crate::{
     StoreError, responses,
     store::{
-        ComboUpdate, DeleteProxyPoolResult, ProviderConnectionInput, ProviderConnectionUpdate,
-        ProxyPoolInput, ProxyPoolUpdate, SettingsUpdate, SettingsView, StateStore,
+        ComboStrategyOverride, ComboUpdate, DeleteProxyPoolResult, ProviderConnectionInput,
+        ProviderConnectionUpdate, ProxyPoolInput, ProxyPoolUpdate, SettingsUpdate, SettingsView,
+        StateStore,
     },
 };
 
@@ -488,6 +489,7 @@ struct SettingsRequest {
     pxpipe_auto_install: Option<bool>,
     pxpipe_min_chars: Option<u64>,
     pxpipe_timeout_ms: Option<u64>,
+    combo_strategies: Option<std::collections::BTreeMap<String, ComboStrategyOverride>>,
 }
 
 async fn get_settings(store: web::Data<StateStore>) -> HttpResponse {
@@ -520,6 +522,7 @@ async fn update_settings(store: web::Data<StateStore>, body: web::Bytes) -> Http
         pxpipe_auto_install: request.pxpipe_auto_install,
         pxpipe_min_chars: request.pxpipe_min_chars,
         pxpipe_timeout_ms: request.pxpipe_timeout_ms,
+        combo_strategies: request.combo_strategies,
     };
     store_json(
         StatusCode::OK,

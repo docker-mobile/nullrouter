@@ -57,6 +57,35 @@ impl Default for FusionTuning {
 }
 
 impl FusionTuning {
+    /// Tuning from a per-combo override, keeping the default for anything unset.
+    ///
+    /// An absent field means "leave it alone", not "reset it": upstream persists only
+    /// what the user changed, so a patch touching the strategy must not silently
+    /// restore the default grace window.
+    ///
+    /// A zero is treated as unset for the two timers, because a zero grace window or a
+    /// zero hard timeout would abandon every panel before it could answer — which is
+    /// not a tuning a user can have meant.
+    pub(crate) fn from_override(
+        min_panel: Option<u32>,
+        straggler_grace_ms: Option<u64>,
+        panel_hard_timeout_ms: Option<u64>,
+    ) -> Self {
+        let defaults = Self::default();
+        Self {
+            min_panel: min_panel
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(defaults.min_panel),
+            straggler_grace_ms: straggler_grace_ms
+                .filter(|value| *value > 0)
+                .unwrap_or(defaults.straggler_grace_ms),
+            panel_hard_timeout_ms: panel_hard_timeout_ms
+                .filter(|value| *value > 0)
+                .unwrap_or(defaults.panel_hard_timeout_ms),
+        }
+    }
+
     /// Quorum for a panel of `panel_size`, never above the panel itself.
     ///
     /// A quorum larger than the panel could never be reached, so the grace window
@@ -392,4 +421,58 @@ fn append_user_turn(body: &Value, text: &str) -> Value {
         json!([{ "role": "user", "content": text }]),
     );
     next
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FusionTuning;
+
+    #[test]
+    fn an_override_keeps_the_default_for_anything_it_does_not_set() {
+        // Upstream persists only what the user changed. A patch that sets the quorum
+        // must not silently reset the grace window to something else.
+        let defaults = FusionTuning::default();
+        let partial = FusionTuning::from_override(Some(3), None, None);
+        assert_eq!(partial.min_panel, 3);
+        assert_eq!(partial.straggler_grace_ms, defaults.straggler_grace_ms);
+        assert_eq!(
+            partial.panel_hard_timeout_ms,
+            defaults.panel_hard_timeout_ms
+        );
+
+        // Nothing set at all is the default.
+        assert_eq!(FusionTuning::from_override(None, None, None), defaults);
+    }
+
+    #[test]
+    fn an_override_sets_every_field_it_names() {
+        let tuned = FusionTuning::from_override(Some(4), Some(2_000), Some(30_000));
+        assert_eq!(tuned.min_panel, 4);
+        assert_eq!(tuned.straggler_grace_ms, 2_000);
+        assert_eq!(tuned.panel_hard_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn a_zero_timer_is_read_as_unset_rather_than_obeyed() {
+        // A zero grace window or a zero hard timeout would abandon every panel before
+        // it could answer — no user means that, and obeying it would make fusion
+        // return "all panel models failed" on a working combo.
+        let defaults = FusionTuning::default();
+        let zeroed = FusionTuning::from_override(Some(0), Some(0), Some(0));
+        assert_eq!(zeroed, defaults);
+    }
+
+    #[test]
+    fn a_quorum_larger_than_the_panel_is_clamped_to_the_panel() {
+        // Otherwise the grace window never starts and every fusion request waits out
+        // the hard timeout.
+        let tuned = FusionTuning::from_override(Some(9), None, None);
+        assert_eq!(tuned.quorum(3), 3);
+        assert_eq!(tuned.quorum(9), 9);
+        // And the floor of two still holds against a one-model override.
+        assert_eq!(
+            FusionTuning::from_override(Some(1), None, None).quorum(5),
+            2
+        );
+    }
 }

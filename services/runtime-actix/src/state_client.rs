@@ -115,6 +115,28 @@ pub(crate) struct RoutingSettings {
     /// Budget for one PXPIPE transform.
     #[serde(default)]
     pub pxpipe_timeout_ms: u64,
+    /// Per-combo strategy overrides, keyed by combo name.
+    ///
+    /// A combo with an entry ignores [`Self::combo_strategy`] for itself alone.
+    #[serde(default)]
+    pub combo_strategies: std::collections::BTreeMap<String, ComboStrategyOverride>,
+}
+
+/// One combo's strategy override, as state reports it.
+///
+/// Every field optional: upstream persists only what the user changed, so an absent
+/// tuning value means "use the default", not "reset to the default".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ComboStrategyOverride {
+    #[serde(default)]
+    pub fallback_strategy: Option<String>,
+    #[serde(default)]
+    pub min_panel: Option<u32>,
+    #[serde(default)]
+    pub straggler_grace_ms: Option<u64>,
+    #[serde(default)]
+    pub panel_hard_timeout_ms: Option<u64>,
 }
 
 /// Usage report sent after a request finishes.

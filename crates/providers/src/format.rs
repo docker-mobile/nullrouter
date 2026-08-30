@@ -269,3 +269,204 @@ pub fn resolve_transport(
         .iter()
         .find(|transport| transport.format_or_default() == source_format.as_str())
 }
+
+/// Every format a provider can be addressed in directly.
+///
+/// The primary transport's format plus each declared alternative. Used to answer
+/// "could this provider take a Claude request without translation" without the
+/// caller reaching into the registry itself.
+pub fn transport_formats(provider: &str) -> Vec<Format> {
+    let Some(entry) = registry::entry(provider) else {
+        return Vec::new();
+    };
+    let mut formats: Vec<Format> = Vec::new();
+    let mut push = |format: Option<Format>| {
+        if let Some(format) = format
+            && !formats.contains(&format)
+        {
+            formats.push(format);
+        }
+    };
+    push(
+        entry
+            .transport
+            .as_ref()
+            .and_then(|transport| Format::parse(transport.format_or_default())),
+    );
+    for transport in entry.transports.iter().flatten() {
+        push(Format::parse(transport.format_or_default()));
+    }
+    formats
+}
+
+/// The transport to dispatch one request on (upstream's `useTransport`).
+///
+/// A multi-transport provider is addressed in the client's own format where it can
+/// be, which removes the translation hop entirely — `deepseek` answers Claude
+/// requests at `/anthropic/v1/messages`, so a Claude client reaching it through this
+/// router should not have its body rewritten to OpenAI and back.
+///
+/// `model` gates that, and the gate is the whole reason this is not just
+/// [`resolve_transport`]. `opencode-go` fronts several vendors on one host and its
+/// `kimi`/`glm` models serve `/chat/completions` only; routing a Claude request there
+/// to `/messages` would be a 404 on a provider that works. A model that declares no
+/// `supportedFormats` is unrestricted, which is upstream's default and keeps
+/// `deepseek`, `glm`, `kimi` and the rest behaving as they did.
+///
+/// `None` means "use the provider's primary transport", i.e. translate as before.
+pub fn runtime_transport(
+    provider: &str,
+    model: &str,
+    source_format: Format,
+) -> Option<&'static registry::Transport> {
+    let transport = resolve_transport(provider, source_format)?;
+    if model_serves_format(provider, model, source_format) {
+        Some(transport)
+    } else {
+        None
+    }
+}
+
+/// Whether a model's own endpoint list covers this format.
+///
+/// `true` when the model declares nothing, so the absence of a declaration is not
+/// read as a refusal.
+pub fn model_serves_format(provider: &str, model: &str, format: Format) -> bool {
+    let Some(model) = registry::find_model(provider, model) else {
+        return true;
+    };
+    if model.supported_formats.is_empty() {
+        return true;
+    }
+    model
+        .supported_formats
+        .iter()
+        .any(|declared| declared == format.as_str())
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::{
+        Format, model_serves_format, resolve_transport, runtime_transport, transport_formats,
+    };
+
+    #[test]
+    fn a_multi_transport_provider_exposes_every_declared_format() {
+        // deepseek fronts one host with two endpoints: /chat/completions and
+        // /anthropic/v1/messages. Both must be visible, or a Claude client is
+        // translated to OpenAI and back for nothing.
+        let formats = transport_formats("deepseek");
+        assert!(formats.contains(&Format::OpenAi), "{formats:?}");
+        assert!(formats.contains(&Format::Claude), "{formats:?}");
+    }
+
+    #[test]
+    fn a_single_transport_provider_exposes_only_its_own_format() {
+        let formats = transport_formats("openai");
+        assert_eq!(formats, vec![Format::OpenAi]);
+        // An unknown provider claims nothing rather than guessing OpenAI.
+        assert!(transport_formats("no-such-provider").is_empty());
+    }
+
+    #[test]
+    fn the_claude_endpoint_is_selected_for_a_claude_request() {
+        let transport = resolve_transport("deepseek", Format::Claude).expect("claude transport");
+        assert_eq!(
+            transport.base_url.as_deref(),
+            Some("https://api.deepseek.com/anthropic/v1/messages")
+        );
+        // And its own auth descriptor travels with it: the Claude endpoint wants
+        // x-api-key, not the bearer the OpenAI endpoint takes.
+        let auth = transport.auth.as_ref().expect("auth");
+        assert_eq!(auth.header.as_deref(), Some("x-api-key"));
+
+        let openai = resolve_transport("deepseek", Format::OpenAi).expect("openai transport");
+        assert_eq!(
+            openai.base_url.as_deref(),
+            Some("https://api.deepseek.com/chat/completions")
+        );
+    }
+
+    #[test]
+    fn a_format_the_provider_does_not_serve_resolves_to_nothing() {
+        // Gemini is not one of deepseek's endpoints; the caller then translates
+        // through the primary transport as before.
+        assert!(resolve_transport("deepseek", Format::Gemini).is_none());
+    }
+
+    #[test]
+    fn a_model_that_declares_narrower_formats_gates_the_transport() {
+        // opencode-go fronts several vendors on one host. Its kimi and glm models
+        // serve /chat/completions only; routing a Claude request to /messages there
+        // is a 404 on a provider that works.
+        assert!(model_serves_format(
+            "opencode-go",
+            "glm-5.2",
+            Format::OpenAi
+        ));
+        assert!(!model_serves_format(
+            "opencode-go",
+            "glm-5.2",
+            Format::Claude
+        ));
+        assert!(
+            runtime_transport("opencode-go", "glm-5.2", Format::Claude).is_none(),
+            "a Claude request on a chat-completions-only model must not take the /messages endpoint"
+        );
+        // A model on the same provider that does declare Claude gets it.
+        assert!(model_serves_format(
+            "opencode-go",
+            "deepseek-v4-pro",
+            Format::Claude
+        ));
+        assert!(runtime_transport("opencode-go", "deepseek-v4-pro", Format::Claude).is_some());
+    }
+
+    #[test]
+    fn a_model_declaring_nothing_is_unrestricted() {
+        // Upstream's default, and what keeps deepseek/glm/kimi behaving as before.
+        assert!(model_serves_format(
+            "deepseek",
+            "deepseek-v4-pro",
+            Format::Claude
+        ));
+        assert!(runtime_transport("deepseek", "deepseek-v4-pro", Format::Claude).is_some());
+        // An unknown model is likewise not treated as a refusal.
+        assert!(model_serves_format(
+            "deepseek",
+            "not-a-model",
+            Format::Claude
+        ));
+    }
+
+    #[test]
+    fn every_declared_transport_format_is_selectable() {
+        // Enumerates the registry rather than naming providers, so a new
+        // multi-transport entry is covered the day it lands.
+        let mut checked = 0;
+        for entry in crate::registry::entries() {
+            let Some(transports) = entry.transports.as_ref() else {
+                continue;
+            };
+            for transport in transports {
+                let Some(format) = Format::parse(transport.format_or_default()) else {
+                    panic!(
+                        "{}: transport format {:?} is unparsable",
+                        entry.id, transport.format
+                    );
+                };
+                let resolved = resolve_transport(&entry.id, format);
+                assert!(
+                    resolved.is_some(),
+                    "{}: declared {format:?} but it is not selectable",
+                    entry.id
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 17,
+            "expected the known multi-transport set, saw {checked}"
+        );
+    }
+}
