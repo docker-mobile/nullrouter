@@ -319,11 +319,13 @@ async fn non_streaming_chat_completes_through_the_full_pipeline() -> TestResult 
     assert_eq!(sent_json.get("model"), Some(&json!("gpt-5")));
 
     // And: usage was recorded against the selected connection.
-    let usage = state
-        .requests()
-        .into_iter()
-        .find(|(path, _)| path.contains("/internal/v1/usage"));
-    let (_, usage_body) = usage.expect("usage was recorded");
+    //
+    // Polled rather than read once. The usage POST is spawned instead of awaited — the client was
+    // waiting on a round trip that happens after its response already exists — so it lands shortly
+    // after the response rather than before it. The bound is what keeps this a real assertion: if
+    // the spawn were dropped and nothing recorded usage, this fails on timeout rather than passing.
+    let usage = poll_for_usage(&state).await;
+    let (_, usage_body) = usage.expect("usage was recorded within the timeout");
     let usage_json: Value = serde_json::from_str(&usage_body)?;
     assert_eq!(usage_json.get("status"), Some(&json!("success")));
     assert_eq!(usage_json.get("connectionId"), Some(&json!("conn_e2e")));
@@ -889,4 +891,27 @@ async fn round_robin_starts_from_a_different_model_each_request() -> TestResult 
         "{sent:?}"
     );
     Ok(())
+}
+
+/// Wait for a usage record to reach the state stub.
+///
+/// `record` spawns the usage POST rather than awaiting it, so it arrives after the response the
+/// test already has in hand. Polling with a deadline keeps the assertion meaningful: an
+/// implementation that recorded nothing would time out rather than pass, which a bare sleep or a
+/// single read would not guarantee.
+async fn poll_for_usage(state: &FakeServer) -> Option<(String, String)> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Some(found) = state
+            .requests()
+            .into_iter()
+            .find(|(path, _)| path.contains("/internal/v1/usage"))
+        {
+            return Some(found);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        actix_web::rt::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }

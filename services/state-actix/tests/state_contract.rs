@@ -334,7 +334,10 @@ async fn usage_records_reach_disk_on_flush_rather_than_on_write() -> TestResult 
         "a deferred write should leave the snapshot dirty for the flush"
     );
     let on_disk = std::fs::read_to_string(&state_file)?;
-    assert!(on_disk.contains("gpt-5"), "flush should have written the record");
+    assert!(
+        on_disk.contains("gpt-5"),
+        "flush should have written the record"
+    );
 
     // Flushing again is a no-op rather than a second write.
     assert!(!store.flush_if_dirty()?, "nothing should be left to flush");

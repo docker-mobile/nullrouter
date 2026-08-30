@@ -786,9 +786,7 @@ impl StateStore {
     }
 
     pub(crate) fn get_combo(&self, id: &str) -> Result<Option<Combo>, StoreError> {
-        self.with_snapshot(|snapshot| {
-            snapshot.combos.iter().find(|combo| combo.id == id).cloned()
-        })
+        self.with_snapshot(|snapshot| snapshot.combos.iter().find(|combo| combo.id == id).cloned())
     }
 
     pub(crate) fn combo_name_exists(

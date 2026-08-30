@@ -661,8 +661,8 @@ async fn probe_targets(store: web::Data<StateStore>) -> HttpResponse {
         })
         .map(|connection| {
             json!({
-                "connectionId": connection.id.clone(),
-                "provider": connection.provider.clone(),
+                "connectionId": connection.id,
+                "provider": connection.provider,
                 "credentials": CredentialsResponse::from_connection(&connection),
             })
         })
@@ -679,43 +679,46 @@ async fn probe_targets(store: web::Data<StateStore>) -> HttpResponse {
 /// reading none of it. See [`StateStore::with_snapshot`].
 async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
     let Ok(body) = store.with_snapshot(|snapshot| {
-    let settings = &snapshot.settings;
-    let combos: Vec<serde_json::Value> = snapshot
-        .combos
-        .iter()
-        .map(|combo| {
-            json!({
-                "id": combo.id,
-                "name": combo.name,
-                "kind": combo.kind,
-                "models": combo.models,
+        let settings = &snapshot.settings;
+        let combos: Vec<serde_json::Value> = snapshot
+            .combos
+            .iter()
+            .map(|combo| {
+                json!({
+                    "id": combo.id,
+                    "name": combo.name,
+                    "kind": combo.kind,
+                    "models": combo.models,
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    // Only active connections, and only their non-secret routing fields.
-    let connections: Vec<serde_json::Value> = snapshot
-        .provider_connections
-        .iter()
-        .filter(|connection| connection.is_active)
-        .map(|connection| {
-            let extra = connection.provider_specific_data.clone().unwrap_or_default();
-            json!({
-                "provider": connection.provider,
-                "prefix": extra.get("prefix").and_then(serde_json::Value::as_str),
-                "enabledModels": extra
-                    .get("enabledModels")
-                    .and_then(serde_json::Value::as_array)
-                    .map(|models| {
-                        models
-                            .iter()
-                            .filter_map(serde_json::Value::as_str)
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
+        // Only active connections, and only their non-secret routing fields.
+        let connections: Vec<serde_json::Value> = snapshot
+            .provider_connections
+            .iter()
+            .filter(|connection| connection.is_active)
+            .map(|connection| {
+                let extra = connection
+                    .provider_specific_data
+                    .clone()
+                    .unwrap_or_default();
+                json!({
+                    "provider": connection.provider,
+                    "prefix": extra.get("prefix").and_then(serde_json::Value::as_str),
+                    "enabledModels": extra
+                        .get("enabledModels")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|models| {
+                            models
+                                .iter()
+                                .filter_map(serde_json::Value::as_str)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                })
             })
-        })
-        .collect();
+            .collect();
 
         json!({
             "combos": combos,

@@ -392,9 +392,14 @@ impl StateClient {
     ///
     /// A poisoned lock is treated as a miss rather than a panic: the cost is a round trip.
     fn cached_context(&self) -> Option<RoutingContext> {
-        let slot = self.context.read().ok()?;
-        let (read_at, context) = slot.as_ref()?;
-        (read_at.elapsed() < CONTEXT_TTL).then(|| context.clone())
+        let cached = {
+            let slot = self.context.read().ok()?;
+            let (read_at, context) = slot.as_ref()?;
+            (read_at.elapsed() < CONTEXT_TTL).then(|| context.clone())
+        };
+        // The guard is dropped at the block's end rather than at the function's, so the clone above
+        // is the only work done under the read lock.
+        cached
     }
 
     async fn fetch_routing_context(&self) -> RoutingContext {

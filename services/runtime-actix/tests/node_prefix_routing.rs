@@ -337,15 +337,16 @@ async fn the_model_name_keeps_its_own_prefix_off_the_wire() -> TestResult {
 #[actix_web::test]
 async fn a_registry_provider_adds_no_routing_context_fetch() -> TestResult {
     // `routing-context` is a round trip to the state service and `provider/model` is the
-    // common path, so prefix resolution must not fetch it for a registry provider.
+    // common path, so prefix resolution must not add one.
     //
-    // Asserted as a *difference* rather than as zero, because the request path already
-    // fetches routing context twice before resolution ever runs -- `enforce_api_key` reads
-    // one bool from it and `pxpipe_settings` reads three numbers, each pulling the whole
-    // payload. That is a real hot-path cost, recorded in BENCHMARKS.md; it is not this
-    // feature's, and pinning this test to today's count would make it fail when that is
-    // fixed. What must hold is that resolving a registry provider costs no *extra* fetch,
-    // and that resolving a user prefix costs exactly one.
+    // This used to assert `baseline + 1`: the request path fetched routing context three
+    // separate times, and prefix resolution was the third. The note here said pinning the
+    // test to that count would make it fail once the duplication was fixed, and that is
+    // what happened -- `StateClient` now caches the context for 250ms, so the three reads
+    // are one fetch and prefix resolution costs nothing extra.
+    //
+    // So the assertion is now equality, which is the stronger form of the same property.
+    // It still fails if resolution starts making an uncached call of its own.
     let registry_state = state_service_declining("myllm").await;
     post(
         &registry_state.addr_string(),
@@ -365,10 +366,15 @@ async fn a_registry_provider_adds_no_routing_context_fetch() -> TestResult {
     let with_prefix = prefix_state.count("/internal/v1/routing-context");
 
     assert_eq!(
-        with_prefix,
-        baseline + 1,
-        "prefix resolution should cost exactly one routing-context fetch \
+        with_prefix, baseline,
+        "prefix resolution should add no routing-context fetch \
          (registry provider: {baseline}, user prefix: {with_prefix})"
+    );
+    // And the cache must not have removed the fetch altogether: routing context is still read,
+    // once, or this test would pass against a router that never consulted it.
+    assert!(
+        baseline >= 1,
+        "routing context should still be fetched at least once, got {baseline}"
     );
 
     let selected = registry_state

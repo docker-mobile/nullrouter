@@ -70,19 +70,29 @@ impl LineBuffer {
     }
 
     /// Append a chunk and return every complete line it finished.
+    ///
+    /// One allocation per line, and one buffer shift per chunk. The obvious implementation —
+    /// copying the line out, copying it again to strip `\r`, then rebuilding `self.buffer` from the
+    /// remainder — allocates three times per line and makes the whole loop quadratic in the number
+    /// of lines a single chunk carries, because each line re-copies everything after it. A
+    /// 2000-frame response arriving in few chunks pays that quadratic term in full.
     pub fn push(&mut self, chunk: &str) -> Vec<String> {
         self.buffer.push_str(chunk);
+
+        // Find the boundaries first, so the buffer is shifted exactly once rather than per line.
         let mut lines = Vec::new();
-        while let Some(newline) = self.buffer.find('\n') {
-            let line = self.buffer.get(..newline).unwrap_or_default().to_owned();
-            // `\r\n` line endings.
-            let line = line.strip_suffix('\r').unwrap_or(&line).to_owned();
-            self.buffer = self
-                .buffer
-                .get(newline + 1..)
-                .unwrap_or_default()
-                .to_owned();
-            lines.push(line);
+        let mut start = 0_usize;
+        while let Some(offset) = self.buffer.get(start..).and_then(|rest| rest.find('\n')) {
+            let end = start + offset;
+            let line = self.buffer.get(start..end).unwrap_or_default();
+            // `\r\n` line endings. Stripped by slicing, not by a second copy.
+            lines.push(line.strip_suffix('\r').unwrap_or(line).to_owned());
+            start = end + 1;
+        }
+        if start > 0 {
+            // `drain` moves the tail down in place; the previous version allocated a fresh String
+            // for the remainder on every line.
+            self.buffer.drain(..start);
         }
         lines
     }
@@ -198,6 +208,59 @@ mod tests {
             Some(Frame::Data(json!({ "b": 2 })))
         );
         assert!(tail.flush().is_none());
+    }
+
+    #[test]
+    fn many_lines_in_one_chunk_all_come_back_in_order() {
+        // The case the rewrite was for. Every line arriving in a single chunk used to re-copy the
+        // whole remaining buffer, so a chunk carrying N lines did O(N^2) byte copies; a 2000-frame
+        // completion delivered in a few chunks hit that squarely. Correctness first: the boundaries
+        // must land in the same places whatever the chunking.
+        let mut buffer = LineBuffer::new();
+        let mut chunk = String::new();
+        for index in 0..2000 {
+            use std::fmt::Write as _;
+            let _ = writeln!(chunk, "data: {{\"i\":{index}}}");
+        }
+        let lines = buffer.push(&chunk);
+        assert_eq!(lines.len(), 2000);
+        assert_eq!(
+            lines
+                .first()
+                .and_then(|line| parse_line(line, Encoding::Sse)),
+            Some(Frame::Data(json!({ "i": 0 })))
+        );
+        assert_eq!(
+            lines
+                .last()
+                .and_then(|line| parse_line(line, Encoding::Sse)),
+            Some(Frame::Data(json!({ "i": 1999 })))
+        );
+        assert!(buffer.is_empty(), "nothing should be left buffered");
+    }
+
+    #[test]
+    fn the_same_bytes_split_differently_yield_the_same_lines() {
+        // Chunk boundaries are the network's business, not the caller's, so the line sequence must
+        // not depend on them. This is the invariant the buffer exists to provide, and the one an
+        // off-by-one in the new offset arithmetic would break.
+        let source = "data: one\n\ndata: two\r\ndata: [DONE]\n";
+        let whole = LineBuffer::new().push(source);
+
+        for split in 1..source.len() {
+            let mut buffer = LineBuffer::new();
+            let mut lines = buffer.push(source.get(..split).unwrap_or_default());
+            lines.extend(buffer.push(source.get(split..).unwrap_or_default()));
+            assert_eq!(lines, whole, "split at {split} changed the line sequence");
+        }
+    }
+
+    #[test]
+    fn a_blank_line_is_returned_as_a_line() {
+        // SSE frames are terminated by a blank line, so the empty string between two `data:` lines
+        // is real output and must not be silently dropped.
+        let mut buffer = LineBuffer::new();
+        assert_eq!(buffer.push("a\n\nb\n"), vec!["a", "", "b"]);
     }
 
     #[test]

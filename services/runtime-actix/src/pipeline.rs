@@ -45,6 +45,29 @@ const STREAM_CHANNEL_FRAMES: usize = 64;
 ///
 /// `send` awaits capacity rather than dropping when full: a dropped frame would
 /// truncate JSON mid-object and corrupt the client's parse.
+/// Concatenate a batch of SSE frames into one response chunk.
+///
+/// Separate from the stream so the concatenation can be tested without depending on scheduling:
+/// whether several frames are ever queued at once is a property of how fast the socket drains, and
+/// an in-process test harness that polls the body after every send never queues more than one.
+fn coalesce_frames(batch: &mut [String]) -> actix_web::web::Bytes {
+    match batch {
+        // Nothing to join. `recv_many` returning 0 is handled by the caller, so this is only
+        // reachable if the batch was somehow emptied; an empty chunk is harmless either way.
+        [] => actix_web::web::Bytes::new(),
+        // One frame, the common case when the producer is not running ahead: hand over the
+        // String's own allocation instead of copying it.
+        [only] => actix_web::web::Bytes::from(std::mem::take(only)),
+        frames => {
+            let mut joined = String::with_capacity(frames.iter().map(String::len).sum::<usize>());
+            for frame in frames {
+                joined.push_str(frame);
+            }
+            actix_web::web::Bytes::from(joined)
+        }
+    }
+}
+
 struct ChannelSink {
     sender: tokio::sync::mpsc::Sender<String>,
 }
@@ -332,8 +355,7 @@ impl Runtime {
             nullrouter_translate::Usage::default(),
             outcome.started,
             outcome.error.clone(),
-        )
-        .await;
+        );
     }
 
     /// Lock an account after a video failure, using the shared fallback policy.
@@ -685,8 +707,7 @@ impl Runtime {
             usage,
             started,
             None,
-        )
-        .await;
+        );
 
         let text = fusion::extract_panel_text(&body);
         (!text.trim().is_empty()).then_some(text)
@@ -1066,8 +1087,7 @@ impl Runtime {
                     nullrouter_translate::Usage::default(),
                     started,
                     (!succeeded).then(|| format!("upstream returned {upstream_status}")),
-                )
-                .await;
+                );
 
                 if payload.is_null() {
                     return responses::json(
@@ -1412,8 +1432,7 @@ impl Runtime {
                 nullrouter_translate::Usage::default(),
                 started,
                 Some(parsed.message.clone()),
-            )
-            .await;
+            );
 
             if decision.should_fallback {
                 return Attempt::Retryable {
@@ -1524,12 +1543,27 @@ impl Runtime {
             state_client.record_usage(&report).await;
         });
 
-        let body = futures_util::stream::unfold(receiver, |mut receiver| async move {
-            receiver
-                .recv()
-                .await
-                .map(|frame| (Ok(actix_web::web::Bytes::from(frame)), receiver))
-        });
+        // Frames already sitting in the channel are concatenated into one chunk rather than
+        // written one at a time. A 2000-frame response used to mean 2000 chunked-encoding writes;
+        // when the translator runs ahead of the socket — which it does, since translating a frame
+        // is faster than sending one — most of those writes were carrying a single ~40-byte frame.
+        //
+        // This adds no latency: `recv_many` returns as soon as anything is available and only
+        // takes what is already queued, so a slow producer still yields one frame per chunk. SSE
+        // framing is unaffected because the boundaries are the `\n\n` inside the payload, not the
+        // transport chunks — a client cannot distinguish this from the previous behaviour except
+        // by timing.
+        let body = futures_util::stream::unfold(
+            (receiver, Vec::with_capacity(STREAM_CHANNEL_FRAMES)),
+            |(mut receiver, mut batch)| async move {
+                batch.clear();
+                if receiver.recv_many(&mut batch, STREAM_CHANNEL_FRAMES).await == 0 {
+                    // Producer finished and the channel is drained.
+                    return None;
+                }
+                Some((Ok(coalesce_frames(&mut batch)), (receiver, batch)))
+            },
+        );
 
         Attempt::Responded(responses::sse_stream(StatusCode::OK, body))
     }
@@ -1594,8 +1628,7 @@ impl Runtime {
             usage,
             started,
             None,
-        )
-        .await;
+        );
 
         Attempt::Responded(responses::json(StatusCode::OK, &body))
     }
@@ -1688,8 +1721,7 @@ impl Runtime {
             nullrouter_translate::Usage::default(),
             Instant::now(),
             Some(message.to_owned()),
-        )
-        .await;
+        );
         Self::error_response(context, status, message)
     }
 
@@ -1726,8 +1758,7 @@ impl Runtime {
             nullrouter_translate::Usage::default(),
             Instant::now(),
             Some(message.clone()),
-        )
-        .await;
+        );
 
         let retry_after_seconds = remaining_ms.div_euclid(1000).max(1);
         let mut response = Self::error_response(context, status, &message);
@@ -1762,7 +1793,9 @@ impl Runtime {
         clippy::too_many_arguments,
         reason = "one usage row's worth of fields, assembled at several call sites"
     )]
-    async fn record(
+    /// Not `async`: the usage POST is spawned, so there is nothing here to await. Keeping the
+    /// signature async would make every caller's `.await` a no-op that reads as if it waited.
+    fn record(
         &self,
         context: &ChatContext<'_>,
         target: &model::ModelTarget,
@@ -1830,4 +1863,70 @@ enum Attempt {
         cooldown_ms: u64,
         backoff_level: Option<u32>,
     },
+}
+
+#[cfg(test)]
+mod coalesce_tests {
+    use super::coalesce_frames;
+
+    #[test]
+    fn one_frame_passes_through_byte_for_byte() {
+        let mut batch = vec!["data: {\"a\":1}\n\n".to_owned()];
+        assert_eq!(coalesce_frames(&mut batch).as_ref(), b"data: {\"a\":1}\n\n");
+    }
+
+    #[test]
+    fn several_frames_are_concatenated_with_nothing_inserted_between_them() {
+        // The property that keeps SSE framing intact: the frames already end in `\n\n`, so joining
+        // them means appending, never inserting a separator. A separator here would produce a
+        // blank event that a strict client counts as a message.
+        let mut batch = vec![
+            "data: one\n\n".to_owned(),
+            "data: two\n\n".to_owned(),
+            "data: [DONE]\n\n".to_owned(),
+        ];
+        let chunk = coalesce_frames(&mut batch);
+        assert_eq!(
+            chunk.as_ref(),
+            b"data: one\n\ndata: two\n\ndata: [DONE]\n\n"
+        );
+        // And the count of terminators is preserved exactly.
+        assert_eq!(
+            String::from_utf8_lossy(chunk.as_ref())
+                .matches("\n\n")
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn the_concatenation_is_the_same_bytes_as_writing_each_frame_separately() {
+        // Stated as an equivalence, because that is the whole claim being made: coalescing changes
+        // how many writes happen, not what the client receives.
+        let frames: Vec<String> = (0..200)
+            .map(|index| format!("data: {{\"i\":{index}}}\n\n"))
+            .collect();
+        let separately: Vec<u8> = frames.concat().into_bytes();
+
+        let mut batch = frames;
+        let coalesced = coalesce_frames(&mut batch);
+        assert_eq!(coalesced.as_ref(), separately.as_slice());
+    }
+
+    #[test]
+    fn an_empty_batch_yields_an_empty_chunk_rather_than_panicking() {
+        let mut batch: Vec<String> = Vec::new();
+        assert!(coalesce_frames(&mut batch).is_empty());
+    }
+
+    #[test]
+    fn a_frame_containing_a_blank_line_is_not_mangled() {
+        // Content with an embedded blank line is legal inside a JSON string payload, and must not
+        // be treated as a frame boundary by anything here — this function does not parse.
+        let mut batch = vec!["data: {\"text\":\"a\\n\\nb\"}\n\n".to_owned()];
+        assert_eq!(
+            coalesce_frames(&mut batch).as_ref(),
+            b"data: {\"text\":\"a\\n\\nb\"}\n\n"
+        );
+    }
 }
