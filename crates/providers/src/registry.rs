@@ -86,6 +86,23 @@ pub struct RegistryEntry {
     pub models: Vec<Model>,
     #[serde(default)]
     pub service_kinds: Option<Vec<String>>,
+    /// Where this provider publishes its own model catalogue, when it does.
+    ///
+    /// Eight providers do. The dashboard's "suggested models" list is that catalogue,
+    /// filtered — a gateway like OpenRouter serves hundreds and the useful subset is
+    /// whichever are free with a large context window.
+    #[serde(default)]
+    pub models_fetcher: Option<ModelsFetcher>,
+}
+
+/// A provider's public model catalogue.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelsFetcher {
+    pub url: String,
+    /// Which filter to apply: `openrouter-free`, `opencode-free`, `mimo-free`, `openai`.
+    #[serde(rename = "type")]
+    pub filter: String,
 }
 
 impl RegistryEntry {
@@ -93,6 +110,28 @@ impl RegistryEntry {
     pub fn models_key(&self) -> &str {
         self.alias.as_deref().unwrap_or(&self.id)
     }
+}
+
+/// The catalogue URL a provider declares, if any.
+pub fn models_fetcher(provider_id: &str) -> Option<&'static ModelsFetcher> {
+    entry(provider_id)?.models_fetcher.as_ref()
+}
+
+/// Whether any provider declares this exact catalogue URL.
+///
+/// The reason `/api/providers/suggested-models` can take a `url` parameter without becoming
+/// a server-side request forgery primitive. Upstream's route fetches whatever it is handed;
+/// checking it against the registry first costs nothing, because the dashboard only ever
+/// passes a URL it read from the registry in the first place.
+///
+/// Exact match, not a host or prefix match: a prefix check on `https://openrouter.ai/` would
+/// still allow every other path on that host, and a host check allows anything an open
+/// redirect on that host can reach.
+pub fn declares_models_url(url: &str) -> bool {
+    entries()
+        .iter()
+        .filter_map(|entry| entry.models_fetcher.as_ref())
+        .any(|fetcher| fetcher.url == url)
 }
 
 /// UI metadata for the dashboard provider list.

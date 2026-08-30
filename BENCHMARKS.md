@@ -283,6 +283,22 @@ the README claims the feature and a reader deserves to know which claims have nu
 - Concurrency 1 and 8.
 - Use `oha`/`k6`/`wrk` — a hand-rolled client becomes the bottleneck and measures itself.
 
+### What the committed runs actually used
+
+**20s per leg and 3 trials, not 30s and 5.** The protocol above is the standard; this is the
+deviation, stated rather than left for a reader to infer from the file headers.
+
+Each streaming cell is now measured twice over (with and without keep-alive), so a full pass is
+18 timed legs per concurrency level. At 30s × 5 trials that is about three hours per router, and
+fairness rule 6 means nothing else may run on the machine for the duration — six hours of exclusive
+time for two routers.
+
+At 20s and concurrency 1 the streaming cells land near 500 requests, short of the nominal 2000-request
+floor. That floor exists to keep a median from being noise; the observed per-trial spread was ±0.5 ms
+on the non-streaming cells, so its purpose is met at this length. The c=1 streaming cells are the
+weakest rows in the table for this reason, and the `[min..max]` column is there to show it rather than
+hide it. Anyone re-running with more budget should use the documented 30s/5.
+
 ### The harness
 
 `benches/run.sh` implements the above. It measures whichever router is listening on `--router-port`

@@ -152,8 +152,18 @@ async fn provider_proxy_model_and_usage_gap_routes_return_json_contracts() -> Te
     assert_eq!(field(&deno, "success")?, false);
     assert_eq!(cloudflare_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&cloudflare, "success")?, false);
-    assert_eq!(model_test_status, StatusCode::NOT_IMPLEMENTED);
+    // `/api/models/test` no longer answers 501: it dispatches a real completion through the
+    // runtime. This slice points at a closed port, so the honest answer is 503 — the router
+    // is down, which is a different thing for a user to fix than a provider refusing.
+    assert_eq!(model_test_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&model_test, "ok")?, false);
+    assert!(
+        field(&model_test, "error")?
+            .as_str()
+            .unwrap_or_default()
+            .contains("runtime"),
+        "the failure should name the runtime: {model_test}"
+    );
     assert_eq!(usage_detail_status, StatusCode::OK);
     assert_eq!(field(&usage_detail, "requests")?, &serde_json::json!([]));
     assert_eq!(usage_connection_status, StatusCode::NOT_FOUND);

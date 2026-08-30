@@ -1,0 +1,21 @@
+run: 20260830T120626Z-nullrouter
+label: nullrouter
+date: 2026-08-30T12:06:26Z
+host: Linux 7.1.6-firecracker x86_64
+cpus: 16
+mem: 15.6 GiB
+load-tool: oha oha 1.16.0
+node: v18.20.4
+rustc: rustc 1.98.0 (88d9e12ae 2026-08-18)
+mock: port=8099 sleep_ms=25
+router-port: 20128
+duration-per-cell: 20s  trials: 3  warmup: 200
+
+scenarios (overhead = through - direct, both p50 ms)
+
+S1-proxy-nonstream           c=1   through=40.639    direct=25.243    overhead=15.396 ms  [15.250..15.765 over 3 trials]
+S2-translate-nonstream       c=1   through=40.423    direct=25.258    overhead=15.172 ms  [14.221..15.585 over 3 trials]
+S3-proxy-stream-200          c=1   through=40.262    direct=25.270    overhead=14.996 ms  [14.832..15.765 over 3 trials]
+  S3-proxy-stream-200        c=1   keep-alive=40.262    none=40.649    ratio=0.99
+S4-translate-stream-200      c=1   through=42.038    direct=25.287    overhead=16.781 ms  [15.512..17.392 over 3 trials]
+  S4-translate-stream-200    c=1   keep-alive=42.038    none=41.098    ratio=1.02

@@ -89,6 +89,22 @@ async fn list() -> HttpResponse {
     )
 }
 
+/// How long to wait for a provider's public catalogue.
+///
+/// A dashboard list, so a stale-but-quick answer beats a spinner. Upstream sets no timeout
+/// at all, which leaves the route hanging on whatever the catalogue host does.
+const CATALOGUE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The models a provider publishes, filtered to the useful subset.
+///
+/// **The `url` must be one the registry itself declares.** Upstream fetches whatever URL the
+/// caller passes, which is a server-side request forgery primitive: the route is behind
+/// dashboard auth, but an authenticated request could still make the server probe hosts the
+/// caller cannot reach, and read back whatever came out. Checking against the registry costs
+/// nothing, because the dashboard only ever passes a URL it read from the registry.
+///
+/// This is a deliberate divergence and the one place this route is stricter than upstream.
+/// The filters themselves, and the empty-list-on-failure behaviour, are faithful.
 async fn suggested_models(query: web::Query<SuggestedModelsQuery>) -> HttpResponse {
     let Some(url) = query.url.as_deref().filter(|value| !value.is_empty()) else {
         return responses::json(
@@ -107,21 +123,70 @@ async fn suggested_models(query: web::Query<SuggestedModelsQuery>) -> HttpRespon
         );
     };
 
-    if !matches!(
-        filter_type,
-        "openrouter-free" | "opencode-free" | "mimo-free"
-    ) {
+    if !nullrouter_providers::registry::declares_models_url(url) {
+        // Deliberately says which URLs are allowed rather than just refusing: the caller is
+        // the dashboard, and a mismatch means the registry and the dashboard disagree.
+        return responses::json(
+            StatusCode::BAD_REQUEST,
+            &responses::error(
+                "url is not a model catalogue declared by any provider in the registry",
+            ),
+        );
+    }
+
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(CATALOGUE_TIMEOUT)
+        .build()
+    else {
+        return responses::json(
+            StatusCode::OK,
+            &SuggestedModelsResponse { data: Vec::new() },
+        );
+    };
+
+    // Every failure past this point is an empty list, as upstream does: this is a
+    // convenience list beside a text field the user can always type into, so a catalogue
+    // being down must not present as a dashboard error.
+    let body = match client.get(url).send().await {
+        Ok(response) if response.status().is_success() => response.text().await.unwrap_or_default(),
+        Ok(response) => {
+            tracing::info!(
+                url,
+                status = response.status().as_u16(),
+                "model catalogue refused"
+            );
+            return responses::json(
+                StatusCode::OK,
+                &SuggestedModelsResponse { data: Vec::new() },
+            );
+        }
+        Err(error) => {
+            tracing::info!(url, %error, "model catalogue unreachable");
+            return responses::json(
+                StatusCode::OK,
+                &SuggestedModelsResponse { data: Vec::new() },
+            );
+        }
+    };
+
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return responses::json(
+            StatusCode::OK,
+            &SuggestedModelsResponse { data: Vec::new() },
+        );
+    };
+
+    // An unknown filter is a 400 rather than an empty list. An empty list here would read
+    // as "this provider publishes no free models", which is a different claim.
+    let Some(models) = nullrouter_providers::suggested::filter_catalogue(filter_type, &parsed)
+    else {
         return responses::json(
             StatusCode::BAD_REQUEST,
             &responses::error("Unknown filter type"),
         );
-    }
+    };
 
-    let _ = url;
-    responses::json(
-        StatusCode::OK,
-        &SuggestedModelsResponse { data: Vec::new() },
-    )
+    responses::json(StatusCode::OK, &serde_json::json!({ "data": models }))
 }
 
 async fn create(body: web::Bytes) -> HttpResponse {

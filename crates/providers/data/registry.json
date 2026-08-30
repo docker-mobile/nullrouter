@@ -3439,7 +3439,11 @@
    }
   ],
   "serviceKinds": null,
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://api.kilo.ai/api/gateway/models",
+   "type": "openrouter-free"
+  }
  },
  {
   "id": "kimchi",
@@ -3997,7 +4001,11 @@
    }
   ],
   "serviceKinds": null,
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://models.dev/api.json",
+   "type": "mimo-free"
+  }
  },
  {
   "id": "minimax-cn",
@@ -5021,7 +5029,11 @@
   "oauth": null,
   "models": [],
   "serviceKinds": null,
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://opencode.ai/zen/v1/models",
+   "type": "opencode-free"
+  }
  },
  {
   "id": "openrouter",
@@ -5148,7 +5160,11 @@
    "tts",
    "imageToText"
   ],
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://openrouter.ai/api/v1/models",
+   "type": "openrouter-free"
+  }
  },
  {
   "id": "perplexity-web",
@@ -5322,7 +5338,11 @@
    "llm",
    "webSearch"
   ],
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://api.perplexity.ai/v1/models",
+   "type": "openai"
+  }
  },
  {
   "id": "playht",
@@ -6054,7 +6074,11 @@
    "embedding",
    "image"
   ],
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://api.venice.ai/api/v1/models",
+   "type": "openai"
+  }
  },
  {
   "id": "vercel-ai-gateway",
@@ -6095,7 +6119,11 @@
    "imageToText",
    "webSearch"
   ],
-  "thinkingConfig": null
+  "thinkingConfig": null,
+  "modelsFetcher": {
+   "url": "https://ai-gateway.vercel.sh/v1/models",
+   "type": "openai"
+  }
  },
  {
   "id": "vertex-partner",
@@ -7968,6 +7996,10 @@
     "max"
    ],
    "defaultMode": "high"
+  },
+  "modelsFetcher": {
+   "url": "https://api.tokenrouter.com/v1/models",
+   "type": "openai"
   }
  },
  {

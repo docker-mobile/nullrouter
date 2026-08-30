@@ -319,6 +319,15 @@ cell() {
     through+=("$t"); direct+=("$d")
     overhead+=("$(awk -v a="$t" -v b="$d" 'BEGIN{printf "%.3f", a-b}')")
   done
+
+  # The keep-alive comparison has to happen while the mock is still up. Measuring it after
+  # `stop_mock` reported `none=0.000` for every streaming cell -- a value that looks like a
+  # measurement rather than like the failure it was.
+  local no_keepalive=""
+  if [[ "$want" == "stream" ]]; then
+    no_keepalive="$(measure_no_keepalive "$router_url" "$body" "$concurrency")"
+  fi
+
   stop_mock
 
   if [[ ${#overhead[@]} -eq 0 ]]; then
@@ -350,7 +359,19 @@ cell() {
   lo="$(printf '%s\n' "${overhead[@]}" | sort -n | head -1)"
   hi="$(printf '%s\n' "${overhead[@]}" | sort -n | tail -1)"
 
-  # Keep-alive guard, streaming cells only.
+  # All three columns are medians. Printing trial 1's `through` beside a median `overhead`
+  # made a bimodal cell look like a stable one with an odd spread.
+  local median_through median_direct
+  median_through="$(printf '%s\n' "${through[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
+  median_direct="$(printf '%s\n' "${direct[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
+
+  printf '%-28s c=%-2s  through=%-9s direct=%-9s overhead=%s ms  [%s..%s over %d trials]\n' \
+    "$name" "$concurrency" "$median_through" "$median_direct" "$median" "$lo" "$hi" "${#overhead[@]}" \
+    | tee -a "$RESULT"
+
+  # Keep-alive guard, streaming cells only. Runs after the medians because it compares
+  # against `median_through` — an earlier version referenced it above its assignment, and
+  # `set -u` killed the whole run on the first streaming cell.
   #
   # A streamed response used to cost ~2x its real latency to any client using keep-alive,
   # because the accept socket had no TCP_NODELAY: the headers went out as one small write
@@ -362,27 +383,20 @@ cell() {
   # So the harness measures both and reports the ratio. Anything much above 1 means a
   # client that reuses connections -- which is every real client -- is paying for it.
   if [[ "$want" == "stream" ]]; then
-    local no_ka
-    no_ka="$(measure_no_keepalive "$router_url" "$body" "$concurrency")"
-    if [[ -n "$no_ka" && -n "$median_through" ]]; then
+    # A zero or missing figure means the no-keep-alive leg did not measure anything. Say so
+    # rather than printing `ratio=0.00`, which reads like a result.
+    if [[ -z "$no_keepalive" ]] || awk -v b="$no_keepalive" 'BEGIN{exit !(b <= 0)}'; then
+      printf '%-28s c=%-2s  keep-alive comparison unavailable (no p50 without keep-alive)\n' \
+        "  $name" "$concurrency" | tee -a "$RESULT"
+    else
       local ratio
-      ratio="$(awk -v a="$median_through" -v b="$no_ka" 'BEGIN{printf "%.2f", (b > 0) ? a / b : 0}')"
-      printf '%-28s c=%-2s  keep-alive=%s vs none=%s  ratio=%s%s\n' \
-        "  $name" "$concurrency" "$median_through" "$no_ka" "$ratio" \
-        "$(awk -v r="$ratio" 'BEGIN{print (r > 1.5) ? "  <-- streamed responses cost reused connections extra; check TCP_NODELAY" : ""}')" \
+      ratio="$(awk -v a="$median_through" -v b="$no_keepalive" 'BEGIN{printf "%.2f", a / b}')"
+      printf '%-28s c=%-2s  keep-alive=%-9s none=%-9s ratio=%s%s\n' \
+        "  $name" "$concurrency" "$median_through" "$no_keepalive" "$ratio" \
+        "$(awk -v r="$ratio" 'BEGIN{print (r > 1.5) ? "  <-- reused connections pay extra on streamed responses; check TCP_NODELAY" : ""}')" \
         | tee -a "$RESULT"
     fi
   fi
-
-  # All three columns are medians. Printing trial 1's `through` beside a median `overhead`
-  # made a bimodal cell look like a stable one with an odd spread.
-  local median_through median_direct
-  median_through="$(printf '%s\n' "${through[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
-  median_direct="$(printf '%s\n' "${direct[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
-
-  printf '%-28s c=%-2s  through=%-9s direct=%-9s overhead=%s ms  [%s..%s over %d trials]\n' \
-    "$name" "$concurrency" "$median_through" "$median_direct" "$median" "$lo" "$hi" "${#overhead[@]}" \
-    | tee -a "$RESULT"
 }
 
 echo "scenarios (overhead = through - direct, both p50 ms)" | tee -a "$RESULT"

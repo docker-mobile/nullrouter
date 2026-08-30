@@ -62,8 +62,14 @@ async fn provider_routes_return_empty_defaults_and_json_validation_errors() -> T
 
     // When: dashboard provider endpoints are requested.
     let (providers_status, providers) = get_json("/api/providers").await?;
-    let (suggest_status, suggest) = get_json(
-        "/api/providers/suggested-models?url=https://example.invalid&type=openrouter-free",
+    // `https://example.invalid` is no longer fetched: `suggested-models` refuses any URL the
+    // registry does not declare, so this is a 400 by design. Deliberately *not* replaced
+    // with a declared URL — that would make this test fetch a third party's catalogue on
+    // every `cargo test`, which is slow, rate-limitable, and gives a different answer on a
+    // machine with no egress. The fetch path is covered in `tests/api_suggested_models.rs`,
+    // gated behind NULLROUTER_TEST_EGRESS.
+    let (undeclared_status, undeclared) = get_json(
+        "/api/providers/suggested-models?url=https%3A%2F%2Fexample.invalid&type=openrouter-free",
     )
     .await?;
     let (missing_status, missing) = get_json("/api/providers/suggested-models").await?;
@@ -77,8 +83,15 @@ async fn provider_routes_return_empty_defaults_and_json_validation_errors() -> T
     // Then: registered JSON endpoints expose upstream-compatible empty/error envelopes.
     assert_eq!(providers_status, StatusCode::OK);
     assert_eq!(field(&providers, "connections")?, &serde_json::json!([]));
-    assert_eq!(suggest_status, StatusCode::OK);
-    assert_eq!(field(&suggest, "data")?, &serde_json::json!([]));
+    assert_eq!(
+        undeclared_status,
+        StatusCode::BAD_REQUEST,
+        "a URL no provider declares must be refused, not fetched"
+    );
+    assert!(
+        field(&undeclared, "error")?.is_string(),
+        "the refusal should say why: {undeclared}"
+    );
     assert_eq!(missing_status, StatusCode::BAD_REQUEST);
     assert_eq!(field(&missing, "error")?, "Missing url or type");
     assert_eq!(validate_status, StatusCode::BAD_REQUEST);

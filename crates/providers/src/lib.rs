@@ -11,6 +11,7 @@ pub mod model;
 pub mod models_list;
 pub mod registry;
 pub mod services;
+pub mod suggested;
 
 pub use capabilities::{
     Capabilities, ThinkingFormat, ThinkingRange, for_model as capabilities_for_model, max_output,

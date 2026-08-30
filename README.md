@@ -648,8 +648,6 @@ misleading `501`.
   implemented, and *refreshing* an existing provider token is implemented — see below.)
 - **Proxy pool testing and relay deployment** to Cloudflare/Deno/Vercel. Pool CRUD is real; deploying
   a relay is not. Per-connection outbound proxies work.
-- **Suggested-model probing** and `/api/models/test`. (`/api/providers/{id}/test`, `test-models`
-  and `test-batch` are implemented and make real provider calls.)
 - **Translator execution and log persistence.** Steps 1–3 validate and echo their shape; they do not
   translate. (The translation engine itself is real and used on the live `/v1` path — this is the
   dashboard's step-by-step inspector.)
@@ -669,6 +667,37 @@ rather than silently retried.
 `backend_connected: false` with a reason; posting a message returns 503 rather than pretending to
 deliver it. Console-log streams connect and emit an empty init frame — there is no live capture
 backend.
+
+**Model testing is real.** `POST /api/models/test` dispatches a one-token, non-streaming completion
+through the runtime — the same path real traffic takes, so a passing test means something — and reports
+latency, finish reason, and usage. Every failure carries **the provider's own message**: "insufficient
+quota" or "The model `x` does not exist", not "request failed". A `200` that arrives without a
+completion is reported as a failure, because some providers answer `200` with an error object and
+calling that a working model is the one false pass this route exists to prevent. A model whose kind is
+not `llm` is refused before dispatch rather than sent a chat body it would reject.
+
+**Suggested-model lists are real**, and this is the one route deliberately *stricter* than upstream.
+Eight providers publish a model catalogue; `GET /api/providers/suggested-models` fetches one and
+filters it to the useful subset — for a gateway like OpenRouter, the free models with a context window
+of 200k or more, largest first.
+
+> **The `url` must be one the registry itself declares.** Upstream fetches whatever URL the caller
+> passes. That is a server-side request forgery primitive: the route sits behind dashboard auth, but an
+> authenticated request could still make the server GET any host it can reach — including this
+> router's own internal services — and read the result back. The check is an exact URL match, not a
+> host match, since a host match still allows every other path there. Nothing is lost, because the
+> dashboard only ever passes a URL it read from the registry. The catalogue URLs are extracted from
+> upstream by `tools/extract-models-fetcher.py` rather than typed in.
+
+A catalogue that is down, slow, or malformed yields an empty list, matching upstream: this sits beside
+a text field the user can always type into, so it must not present as a dashboard error. An *unknown
+filter* is a 400 rather than an empty list, because an empty list would claim the provider publishes
+no free models.
+
+One divergence worth naming: upstream's filter table has no `openai` entry, yet four providers
+(`perplexity-agent`, `venice`, `tokenrouter`, `vercel-ai-gateway`) declare `type: "openai"`, so
+upstream answers 400 and their lists never populate. That filter is implemented here — a plain OpenAI
+catalogue needs no filtering.
 
 **Remote `/models` probing is implemented.** A user-added `openai-compatible-*` or
 `anthropic-compatible-*` connection points at a host its owner chose, so the registry cannot know its
