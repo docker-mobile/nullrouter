@@ -28,6 +28,15 @@ say() { echo "==> $*"; }
 fail() { echo "error: $*" >&2; exit 1; }
 
 # ── sign in ──────────────────────────────────────────────────────────────────
+# Checked first, and by name, because every later failure looks like a router problem
+# otherwise: the import succeeds, the key mints, and only the final dispatch fails with a
+# bad_gateway that reads as nullrouter's fault.
+MOCK_PORT="${MOCK_PORT:-8099}"
+timeout 1 bash -c "</dev/tcp/127.0.0.1/$MOCK_PORT" 2>/dev/null || fail \
+  "no mock provider on :$MOCK_PORT. Start it first:
+  cargo build -p mock-provider --release
+  ./target/release/mock-provider --port $MOCK_PORT --sleep-ms 25 --frames 200 --frame-chars 12 &"
+
 say "signing in at $GATEWAY"
 login="$(curl -s -c "$COOKIES" -X POST "$GATEWAY/api/auth/login" \
   -H 'content-type: application/json' -d "{\"password\":\"$PASSWORD\"}")"

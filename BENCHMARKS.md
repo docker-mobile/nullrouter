@@ -142,32 +142,51 @@ against a 25 ms upstream call 2.30 µs is 0.009% — so the mutex is not worth r
 recorded because it is the one place where contention exists at all, and a future regression that made
 `fill_first` or `fusion` start locking would show up as their cost climbing toward this row.
 
-## Found while wiring the harness: three state fetches per request
+## The overhead is state round trips, not translation
 
-Not a measured figure — a structural cost the harness setup exposed, recorded here because it is
-larger than everything the micro-benchmarks found put together.
+The first thing the harness found, and it is worth more than every micro-benchmark above: nullrouter
+adds **~14 ms to a 25 ms upstream call**, and translation is a rounding error inside it.
 
-Every chat request fetches `/internal/v1/routing-context` from the state service **at least twice
-before a target is even resolved**:
+Measured on this sandbox, `oha`, concurrency 1, non-streaming, mock at `--sleep-ms 25`:
 
-| Caller | What it reads from the payload |
-|---|---|
-| `enforce_api_key` | `settings.require_api_key` — one bool |
-| `pxpipe_settings` | three pxpipe numbers |
-| `resolve_targets` | combos, or a user-defined node prefix (only when the name is not a registry provider) |
+| Path | p50 | Attributable to |
+|---|---|---|
+| Client → mock (control) | 25.36 ms | the mock's own fixed sleep |
+| Client → **runtime** (`:20132`) → mock | 38.96 ms | **13.60 ms** of runtime |
+| Client → gateway (`:20128`) → runtime → mock | 40.51 ms | **1.55 ms** of gateway |
+| One `GET /internal/v1/routing-context` | 1.92 ms | one state round trip |
 
-Each is a full HTTP round trip carrying every connection and every combo, to read a handful of
-fields. On loopback that is cheap per hop but it is not free, and it is paid on every request
-including the ones that need none of it. Against a 25 ms upstream call two avoidable round trips
-matter more than the 0.5 µs of thinking-pipeline reordering discussed above, which is the point of
-writing it down: the micro-benchmarks were measuring the wrong order of magnitude.
+A chat request makes five state calls before the provider is dialled:
 
-A per-request fetch threaded through the call chain is the fix, not a TTL cache — the runtime
-re-reads these settings deliberately, at the last hop before a provider call, so that a dashboard
-toggle is never silently ignored. A cache would trade a stated guarantee for latency.
+| Caller | What it needs | Cost |
+|---|---|---|
+| `enforce_api_key` | `settings.require_api_key` — one bool | one `routing-context` |
+| `enforce_api_key` | the key itself | one `validate-api-key` |
+| `pxpipe_settings` | three pxpipe numbers | one `routing-context` |
+| `resolve_targets` | combos, or a user-defined node prefix | one `routing-context` |
+| credential selection | the connection to use | one `credentials/select` |
+
+Five at ~1.9 ms is ~9.6 ms of the 13.60 ms. Three of the five fetch the *same* `routing-context`
+payload — every connection and every combo — to read a bool, three numbers, and a prefix map.
+
+Checked rather than assumed: turning `requireApiKey` off removed **1.29 ms**. That also corrected the
+count. I predicted two round trips would disappear and only one did, because `enforce_api_key` fetches
+`routing-context` to read the flag *before* it can know the flag is off — so the fetch happens either
+way and only `validate-api-key` is skipped. One round trip, ~1.3 ms measured against ~1.9 ms
+predicted, which is the right order at this precision.
+
+Against these figures the 0.5 µs of thinking-pipeline reordering discussed above is 0.004% of the
+overhead. The micro-benchmarks were measuring three orders of magnitude below where the cost lives.
+That is the argument for building the end-to-end harness before optimising anything.
+
+**The fix is one fetch per request threaded through the call chain, not a TTL cache.** The runtime
+re-reads these deliberately, at the last hop before a provider call, so that a dashboard toggle is
+never silently ignored; a cache would trade a stated guarantee for latency. Not done here — it touches
+`enforce_api_key`, `pxpipe_settings` and `resolve_targets` and wants its own change with its own
+before-and-after numbers from this harness.
 
 `services/runtime-actix/tests/node_prefix_routing.rs` asserts the prefix-resolution fetch as a
-*difference* from the baseline count rather than pinning the absolute number, so it keeps working when
+*difference* from the baseline count rather than pinning the absolute number, so it keeps passing when
 this is fixed.
 
 ## End-to-end overhead

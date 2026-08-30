@@ -1,0 +1,15 @@
+run: 20260830T105427Z-nullrouter
+label: nullrouter
+date: 2026-08-30T10:54:27Z
+host: Linux 7.1.6-firecracker x86_64
+cpus: 16
+mem: 15.6 GiB
+load-tool: oha oha 1.16.0
+node: v18.20.4
+rustc: rustc 1.98.0 (88d9e12ae 2026-08-18)
+mock: port=8099 sleep_ms=25
+router-port: 20128
+duration-per-cell: 30s  trials: 5  warmup: 200
+
+scenarios (overhead = through - direct, both p50 ms)
+

@@ -13,6 +13,15 @@
 # drive nullrouter and 9Router identically, or the comparison is between two harnesses
 # rather than two routers.
 #
+# This script starts and stops the mock itself, once per cell, because the frame count
+# differs per scenario. So --mock-port must be FREE when it runs. benches/configure.sh needs
+# a mock up to verify the router can reach one, so the order is:
+#
+#   ./target/release/mock-provider --port 8099 --sleep-ms 25 --frames 200 &
+#   benches/configure.sh                      # verifies, prints the key
+#   kill %1                                   # release the port
+#   benches/run.sh --label ... --api-key ...  # manages its own mocks
+#
 # Usage:
 #   benches/run.sh --label nullrouter --router-port 20128 --api-key sk-...
 #   benches/run.sh --label 9router    --router-port 3000  --api-key sk-...
@@ -105,17 +114,54 @@ MOCK_BIN="target/release/mock-provider"
 
 start_mock() {
   local frames="$1"
+
+  # A mock left over from the previous cell still holds the port, so the new one fails to
+  # bind and the *old* frame count serves the cell -- a 200-frame scenario measured against
+  # a 1-frame mock, which reads as a fast result rather than as an error. This produced a
+  # bimodal S3/S5 (~14 ms on one trial, ~58 ms on the next) before it was caught.
+  local waited=0
+  while timeout 1 bash -c "</dev/tcp/127.0.0.1/$MOCK_PORT" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [[ $waited -gt 50 ]]; then
+      echo "port $MOCK_PORT still held after 5s; cannot start a clean mock" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+
   "$MOCK_BIN" --port "$MOCK_PORT" --sleep-ms "$MOCK_SLEEP_MS" --frames "$frames" \
     --frame-chars 12 >/dev/null 2>&1 &
   MOCK_PID=$!
   for _ in $(seq 1 50); do
-    curl -sf "http://127.0.0.1:$MOCK_PORT/health" >/dev/null && return 0
-    sleep 0.1
+    local health
+    health="$(curl -sf "http://127.0.0.1:$MOCK_PORT/health" 2>/dev/null)" || { sleep 0.1; continue; }
+    # Confirm it is the mock this cell asked for, not merely *a* mock. /health reports the
+    # configuration it is actually running with for exactly this check.
+    local got_frames got_sleep
+    got_frames="$(echo "$health" | sed -n 's/.*"frames":\([0-9]*\).*/\1/p')"
+    got_sleep="$(echo "$health" | sed -n 's/.*"sleepMs":\([0-9]*\).*/\1/p')"
+    if [[ "$got_frames" == "$frames" && "$got_sleep" == "$MOCK_SLEEP_MS" ]]; then
+      return 0
+    fi
+    echo "mock on :$MOCK_PORT reports frames=$got_frames sleepMs=$got_sleep, wanted frames=$frames sleepMs=$MOCK_SLEEP_MS" >&2
+    echo "  a stale mock is serving this cell; refusing to measure against it" >&2
+    return 1
   done
   echo "mock did not come up" >&2
   return 1
 }
-stop_mock() { [[ -n "${MOCK_PID:-}" ]] && kill "$MOCK_PID" 2>/dev/null || true; }
+stop_mock() {
+  [[ -n "${MOCK_PID:-}" ]] && kill "$MOCK_PID" 2>/dev/null
+  # Wait for the port to be released, so the next cell's bind does not race this kill.
+  local waited=0
+  while [[ -n "${MOCK_PID:-}" ]] && timeout 1 bash -c "</dev/tcp/127.0.0.1/$MOCK_PORT" 2>/dev/null; do
+    waited=$((waited + 1))
+    [[ $waited -gt 50 ]] && break
+    sleep 0.1
+  done
+  MOCK_PID=""
+  return 0
+}
 trap stop_mock EXIT
 
 # ── request bodies ───────────────────────────────────────────────────────────
@@ -148,13 +194,25 @@ body_for() { # scenario -> path, with the model substituted
 
 # ── measurement ──────────────────────────────────────────────────────────────
 # p50 in milliseconds for one URL+body, or "" when the run failed.
+#
+# The unit is read from the output, not assumed. oha 1.16 prints
+# `50.00% in 25.3542 ms`; assuming seconds and multiplying by 1000 produced a first run
+# reporting 25366 ms for a 25 ms mock -- a 1000x error that still looked like a plausible
+# table because every cell was wrong by the same factor. Hence also `sanity_direct` below.
 measure() {
   local url="$1" body="$2" concurrency="$3"
   local args=(-z "$DURATION" -c "$concurrency" -m POST -T application/json
               -D "$body" --no-tui)
   [[ -n "$API_KEY" ]] && args+=(-H "Authorization: Bearer $API_KEY")
-  "$LOAD_TOOL" "${args[@]}" "$url" 2>/dev/null \
-    | awk '/50.00% in/ {printf "%.3f", $3 * 1000}'
+  "$LOAD_TOOL" "${args[@]}" "$url" 2>/dev/null | awk '
+    /50\.00% in/ {
+      value = $3
+      unit = $4
+      if (unit ~ /^s(ecs?)?$/) value = value * 1000
+      else if (unit ~ /^us|^µs/)  value = value / 1000
+      printf "%.3f", value
+      exit
+    }'
 }
 
 # Warm the target: cold-start noise otherwise swamps the cheapest scenario.
@@ -251,6 +309,23 @@ cell() {
     return 0
   fi
 
+  # The direct leg is the control, and it has a known expected value: the mock's own fixed
+  # sleep. If it does not land near --mock-sleep-ms then the harness is mis-measuring and
+  # the overhead column is arithmetic on two wrong numbers. Asserted rather than left as
+  # advice in the footer, because the first run of this script reported a 25 ms mock as
+  # 25366 ms and every cell was self-consistently wrong.
+  local first_direct="${direct[0]}"
+  local low high
+  low="$(awk -v s="$MOCK_SLEEP_MS" 'BEGIN{print s * 0.5}')"
+  high="$(awk -v s="$MOCK_SLEEP_MS" 'BEGIN{print s * 3 + 10}')"
+  if awk -v d="$first_direct" -v l="$low" -v h="$high" 'BEGIN{exit !(d < l || d > h)}'; then
+    echo "$name c=$concurrency: direct leg measured ${first_direct}ms against a ${MOCK_SLEEP_MS}ms mock" \
+      | tee -a "$RESULT"
+    echo "  outside [${low}, ${high}] -- the harness is mis-measuring; overhead not reported" \
+      | tee -a "$RESULT"
+    return 0
+  fi
+
   # Median of the per-trial overheads, plus min/max so the spread is on the record.
   local median
   median="$(printf '%s\n' "${overhead[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
@@ -258,8 +333,14 @@ cell() {
   lo="$(printf '%s\n' "${overhead[@]}" | sort -n | head -1)"
   hi="$(printf '%s\n' "${overhead[@]}" | sort -n | tail -1)"
 
+  # All three columns are medians. Printing trial 1's `through` beside a median `overhead`
+  # made a bimodal cell look like a stable one with an odd spread.
+  local median_through median_direct
+  median_through="$(printf '%s\n' "${through[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
+  median_direct="$(printf '%s\n' "${direct[@]}" | sort -n | awk '{v[NR]=$1} END{print (NR%2)?v[(NR+1)/2]:(v[NR/2]+v[NR/2+1])/2}')"
+
   printf '%-28s c=%-2s  through=%-9s direct=%-9s overhead=%s ms  [%s..%s over %d trials]\n' \
-    "$name" "$concurrency" "${through[0]}" "${direct[0]}" "$median" "$lo" "$hi" "${#overhead[@]}" \
+    "$name" "$concurrency" "$median_through" "$median_direct" "$median" "$lo" "$hi" "${#overhead[@]}" \
     | tee -a "$RESULT"
 }
 
