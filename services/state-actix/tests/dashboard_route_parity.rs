@@ -231,7 +231,11 @@ async fn api_settings_remain_state_owned_default_and_update_routes() -> TestResu
     assert_eq!(field(&defaults.body, "outboundProxyEnabled")?, false);
     assert_eq!(field(&defaults.body, "outboundProxyUrl")?, "");
     assert_eq!(field(&defaults.body, "outboundNoProxy")?, "");
-    missing_field(&defaults.body, "requireApiKey")?;
+    // `requireApiKey` is reported and writable. It used to be neither: the field was missing from
+    // `SettingsUpdate`, so `PUT /api/settings` accepted `{"requireApiKey": true}`, answered 200 and
+    // changed nothing, and it was absent from the GET so no toggle could show its state. Upstream's
+    // PATCH passes its whole body through and its GET returns every setting bar the two secrets.
+    assert_eq!(field(&defaults.body, "requireApiKey")?, false);
     missing_field(&defaults.body, "hasPassword")?;
     missing_field(&defaults.body, "oidcConfigured")?;
     // Login is unconditional, so `requireLogin` is not part of this shape. A
@@ -250,6 +254,52 @@ async fn api_settings_remain_state_owned_default_and_update_routes() -> TestResu
     .await?;
     assert_eq!(put.status, StatusCode::OK);
     assert_eq!(field(&put.body, "outboundProxyEnabled")?, true);
+
+    // `requireApiKey` must round-trip. It used to answer 200 and change nothing, which is the
+    // worst shape available for a security toggle: the dashboard showed the write had succeeded
+    // while `/v1` stayed open. Asserted through a re-read, not just the write's own response, since
+    // the response echoing the request would not prove it was stored.
+    let gate = request_json(
+        store.clone(),
+        request(Method::PUT, "/api/settings", r#"{"requireApiKey":true}"#),
+    )
+    .await?;
+    assert_eq!(gate.status, StatusCode::OK);
+    assert_eq!(field(&gate.body, "requireApiKey")?, true);
+    let reread = get_json(store.clone(), "/api/settings").await?;
+    assert_eq!(
+        field(&reread.body, "requireApiKey")?,
+        true,
+        "the gate must survive a re-read, not just echo back"
+    );
+    // And it can be turned off again, so a user is not locked into it.
+    let off = request_json(
+        store.clone(),
+        request(Method::PUT, "/api/settings", r#"{"requireApiKey":false}"#),
+    )
+    .await?;
+    assert_eq!(field(&off.body, "requireApiKey")?, false);
+    // A request that does not mention it leaves it alone, which is what makes a one-key PUT safe.
+    let unrelated = request_json(
+        store.clone(),
+        request(Method::PUT, "/api/settings", r#"{"requireApiKey":true}"#),
+    )
+    .await?;
+    assert_eq!(field(&unrelated.body, "requireApiKey")?, true);
+    let untouched = request_json(
+        store.clone(),
+        request(
+            Method::PUT,
+            "/api/settings",
+            r#"{"tunnelUrl":"https://x.example"}"#,
+        ),
+    )
+    .await?;
+    assert_eq!(
+        field(&untouched.body, "requireApiKey")?,
+        true,
+        "a PUT that does not mention the gate must not clear it"
+    );
 
     let post = request_json(
         store.clone(),

@@ -399,6 +399,12 @@ pub(crate) struct Settings {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SettingsView {
+    /// Whether `/v1` requires a managed API key.
+    ///
+    /// Reported because it is now writable: a dashboard toggle needs to render its current state,
+    /// and upstream's `GET /api/settings` returns every setting except the password hash and the
+    /// OIDC client secret. Not a secret — it says whether a gate is on, not what opens it.
+    pub require_api_key: bool,
     pub tunnel_dashboard_access: bool,
     pub tunnel_url: String,
     pub tailscale_url: String,
@@ -426,6 +432,7 @@ pub(crate) struct SettingsView {
 impl From<Settings> for SettingsView {
     fn from(settings: Settings) -> Self {
         Self {
+            require_api_key: settings.require_api_key,
             tunnel_dashboard_access: settings.tunnel_dashboard_access,
             tunnel_url: settings.tunnel_url,
             tailscale_url: settings.tailscale_url,
@@ -966,6 +973,9 @@ impl StateStore {
     /// [`SettingsUpdate`].
     pub(crate) fn update_settings(&self, update: SettingsUpdate) -> Result<Settings, StoreError> {
         self.write_snapshot(|snapshot| {
+            if let Some(require_api_key) = update.require_api_key {
+                snapshot.settings.require_api_key = require_api_key;
+            }
             if let Some(tunnel_dashboard_access) = update.tunnel_dashboard_access {
                 snapshot.settings.tunnel_dashboard_access = tunnel_dashboard_access;
             }
@@ -1662,6 +1672,13 @@ pub(crate) struct ProxyPoolUpdate {
 /// is a different request and does clear it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SettingsUpdate {
+    /// Whether `/v1` requires a managed API key.
+    ///
+    /// Was missing here, which meant `PUT /api/settings` accepted `{"requireApiKey": true}`,
+    /// answered 200, and changed nothing — the field was only reachable through a 9Router import.
+    /// Upstream's `PATCH /api/settings` passes its whole body to `updateSettings`, so the toggle
+    /// works there; a dashboard switch that silently does nothing is worse than one that is absent.
+    pub require_api_key: Option<bool>,
     pub tunnel_dashboard_access: Option<bool>,
     pub tunnel_url: Option<String>,
     pub tailscale_url: Option<String>,

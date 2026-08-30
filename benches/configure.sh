@@ -86,7 +86,24 @@ unauth="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$GATEWAY/v1/chat/compl
   -H 'content-type: application/json' \
   -d '{"model":"benchopenai/bench-model","messages":[{"role":"user","content":"hi"}]}')"
 [[ "$unauth" == "401" || "$unauth" == "403" ]] \
-  || echo "warning: unauthenticated request returned $unauth, expected 401/403 -- enforcement may be off" >&2
+  || fail "unauthenticated request through the gateway returned $unauth, expected 401/403"
+
+# And the runtime's own gate, checked separately against the runtime port.
+#
+# This was a warning on stderr, and it cost a run: `PUT /api/settings` accepted
+# `requireApiKey` and silently dropped it -- the field was missing from `SettingsUpdate` -- so the
+# gateway enforced from its environment variable while the runtime did not enforce at all. The
+# warning went to stderr, the caller piped this script through `tail -1` to read the key, and the
+# benchmark measured one key check per request where 9Router did one too. Fair by accident, and
+# not what the script claimed. `fail`, not a warning, so the next such gap stops the run.
+runtime_port="${NULLROUTER_RUNTIME_PORT:-20132}"
+runtime_unauth="$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "http://127.0.0.1:${runtime_port}/v1/chat/completions" \
+  -H 'content-type: application/json' \
+  -d '{"model":"benchopenai/bench-model","messages":[{"role":"user","content":"hi"}]}')"
+[[ "$runtime_unauth" == "401" || "$runtime_unauth" == "403" ]] \
+  || fail "the runtime answered $runtime_unauth to an unauthenticated request, expected 401/403 -- \
+requireApiKey did not persist, so the runtime is skipping a key check the comparison assumes"
 
 say "checking a request reaches the mock"
 body="$(curl -s -m 20 -X POST "$GATEWAY/v1/chat/completions" \

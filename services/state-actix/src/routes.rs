@@ -469,6 +469,7 @@ async fn delete_proxy_pool(store: web::Data<StateStore>, path: web::Path<String>
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingsRequest {
+    require_api_key: Option<bool>,
     tunnel_dashboard_access: Option<bool>,
     tunnel_url: Option<String>,
     tailscale_url: Option<String>,
@@ -502,6 +503,7 @@ async fn update_settings(store: web::Data<StateStore>, body: web::Bytes) -> Http
         Err(response) => return response,
     };
     let update = SettingsUpdate {
+        require_api_key: request.require_api_key,
         tunnel_dashboard_access: request.tunnel_dashboard_access,
         tunnel_url: request.tunnel_url,
         tailscale_url: request.tailscale_url,

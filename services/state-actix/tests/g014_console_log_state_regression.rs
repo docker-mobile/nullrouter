@@ -191,7 +191,13 @@ async fn g014_console_log_work_keeps_state_json_routes_structured_and_stateful()
         field(&fetched_settings.body, "outboundProxyUrl")?,
         "http://127.0.0.1:8888"
     );
-    missing_field(&fetched_settings.body, "requireApiKey")?;
+    // `requireApiKey` is reported now. It was absent from this shape *and* silently dropped by the
+    // update route, so `/v1` could stay open while the dashboard showed the toggle had been saved.
+    // `dashboard_route_parity.rs` covers the round trip; this only checks it is present.
+    assert!(
+        fetched_settings.body.get("requireApiKey").is_some(),
+        "the gate's state must be readable for a toggle to render it"
+    );
 
     let providers = get_json(store.clone(), "/api/providers").await?;
     assert_eq!(providers.status, StatusCode::OK);
