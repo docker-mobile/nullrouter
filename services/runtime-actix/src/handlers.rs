@@ -434,14 +434,17 @@ async fn passthrough_entrypoint(
         }
     }
 
+    // Taken owned before `payload` moves, since `model` borrows from it.
+    let requested_model = model.to_owned();
     Ok(runtime
         .execute_passthrough(ChatContext {
             endpoint: request.path(),
-            body: payload.clone(),
+            // Moved, not cloned: `payload` is not read after this.
+            body: payload,
             stream: false,
             // No translation: the provider receives the client's shape.
             source_format: Format::OpenAi,
-            requested_model: model.to_owned(),
+            requested_model,
             // Passthrough sends the client's own bytes; nothing reshapes them.
             pxpipe: None,
         })

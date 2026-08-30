@@ -2,7 +2,7 @@
 //!
 //! Ports `BaseExecutor.execute` from `open-sse/executors/base.js`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use nullrouter_providers::registry;
@@ -157,6 +157,17 @@ pub fn prepare(request: &ExecuteRequest<'_>) -> PreparedRequest {
 #[derive(Debug, Clone)]
 pub struct Executor {
     client: Client,
+    /// Clients for connections that dispatch through an outbound proxy, keyed by the proxy
+    /// specification.
+    ///
+    /// `reqwest::Client` owns a connection pool, so building one per call — which is what
+    /// `client_for` used to do whenever a proxy was configured — means a fresh TCP connection to
+    /// the proxy on every request, and a fresh TLS handshake with it. That is the one case where
+    /// pooling matters most, since a proxy hop is usually the slowest link in the path.
+    ///
+    /// Keyed by `(proxy_url, no_proxy)` because both change which hosts the client bypasses, and a
+    /// client built for one must not serve a connection configured with the other.
+    proxied: std::sync::Arc<std::sync::RwLock<HashMap<(String, String), Client>>>,
 }
 
 impl Default for Executor {
@@ -175,6 +186,7 @@ impl Executor {
                 // A builder failure here means no TLS backend; the default
                 // client still works for plaintext and surfaces errors per call.
                 .unwrap_or_default(),
+            proxied: std::sync::Arc::default(),
         }
     }
 
@@ -200,10 +212,23 @@ impl Executor {
     }
 
     /// Client for a call, honoring any per-connection outbound proxy.
+    ///
+    /// Proxied clients are cached, because each one owns a connection pool and rebuilding it per
+    /// request throws that pool away — see the `proxied` field.
     fn client_for(&self, credentials: &Credentials) -> Client {
         let Some(proxy_url) = credentials.proxy_url() else {
             return self.client.clone();
         };
+        let key = (
+            proxy_url.to_owned(),
+            credentials.no_proxy().unwrap_or_default().to_owned(),
+        );
+        if let Ok(cache) = self.proxied.read()
+            && let Some(client) = cache.get(&key)
+        {
+            return client.clone();
+        }
+
         let Ok(mut proxy) = reqwest::Proxy::all(proxy_url) else {
             // An unparseable proxy URL must not silently bypass the proxy, but
             // upstream fails open here, so the direct client is used.
@@ -213,11 +238,20 @@ impl Executor {
         if let Some(no_proxy) = credentials.no_proxy() {
             proxy = proxy.no_proxy(reqwest::NoProxy::from_string(no_proxy));
         }
-        Client::builder()
+        let Ok(client) = Client::builder()
             .proxy(proxy)
             .pool_idle_timeout(Duration::from_secs(90))
             .build()
-            .unwrap_or_else(|_| self.client.clone())
+        else {
+            return self.client.clone();
+        };
+
+        // A lost race just means two clients were built and one is dropped; `insert` keeps the
+        // later one so every subsequent call shares a single pool either way.
+        if let Ok(mut cache) = self.proxied.write() {
+            cache.insert(key, client.clone());
+        }
+        client
     }
 
     /// Dispatch to an explicit URL, bypassing the chat-transport resolution.
@@ -570,6 +604,104 @@ mod tests {
     use super::{ExecuteError, Executor, resolve_retry_entry};
     use crate::credentials::Credentials;
     use serde_json::json;
+
+    /// How many proxied clients the executor has cached.
+    ///
+    /// A poisoned lock reads as zero, which fails the assertions rather than hiding behind them.
+    fn cached_clients(executor: &Executor) -> usize {
+        executor.proxied.read().map_or(0, |cache| cache.len())
+    }
+
+    /// Credentials that dispatch through `proxy_url`.
+    fn proxied_credentials(proxy_url: &str, no_proxy: Option<&str>) -> Credentials {
+        let mut settings = serde_json::Map::new();
+        settings.insert("connectionProxyEnabled".to_owned(), json!(true));
+        settings.insert("connectionProxyUrl".to_owned(), json!(proxy_url));
+        if let Some(no_proxy) = no_proxy {
+            settings.insert("connectionNoProxy".to_owned(), json!(no_proxy));
+        }
+        serde_json::from_value(json!({
+            "connectionId": "conn_proxy",
+            "connectionName": "proxied",
+            "providerSpecificData": settings,
+        }))
+        .expect("credentials should deserialise")
+    }
+
+    #[test]
+    fn a_proxied_client_is_built_once_and_reused() {
+        // Each `reqwest::Client` owns a connection pool, so rebuilding one per request means a new
+        // TCP connection — and TLS handshake — to the proxy every time. Asserted on the cache,
+        // because pool reuse itself is not observable from here.
+        let executor = Executor::new();
+        let credentials = proxied_credentials("http://127.0.0.1:3128", None);
+
+        let _first = executor.client_for(&credentials);
+        assert_eq!(
+            cached_clients(&executor),
+            1,
+            "the first call should populate the cache"
+        );
+        let _second = executor.client_for(&credentials);
+        assert_eq!(
+            cached_clients(&executor),
+            1,
+            "a second call with the same proxy must not build another client"
+        );
+    }
+
+    #[test]
+    fn different_proxies_do_not_share_a_client() {
+        // Sharing would send a connection's traffic through another connection's proxy, which is
+        // both wrong and a credential leak: the two proxies may belong to different tenants.
+        let executor = Executor::new();
+        let _one = executor.client_for(&proxied_credentials("http://127.0.0.1:3128", None));
+        let _two = executor.client_for(&proxied_credentials("http://127.0.0.1:8080", None));
+        assert_eq!(cached_clients(&executor), 2);
+    }
+
+    #[test]
+    fn the_no_proxy_list_is_part_of_the_cache_key() {
+        // Same proxy, different bypass lists: a client built for one would send traffic direct that
+        // the other requires to be proxied, or the reverse.
+        let executor = Executor::new();
+        let _one = executor.client_for(&proxied_credentials("http://127.0.0.1:3128", None));
+        let _two = executor.client_for(&proxied_credentials(
+            "http://127.0.0.1:3128",
+            Some("example.com"),
+        ));
+        assert_eq!(cached_clients(&executor), 2);
+    }
+
+    #[test]
+    fn an_unproxied_connection_does_not_touch_the_cache() {
+        // The common path stays a clone of the shared pooled client.
+        let executor = Executor::new();
+        let plain: Credentials = serde_json::from_value(json!({
+            "connectionId": "conn_plain",
+            "connectionName": "plain",
+        }))
+        .expect("credentials should deserialise");
+        let _client = executor.client_for(&plain);
+        assert_eq!(
+            cached_clients(&executor),
+            0,
+            "an unproxied call should not populate the proxied cache"
+        );
+    }
+
+    #[test]
+    fn an_unparseable_proxy_url_is_not_cached() {
+        // It falls back to the direct client; caching that under the bad URL would make the
+        // fallback permanent even after the URL was corrected.
+        let executor = Executor::new();
+        let _client = executor.client_for(&proxied_credentials("not a url", None));
+        assert_eq!(
+            cached_clients(&executor),
+            0,
+            "a rejected proxy URL should not be cached"
+        );
+    }
 
     #[test]
     fn default_retry_policy_matches_upstream() {
