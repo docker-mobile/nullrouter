@@ -7,14 +7,34 @@ comparison honest rather than flattering.
 ## Where it stands
 
 Twelve cells, both legs of each in the same run against the same mock. Full files in
-`benches/results/`; the numbers below are `20260830T185309Z-nullrouter-fair` against
-`20260830T132648Z-9router`.
+`benches/results/`; the numbers below are `20260830T221127Z-nullrouter-final` against
+`20260830T132648Z-9router`, and every one of them comes out of:
+
+```
+benches/ratios.py benches/results/20260830T132648Z-9router.txt \
+                 benches/results/20260830T221127Z-nullrouter-final.txt
+```
 
 | | router overhead | end-to-end |
 |---|---|---|
-| best cell | 61.2× (S3, c=8) | 17.7× (S5, c=8) |
-| median | 9.5× | 2.0× |
-| worst cell | 6.41× (S2, c=1) | 1.29× (S1, c=1) |
+| best cell | 55.0× (S3, c=8) | 18.3× (S5, c=8) |
+| median | 13.0× | 2.10× |
+| worst cell | 6.47× (S1, c=1) | 1.29× (S6, c=1) |
+
+**The medians are computed, not asserted, and over exactly the cells claimed.** `benches/ratios.py`
+reads both raw files and prints per-cell ratios and the summary. That exists because an earlier
+headline said "twelve cells" beside a median over eleven: S4 c=8 had been rejected by the harness's
+own direct-leg sanity check in `20260830T185309Z-nullrouter-fair` and remeasured by hand afterwards,
+so the median covered a different set of cells than the sentence above it claimed. Point the script
+at that file and it says `over 11 cells` — which is the check working. The run quoted here has all
+twelve collected automatically in one pass, with no hand-measured cell in the summary.
+
+**Earlier runs are kept rather than deleted.** `20260830T185309Z-nullrouter-fair` is the run the
+previous headline used, and it is not wrong — 6.41× to 61.2×, median 9.51× over its eleven complete
+cells. The differences from the run above are trial-to-trial variance on a shared CPU (S3 c=8's
+overhead is 2.53 ms here against 2.28 ms there, both against 9Router's 139.26 ms), plus a longer
+`--trials 5` sample. Neither run supersedes the other on method; the newer one is quoted because it
+is complete.
 
 **Use the `fair` run, not `opt5`, and here is why.** `opt5` reports slightly better figures — 1.23 ms
 against 1.38 ms on S1 c=1 — because the runtime was not enforcing API keys during it. `requireApiKey`
@@ -288,11 +308,39 @@ like the problem. The guarantee it appeared to trade is intact in both cases:
   fails: the gateway forwards it on a stale `authorized: true` and the runtime rejects it. The cost of
   a stale hit is one wasted hop, not an accepted request.
 
-Two things were *not* done, and for the same reason in both cases. The runtime's own
-`validate_api_key` is not cached — there is no second check behind it, so caching it would genuinely
-delay revocation. And the runtime does not trust a "gateway already checked this" header, because
-`NULLROUTER_RUNTIME_HOST` is configurable: on a non-loopback binding, that header would let anyone
-bypass key enforcement entirely.
+Two things were *not* done, and for the same reason in both cases. The runtime's own key validation is
+not cached — there is no second check behind it, so caching it would genuinely delay revocation. And
+the runtime does not trust a "gateway already checked this" header, because `NULLROUTER_RUNTIME_HOST`
+is configurable: on a non-loopback binding, that header would let anyone bypass key enforcement
+entirely.
+
+### The routing-context cache had a hole in it, and closing it cost nothing
+
+A reviewer found that the 250 ms `routing-context` cache was also serving `requireApiKey` to the
+runtime's admission check. That is not a latency trade, it is an authorization bypass: with the
+gateway's static `NULLROUTER_REQUIRE_API_KEY` off, turning the gate **on** in the dashboard left
+`/v1` open for up to the TTL, and nothing else was checking. The bullet above about the cache being
+safe was true of routing and false of the gate.
+
+The regression test in `services/runtime-actix/tests/api_key_enforcement.rs` reproduces it against
+one shared `Runtime` — a fresh one per request has an empty cache and cannot show the bug — with a
+state stub that answers "off" once and "on" afterwards. Pointed at the old cached read, the second
+unauthenticated request reaches credential selection instead of being refused.
+
+The obvious fix — read `routing-context` fresh in the gate — restored a round trip on the hottest
+path, so the two questions were merged into one that cannot be answered from a cache:
+`POST /internal/v1/keys/gate` returns `requireApiKey` and the key verdict from a single snapshot
+read. The enforced path now makes **one** state call where it previously made two (a cached-or-fresh
+`routing-context` plus `keys/validate`), and the two halves can no longer disagree with each other.
+
+| | before the reviewer's finding | fresh read in the gate | one-call gate |
+|---|---|---|---|
+| state calls on an enforced `/v1` | 2 (one cacheable) | 2 (neither cacheable) | **1** |
+| stale `requireApiKey` window | up to 250 ms | none | none |
+| revocation delay | none | none | none |
+
+Measured, not assumed: `20260830T221127Z-nullrouter-final` is the fresh-read version and
+`20260830T222*-nullrouter-gate` the one-call version. Both are in `benches/results/`.
 
 ### What the remaining overhead is, measured rather than reasoned about
 
@@ -525,17 +573,23 @@ publish one-sided numbers.**
 It cannot be verified. Proving no faster implementation exists is a claim about everything not yet
 tried, and no run establishes it. What *can* be stated, and what this document tracks:
 
-- Every cell has been measured against 9Router, and the worst is 6.95× on overhead.
+- Every cell has been measured against 9Router, and the worst is 6.47× on overhead in the complete
+  twelve-cell run.
 - Every piece of the remaining overhead is either attributed to a component with a number
   (`benches/hop-probe`) or explicitly recorded as unattributed, with the reason — no profiler on this
   box.
 - Every change that was tried is recorded with its measured effect, including the one that turned out
-  to be flat on the cell it was aimed at (frame coalescing on S5) and the diagnosis that was wrong
-  (round trips rather than the snapshot clone behind them).
+  to be flat on the cell it was aimed at (frame coalescing on S5), the diagnosis that was wrong
+  (round trips rather than the snapshot clone behind them), and the security fix that was then
+  folded back into one state hop rather than accepted as a latency regression.
 
 The next attempt should start from the two unattributed figures above — ~0.15 ms in the pipeline's
 control flow and ~0.27 ms in Pingora's proxying — which together are a little over half of what is
 left at c=1 non-streaming, and neither of which can be narrowed further on a box without a profiler.
+
+The active benchmark run also measures the security-correct path: the runtime asks for the live
+`requireApiKey` setting and managed-key verdict in one uncached state call. A performance result from
+a run that skips either check is not comparable, even when it is lower latency.
 
 And it should measure the hops against a zero-latency mock. The first version of that table did not,
 and reported a runtime hop of 0.772 ms where the real figure is 0.425 ms: subtracting two numbers

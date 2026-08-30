@@ -71,16 +71,24 @@ service time, both legs of every cell in the same run. Twelve cells; full method
 
 | | nullrouter | 9Router |
 |---|---|---|
-| Overhead added, non-streaming, 1 connection | **1.38 ms** | 9.21 ms |
-| Overhead added, streamed 200 frames, 8 connections | **2.28 ms** | 139.26 ms |
-| Overhead added, streamed 2000 frames, 1 connection | **11.66 ms** | 82.39 ms |
+| Overhead added, non-streaming, 1 connection | **1.42 ms** | 9.21 ms |
+| Overhead added, streamed 200 frames, 8 connections | **2.53 ms** | 139.26 ms |
+| Overhead added, streamed 2000 frames, 1 connection | **12.00 ms** | 82.39 ms |
 | Memory, idle, all services | **108.8 MiB** (8 processes) | 228.3 MiB (1 process) |
 | CPU, idle, 15s | 0.19 s | **0.01 s** |
 
-Router overhead ranges from 6.41× to 61.2× better depending on the request shape, median 9.5×. On
+Router overhead ranges from 6.47× to 55.0× better depending on the request shape, median 13.0×. On
 the *whole request* — which is what a caller actually waits for, including the provider's own
-latency — that is 1.29× to 17.7×, median 2.0×. The second number is the one to have in mind: a real
+latency — that is 1.29× to 18.3×, median 2.10×. The second number is the one to have in mind: a real
 provider takes hundreds of milliseconds, and no router can make that part faster.
+
+Every ratio above is printed by `benches/ratios.py` from the two raw result files, so none of them
+is arithmetic done in prose:
+
+```bash
+benches/ratios.py benches/results/20260830T132648Z-9router.txt \
+                 benches/results/20260830T221127Z-nullrouter-final.txt
+```
 
 Both routers validate a managed API key on every request in these runs, which is worth stating
 because an earlier run did not: nullrouter's key gate could not be persisted at all, so the runtime
