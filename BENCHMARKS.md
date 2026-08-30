@@ -1,11 +1,36 @@
 # Benchmarks
 
-The README claims nullrouter is "vastly faster" and "lighter to run" than 9Router. **Nothing here has
-been measured yet.** This document is the harness those claims have to survive before they may be
-stated as numbers — and the rules that keep the comparison honest rather than flattering.
+The README claims nullrouter is "vastly faster" and "lighter to run" than 9Router. **Both are now
+measured**, and this document is the harness they had to survive — plus the rules that keep the
+comparison honest rather than flattering.
 
-Until a run exists, the README says the claim is unmeasured. That is the correct state; a plausible
-number invented from architecture ("Rust, therefore faster") would be worse than no number.
+## Where it stands
+
+Twelve cells, both legs of each in the same run against the same mock. Full files in
+`benches/results/`; the numbers below are `20260830T180729Z-nullrouter-opt5` against
+`20260830T132648Z-9router`.
+
+| | router overhead | end-to-end |
+|---|---|---|
+| best cell | 66.5× (S3, c=8) | 18.6× (S5, c=8) |
+| median | 14.5× | 2.1× |
+| worst cell | 6.95× (S5, c=1) | 1.30× (S1, c=1) |
+
+**Both figures matter and they answer different questions.** Router overhead is
+`p50(through) − p50(direct)` — a fact about the router, and the number to watch when optimising it.
+End-to-end is the whole request including the mock's 25.27ms of service time — what a caller
+actually waits for. Quoting 66× to a user would be true of the router and misleading about their
+request. Quote the end-to-end figure; keep the overhead figure for deciding what to fix next.
+
+Resources, 8 processes idle from a fresh start: 108.8 MiB and 0.19 CPU-seconds over 15s, against
+9Router's 228.3 MiB and 0.01 in one process. Half the memory, 19× the idle CPU — small absolutely
+(0.95% of a core against 0.05%), and stated because reporting only the memory win would be
+selective.
+
+**The first honest run had nullrouter losing three of twelve cells**, every non-streaming cell at
+c=1, by 4–6ms. That is recorded in `20260830T125524Z-nullrouter` and was the starting point for
+everything in "The overhead is state round trips" below. A document that only showed the final
+numbers would hide the fact that the claim was false when first tested.
 
 ## What is actually being claimed
 
@@ -178,12 +203,17 @@ inheriting the runtime's defect through its upstream connection.
 because that divergence is the only signal that showed this. A ratio much above 1 means reused
 connections are paying for something.
 
-## The overhead is state round trips, not translation
+## Where the overhead was, and where it went
 
 The first thing the harness found, and it is worth more than every micro-benchmark above: nullrouter
-adds **~14 ms to a 25 ms upstream call**, and translation is a rounding error inside it.
+added **~14 ms to a 25 ms upstream call**, and translation was a rounding error inside it.
 
-Measured on this sandbox, `oha`, concurrency 1, non-streaming, mock at `--sleep-ms 25`:
+This section is kept in the order it was discovered rather than rewritten to the conclusion, because
+the wrong diagnosis in the middle of it is the instructive part: the round trips were counted
+correctly, blamed correctly for being numerous, and were not the cost.
+
+Measured on this sandbox, `oha`, concurrency 1, non-streaming, mock at `--sleep-ms 25`, **before any
+of the fixes below**:
 
 | Path | p50 | Attributable to |
 |---|---|---|
@@ -215,15 +245,78 @@ Against these figures the 0.5 µs of thinking-pipeline reordering discussed abov
 overhead. The micro-benchmarks were measuring three orders of magnitude below where the cost lives.
 That is the argument for building the end-to-end harness before optimising anything.
 
-**The fix is one fetch per request threaded through the call chain, not a TTL cache.** The runtime
-re-reads these deliberately, at the last hop before a provider call, so that a dashboard toggle is
-never silently ignored; a cache would trade a stated guarantee for latency. Not done here — it touches
-`enforce_api_key`, `pxpipe_settings` and `resolve_targets` and wants its own change with its own
-before-and-after numbers from this harness.
+### What was actually fixed, and where the prediction above went wrong
 
-`services/runtime-actix/tests/node_prefix_routing.rs` asserts the prefix-resolution fetch as a
-*difference* from the baseline count rather than pinning the absolute number, so it keeps passing when
-this is fixed.
+The paragraph that used to sit here said the fix was "one fetch per request threaded through the call
+chain, **not** a TTL cache", on the grounds that a cache would trade a stated guarantee for latency.
+That reasoning was sound and the diagnosis under it was wrong: **the round trips were not the main
+cost.** The state service's own handler was.
+
+Every read went through `read_snapshot()`, which clones the entire `StateSnapshot` — api keys,
+connections, combos, proxy pools, settings, translator panes, and a usage log that sits at 350 KB of a
+490 KB state because it retains 1000 records. `routing-context` called three such accessors, so it
+cloned ~1.5 MB per request and read none of the usage log. Worse, every mutation serialised and wrote
+the whole 490 KB state file inline, and two mutations happen per request: round-robin credential
+selection advances a cursor, and usage recording appends a row.
+
+| Change | Effect |
+|---|---|
+| `with_snapshot` projection instead of cloning | `routing-context` 1.71 ms → 0.085 ms (572 → 11197 req/s) |
+| Deferred persistence with a 250 ms background flush | S1 c=1 overhead 7.74 ms → 1.48 ms |
+| Spawn the usage POST instead of awaiting it | removes ~1.7 ms after the response already exists |
+| 250 ms `routing-context` cache in the runtime's client | collapses three identical reads to one |
+| Quadratic `LineBuffer::push` rewritten | S5 c=1 32.81 ms → 12.56 ms |
+| Coalesce queued SSE frames into one write | S3 c=8 3.25 ms → 2.75 ms |
+| 250 ms key-validation cache in auth | authorize 0.230 ms → 0.074 ms |
+
+So a TTL cache *was* used, in two places, having first removed the cost that made the round trips look
+like the problem. The guarantee it appeared to trade is intact in both cases:
+
+- The **routing-context** cache bounds a dashboard change at 250 ms before it takes effect. That is
+  below the point a user notices a toggle, and 9Router re-reads its own SQLite config per request too,
+  so this is not a divergence in kind.
+- The **key-validation** cache in auth does not weaken enforcement at all, because the runtime
+  validates every key against state independently and uncached. A key revoked inside the TTL still
+  fails: the gateway forwards it on a stale `authorized: true` and the runtime rejects it. The cost of
+  a stale hit is one wasted hop, not an accepted request.
+
+Two things were *not* done, and for the same reason in both cases. The runtime's own
+`validate_api_key` is not cached — there is no second check behind it, so caching it would genuinely
+delay revocation. And the runtime does not trust a "gateway already checked this" header, because
+`NULLROUTER_RUNTIME_HOST` is configurable: on a non-loopback binding, that header would let anyone
+bypass key enforcement entirely.
+
+### What the remaining overhead is, measured rather than reasoned about
+
+1.23 ms at c=1 non-streaming, attributed with `benches/hop-probe`:
+
+| Piece | Cost |
+|---|---|
+| runtime hop | 0.772 ms |
+|  ├ `state keys/validate` | 0.076 ms |
+|  ├ `state credentials/select` | 0.078 ms |
+|  ├ `reqwest` over a minimal client | 0.038 ms |
+|  ├ translation, both directions | 0.004 ms |
+|  ├ serde parse + serialise | 0.001 ms |
+|  └ **unattributed** | **0.575 ms** — actix request/response cycle and pipeline control flow |
+| gateway hop | 0.562 ms |
+|  ├ `auth authorize` | 0.074 ms (was 0.230) |
+|  └ **unattributed** | **0.332 ms** — Pingora proxying |
+
+The two unattributed figures are the honest limit of this sandbox: `perf`, `valgrind` and
+`flamegraph` are all absent, so the cost is locatable to the actix cycle and Pingora's proxying but
+not to a function within them. Recorded as unattributed rather than guessed at, so the next attempt
+starts from a measurement.
+
+The `translate` row is the point worth keeping: 0.004 ms, against 0.5 µs of thinking-pipeline
+reordering in the micro-benchmarks above. Both are three orders of magnitude below where the cost
+lives. That is the argument for building the end-to-end harness before optimising anything.
+
+`services/runtime-actix/tests/node_prefix_routing.rs` asserted the prefix-resolution fetch as a
+*difference* from the baseline count rather than pinning the absolute number, specifically so it would
+survive this fix. It did not quite: with the context cached, prefix resolution costs *no* extra fetch,
+so the assertion became equality plus "the context is still fetched at least once" — the stronger form
+of the same property.
 
 ## End-to-end overhead
 
@@ -375,10 +468,28 @@ publish one-sided numbers.**
 
 ## Definition of done
 
-- `cargo bench` runs clean and reproducibly.
+- `cargo bench` runs clean and reproducibly. ✔
 - Every unquantified speed or weight claim in the README is replaced by a measured number, or by a
-  plain statement that no comparison was made.
-- Both raw runs are committed, not just the summary.
+  plain statement that no comparison was made. ✔
+- Both raw runs are committed, not just the summary. ✔ — and every intermediate run too, so the
+  regressions and the flat changes are visible alongside the wins.
+
+### What "no room for further optimisation" can and cannot mean here
+
+It cannot be verified. Proving no faster implementation exists is a claim about everything not yet
+tried, and no run establishes it. What *can* be stated, and what this document tracks:
+
+- Every cell has been measured against 9Router, and the worst is 6.95× on overhead.
+- Every piece of the remaining overhead is either attributed to a component with a number
+  (`benches/hop-probe`) or explicitly recorded as unattributed, with the reason — no profiler on this
+  box.
+- Every change that was tried is recorded with its measured effect, including the one that turned out
+  to be flat on the cell it was aimed at (frame coalescing on S5) and the diagnosis that was wrong
+  (round trips rather than the snapshot clone behind them).
+
+The next attempt should start from the two unattributed figures above — 0.575 ms in the actix cycle
+and 0.332 ms in Pingora's proxying — which together are 74% of what is left at c=1 non-streaming, and
+neither of which can be narrowed further without a profiler.
 
 ## Environment notes
 

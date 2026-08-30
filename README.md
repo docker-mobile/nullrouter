@@ -63,6 +63,29 @@ nullrouter sits in the middle and does the translation, incrementally, on the st
 Plus embeddings, image generation, text-to-speech, transcription, web search, and web fetch, each
 dispatched to whichever provider in the registry actually exposes that service.
 
+### What it costs you to have it in the path
+
+Measured against 9Router v0.5.55 on the same machine, same mock provider with a fixed 25.27 ms
+service time, both legs of every cell in the same run. Twelve cells; full method and raw runs in
+[BENCHMARKS.md](BENCHMARKS.md).
+
+| | nullrouter | 9Router |
+|---|---|---|
+| Overhead added, non-streaming, 1 connection | **1.23 ms** | 9.21 ms |
+| Overhead added, streamed 200 frames, 8 connections | **2.09 ms** | 139.26 ms |
+| Overhead added, streamed 2000 frames, 1 connection | **11.86 ms** | 82.39 ms |
+| Memory, idle, all services | **108.8 MiB** (8 processes) | 228.3 MiB (1 process) |
+| CPU, idle, 15s | 0.19 s | **0.01 s** |
+
+Router overhead ranges from 6.95× to 66.5× better depending on the request shape, median 14.5×. On
+the *whole request* — which is what a caller actually waits for, including the provider's own
+latency — that is 1.30× to 18.6×, median 2.1×. The second number is the one to have in mind: a real
+provider takes hundreds of milliseconds, and no router can make that part faster.
+
+The idle CPU row goes the other way: eight event loops ticking over cost more than one, 0.95% of a
+core against 0.05%. It is in the table because leaving it out would make the comparison a
+sales pitch.
+
 ## Quick start
 
 **Prerequisites:** Rust stable (1.88+, edition 2024), plus
