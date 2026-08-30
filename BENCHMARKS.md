@@ -326,6 +326,28 @@ The two unattributed figures are the limit of what this sandbox can resolve: `pe
 `flamegraph` are all absent, so the cost is locatable to the pipeline's control flow and Pingora's
 proxying but not to a function inside them. Recorded as unattributed rather than guessed at.
 
+### A change that measured well and was still wrong: gateway worker threads
+
+Pingora's `threads` defaults to 1, and the gateway is the only public port — so every request on the
+box goes through one worker. Against a **zero-latency** mock that is plainly a ceiling: the gateway
+saturates a core at 98% and plateaus at 7013 req/s while the runtime behind it still has headroom at
+11605. Raising it to the core count lifted that to 8788 req/s, +25%.
+
+Then the same load against a **250 ms** mock — a realistic provider — at c=64: the gateway sits at
+**3% of one core**. The ceiling is two orders of magnitude away from anything a real deployment
+reaches, because provider latency dominates.
+
+And the threads were not free. S1 and S2 at c=8 went from 1.61 and 1.66 ms to 1.83 and 1.81 ms, with
+trial ranges that do not overlap — a real cost on every request, not noise.
+
+So the default stayed at 1 and the change became `NULLROUTER_GATEWAY_THREADS`, for the case where
+the upstream really is that fast (a local llama.cpp on the same box) and the tradeoff inverts.
+
+The general point, which cost two benchmark runs to learn twice: **a saturation measurement taken
+against an unrealistically fast dependency measures the harness, not the system.** The same error
+inflated the hop attribution above, in the opposite direction — there the mock was too *slow* and
+scheduling noise landed in the difference.
+
 One cheap win is visible without a profiler: `chat_entrypoint` parses the request body **twice**,
 once as `serde_json::Value` and once as a typed `ChatPayload`, from the same bytes. At 0.001 ms per
 parse that is not where the 0.15 ms is, which is exactly why it is recorded here rather than fixed in

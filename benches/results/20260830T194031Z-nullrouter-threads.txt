@@ -1,0 +1,70 @@
+run: 20260830T194031Z-nullrouter-threads
+label: nullrouter-threads
+date: 2026-08-30T19:40:31Z
+host: Linux 7.1.6-firecracker x86_64
+cpus: 16
+mem: 15.6 GiB
+load-tool: oha oha 1.16.0
+node: v18.20.4
+rustc: rustc 1.98.0 (88d9e12ae 2026-08-18)
+mock: port=8099 sleep_ms=25
+router-port: 20128
+duration-per-cell: 20s  trials: 3  warmup: 200
+
+scenarios (overhead = through - direct, both p50 ms)
+
+S1-proxy-nonstream           c=1   through=26.659    direct=25.252    overhead=1.438 ms  [1.349..1.603 over 3 trials]
+S2-translate-nonstream       c=1   through=26.529    direct=25.221    overhead=1.308 ms  [1.270..1.589 over 3 trials]
+S3-proxy-stream-200          c=1   through=27.607    direct=25.231    overhead=2.378 ms  [2.252..2.414 over 3 trials]
+  S3-proxy-stream-200        c=1   keep-alive=27.607    none=27.948    ratio=0.99
+S4-translate-stream-200      c=1   through=27.680    direct=25.244    overhead=2.438 ms  [2.356..2.579 over 3 trials]
+  S4-translate-stream-200    c=1   keep-alive=27.680    none=28.099    ratio=0.99
+S5-translate-stream-2000     c=1   through=37.237    direct=25.344    overhead=11.893 ms  [11.854..12.115 over 3 trials]
+  S5-translate-stream-2000   c=1   keep-alive=37.237    none=38.299    ratio=0.97
+S6-claude-native-nonstream   c=1   through=26.721    direct=25.239    overhead=1.500 ms  [1.365..1.501 over 3 trials]
+S1-proxy-nonstream           c=8   through=27.035    direct=25.227    overhead=1.832 ms  [1.753..1.871 over 3 trials]
+S2-translate-nonstream       c=8   through=27.027    direct=25.201    overhead=1.811 ms  [1.782..1.885 over 3 trials]
+S3-proxy-stream-200          c=8   through=27.453    direct=25.216    overhead=2.231 ms  [2.185..2.422 over 3 trials]
+  S3-proxy-stream-200        c=8   keep-alive=27.453    none=28.011    ratio=0.98
+S4-translate-stream-200      c=8   through=27.662    direct=25.221    overhead=2.457 ms  [2.406..2.512 over 3 trials]
+  S4-translate-stream-200    c=8   keep-alive=27.662    none=28.200    ratio=0.98
+S5-translate-stream-2000     c=8   through=39.176    direct=25.316    overhead=13.850 ms  [12.307..14.474 over 3 trials]
+  S5-translate-stream-2000   c=8   keep-alive=39.176    none=38.337    ratio=1.02
+S6-claude-native-nonstream   c=8   through=26.838    direct=25.201    overhead=1.620 ms  [1.538..1.648 over 3 trials]
+
+written to benches/results/20260830T194031Z-nullrouter-threads.txt
+
+Reading this:
+  * `overhead` is the router's cost. `direct` is the mock's own service time and should
+    sit near --mock-sleep-ms; if it does not, the mock or the machine is the problem and
+    the overhead column is not trustworthy.
+  * If overhead lands on a round fraction of --mock-sleep-ms, suspect the harness rather
+    than celebrating the result: it is probably timing the mock.
+  * A wide [min..max] means a noisy machine, not a fast router. Re-run before quoting.
+  * S5 is the headline: per-frame cost multiplies, and it is the shape real agent traffic
+    takes.
+
+Why this run exists, and why the change it measured was reverted
+----------------------------------------------------------------
+Pingora's `threads` defaults to 1 and the gateway is the only public port, so every request went
+through one worker. Against a zero-latency mock that is a real ceiling: 98% of one core, plateauing
+at 7013 req/s while the runtime behind it still reached 11605. Raising threads to the core count
+lifted throughput to 8788 req/s (+25%). This run is that configuration.
+
+It was reverted. Two reasons, both measured:
+
+  1. The ceiling is unreachable in real use. The same c=64 load against a 250ms mock -- a realistic
+     provider -- leaves the gateway at 3% of one core. Provider latency dominates by two orders of
+     magnitude.
+
+  2. The threads cost latency on every request. Against the `fair` run:
+       S1 c=8  1.606 -> 1.832 ms  (+14.1%, ranges [1.604..1.676] vs [1.753..1.871], not overlapping)
+       S2 c=8  1.656 -> 1.811 ms  (+9.4%)
+       S6 c=1  1.296 -> 1.500 ms  (+15.7%)
+     Other cells moved the other way by less, so the picture is mixed -- but the non-overlapping
+     ranges at c=8 are a real cost, not noise.
+
+Kept as `NULLROUTER_GATEWAY_THREADS` (default 1, or `cores`, or a number) for the case where the
+upstream really is that fast -- a local model on the same box -- and the tradeoff inverts.
+
+The headline figures come from 20260830T185309Z-nullrouter-fair, not this run.

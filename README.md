@@ -612,6 +612,7 @@ a bare `PORT` (which wins over the service-specific variable).
 | Variable / flag | Default |
 |---|---|
 | `NULLROUTER_GATEWAY_LISTEN` / `--listen` | `127.0.0.1:20128` |
+| `NULLROUTER_GATEWAY_THREADS` | `1` — or `cores`, or a number (capped at 32) |
 | `NULLROUTER_REQUIRE_API_KEY` / `--require-api-key` | `false` |
 | `NULLROUTER_API_UPSTREAM` / `--api-upstream` | `127.0.0.1:20129` |
 | `NULLROUTER_DASHBOARD_UPSTREAM` | `127.0.0.1:20130` |
