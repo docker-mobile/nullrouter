@@ -68,6 +68,20 @@ mkdir -p "$OUT_DIR"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$LABEL"
 RESULT="$OUT_DIR/$RUN_ID.txt"
 
+# Only one router may be up while measuring. Both idle routers still run background timers
+# and hold thread pools, and on a shared CPU that lands in the other one's tail. The check
+# is here rather than in the protocol notes because a forgotten teardown is invisible in
+# the results -- it just makes both sides look slower.
+listening() { timeout 1 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null; }
+for other in 20128 20127; do
+  [[ "$other" == "$ROUTER_PORT" ]] && continue
+  if listening "$other"; then
+    echo "port $other is also listening: another router is up while measuring :$ROUTER_PORT." >&2
+    echo "stop it first -- two routers sharing this CPU puts one in the other's tail." >&2
+    exit 4
+  fi
+done
+
 # ── environment, recorded before anything is measured ────────────────────────
 {
   echo "run: $RUN_ID"
@@ -108,11 +122,21 @@ trap stop_mock EXIT
 BODY_DIR="$(mktemp -d)"
 trap 'stop_mock; rm -rf "$BODY_DIR"' EXIT
 
+# `"stream": false` is explicit, and must stay explicit. 9Router reads an *absent* stream
+# field as streaming (`body.stream !== false` in open-sse/handlers/chatCore.js), so a body
+# that merely omits it makes 9Router return SSE while nullrouter returns JSON -- different
+# work in what is supposed to be the same cell. Omitting it silently invalidates S1, S2 and
+# S6 rather than failing them.
 cat > "$BODY_DIR/openai.json" <<'JSON'
-{"model":"MODEL","messages":[{"role":"user","content":"Explain the difference between a mutex and a channel."}],"max_tokens":256}
+{"model":"MODEL","stream":false,"messages":[{"role":"user","content":"Explain the difference between a mutex and a channel."}],"max_tokens":256}
 JSON
 cat > "$BODY_DIR/openai-stream.json" <<'JSON'
 {"model":"MODEL","stream":true,"messages":[{"role":"user","content":"Explain the difference between a mutex and a channel."}],"max_tokens":256}
+JSON
+# Same content and size as openai.json, in Claude's dialect: S6 must differ from S2 in the
+# client format and nothing else, or the difference is not the translation cost.
+cat > "$BODY_DIR/claude.json" <<'JSON'
+{"model":"MODEL","stream":false,"max_tokens":256,"messages":[{"role":"user","content":"Explain the difference between a mutex and a channel."}]}
 JSON
 
 body_for() { # scenario -> path, with the model substituted
@@ -141,10 +165,57 @@ warm() {
   "$LOAD_TOOL" "${args[@]}" "$url" >/dev/null 2>&1 || true
 }
 
+# Does this cell actually measure what it claims? Checked once per cell, before the timed
+# runs, because every failure here is invisible in a latency number.
+#
+# The specific bug this exists for: 9Router treats an absent `stream` field as streaming, so
+# a "non-streaming" cell can have one side returning SSE and the other JSON. Both sides
+# answer, both look fast, and the comparison is meaningless. Rather than trusting the bodies
+# to be right, ask what came back.
+verify_shape() {
+  local name="$1" router_url="$2" body="$3" mock_url="$4" direct_body="$5" want="$6"
+
+  local args=(-s -o /dev/null -w '%{http_code} %{content_type}' -m 30 -X POST
+              -H 'content-type: application/json' --data-binary "@$body")
+  [[ -n "$API_KEY" ]] && args+=(-H "Authorization: Bearer $API_KEY")
+  local through; through="$(curl "${args[@]}" "$router_url" 2>/dev/null)"
+
+  local direct_args=(-s -o /dev/null -w '%{http_code} %{content_type}' -m 30 -X POST
+                     -H 'content-type: application/json' --data-binary "@$direct_body")
+  local direct; direct="$(curl "${direct_args[@]}" "$mock_url" 2>/dev/null)"
+
+  local through_code="${through%% *}" through_type="${through#* }"
+  local direct_code="${direct%% *}" direct_type="${direct#* }"
+
+  if [[ "$through_code" != 2* ]]; then
+    echo "$name: router returned $through_code -- cell will not measure anything useful" | tee -a "$RESULT"
+    return 1
+  fi
+  if [[ "$direct_code" != 2* ]]; then
+    echo "$name: mock returned $direct_code on the direct leg" | tee -a "$RESULT"
+    return 1
+  fi
+
+  # `want` is stream|json. Compare both legs against it, not just against each other: two
+  # sides that agree on the wrong shape would still pass a same-shape check.
+  local through_kind direct_kind
+  case "$through_type" in *event-stream*) through_kind=stream ;; *) through_kind=json ;; esac
+  case "$direct_type" in *event-stream*) direct_kind=stream ;; *) direct_kind=json ;; esac
+
+  if [[ "$through_kind" != "$want" || "$direct_kind" != "$want" ]]; then
+    echo "$name: shape mismatch -- wanted $want, router gave $through_kind ($through_type), mock gave $direct_kind ($direct_type)" \
+      | tee -a "$RESULT"
+    echo "  a non-streaming body that omits \"stream\":false reads as streaming to 9Router." \
+      | tee -a "$RESULT"
+    return 1
+  fi
+  return 0
+}
+
 # One scenario, both legs, N trials. Reports each trial so the spread is visible —
 # a single number hides whether the machine was noisy.
 cell() {
-  local name="$1" frames="$2" model="$3" src="$4" router_path="$5" mock_path="$6" concurrency="$7"
+  local name="$1" frames="$2" model="$3" src="$4" router_path="$5" mock_path="$6" concurrency="$7" want="$8"
 
   start_mock "$frames" || return 1
   local body; body="$(body_for "$name" "$model" "$src")"
@@ -152,6 +223,11 @@ cell() {
 
   local router_url="http://127.0.0.1:$ROUTER_PORT$router_path"
   local mock_url="http://127.0.0.1:$MOCK_PORT$mock_path"
+
+  if ! verify_shape "$name" "$router_url" "$body" "$mock_url" "$direct_body" "$want"; then
+    stop_mock
+    return 0
+  fi
 
   warm "$router_url" "$body"
   warm "$mock_url" "$direct_body"
@@ -193,19 +269,23 @@ echo | tee -a "$RESULT"
 for concurrency in 1 8; do
   # S1: pure proxy, no translation.
   cell "S1-proxy-nonstream" 1 "$MODEL_OPENAI" "openai.json" \
-    "/v1/chat/completions" "/v1/chat/completions" "$concurrency"
+    "/v1/chat/completions" "/v1/chat/completions" "$concurrency" json
   # S2: OpenAI client, Claude provider, non-streaming.
   cell "S2-translate-nonstream" 1 "$MODEL_CLAUDE" "openai.json" \
-    "/v1/chat/completions" "/v1/messages" "$concurrency"
+    "/v1/chat/completions" "/v1/messages" "$concurrency" json
   # S3: streamed, no translation.
   cell "S3-proxy-stream-200" 200 "$MODEL_OPENAI" "openai-stream.json" \
-    "/v1/chat/completions" "/v1/chat/completions" "$concurrency"
+    "/v1/chat/completions" "/v1/chat/completions" "$concurrency" stream
   # S4: streamed, translated.
   cell "S4-translate-stream-200" 200 "$MODEL_CLAUDE" "openai-stream.json" \
-    "/v1/chat/completions" "/v1/messages" "$concurrency"
+    "/v1/chat/completions" "/v1/messages" "$concurrency" stream
   # S5: the headline. What a coding agent produces all day.
   cell "S5-translate-stream-2000" 2000 "$MODEL_CLAUDE" "openai-stream.json" \
-    "/v1/chat/completions" "/v1/messages" "$concurrency"
+    "/v1/chat/completions" "/v1/messages" "$concurrency" stream
+  # S6: S2 with the translation removed and nothing else changed. S2 - S6 is the
+  # translation cost in situ, which the micro-benchmarks independently predict.
+  cell "S6-claude-native-nonstream" 1 "$MODEL_CLAUDE" "claude.json" \
+    "/v1/messages" "/v1/messages" "$concurrency" json
 done
 
 echo | tee -a "$RESULT"

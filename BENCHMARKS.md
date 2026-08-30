@@ -142,6 +142,34 @@ against a 25 ms upstream call 2.30 µs is 0.009% — so the mutex is not worth r
 recorded because it is the one place where contention exists at all, and a future regression that made
 `fill_first` or `fusion` start locking would show up as their cost climbing toward this row.
 
+## Found while wiring the harness: three state fetches per request
+
+Not a measured figure — a structural cost the harness setup exposed, recorded here because it is
+larger than everything the micro-benchmarks found put together.
+
+Every chat request fetches `/internal/v1/routing-context` from the state service **at least twice
+before a target is even resolved**:
+
+| Caller | What it reads from the payload |
+|---|---|
+| `enforce_api_key` | `settings.require_api_key` — one bool |
+| `pxpipe_settings` | three pxpipe numbers |
+| `resolve_targets` | combos, or a user-defined node prefix (only when the name is not a registry provider) |
+
+Each is a full HTTP round trip carrying every connection and every combo, to read a handful of
+fields. On loopback that is cheap per hop but it is not free, and it is paid on every request
+including the ones that need none of it. Against a 25 ms upstream call two avoidable round trips
+matter more than the 0.5 µs of thinking-pipeline reordering discussed above, which is the point of
+writing it down: the micro-benchmarks were measuring the wrong order of magnitude.
+
+A per-request fetch threaded through the call chain is the fix, not a TTL cache — the runtime
+re-reads these settings deliberately, at the last hop before a provider call, so that a dashboard
+toggle is never silently ignored. A cache would trade a stated guarantee for latency.
+
+`services/runtime-actix/tests/node_prefix_routing.rs` asserts the prefix-resolution fetch as a
+*difference* from the baseline count rather than pinning the absolute number, so it keeps working when
+this is fixed.
+
 ## End-to-end overhead
 
 Where the comparative claim lives.
@@ -167,14 +195,29 @@ the measurement.
 | S3 | OpenAI client → OpenAI provider, streamed, 200 frames |
 | S4 | OpenAI client → Claude provider, streamed, 200 frames |
 | S5 | OpenAI client → Claude provider, streamed, 2000 frames, 12 tools |
-| S6 | Claude client → `deepseek`, non-streaming (multi-transport: **no** translation) |
+| S6 | Claude client → Claude provider, non-streaming (**no** translation — the control for S2) |
 
 **S5 is the headline.** It is what a coding agent produces all day, and where per-frame cost
 multiplies. A per-request-only benchmark understates the thing users feel.
 
-S6 exists because multi-transport selection is meant to remove the translation hop entirely. If S6
-does not beat S2 by roughly the translation cost from the micro-benchmarks, the feature is not doing
-what it claims.
+S6 is S2 with the translation removed and nothing else changed: same provider, same mock, same body
+size, only the client dialect differs. S2 − S6 is therefore the translation cost in situ, and the
+micro-benchmarks predict it. If the difference is far off that prediction, one of the two numbers is
+wrong.
+
+**S6 was originally specified as `Claude client → deepseek`, to measure multi-transport selection
+removing the translation hop. That is not measurable here and the scenario was changed.** A registry
+provider's URL comes from its transport table; `base_url()` is only consulted for the
+`openai-compatible`, `anthropic-compatible`, and `ollama-local` families, so a connection cannot
+point `deepseek` at the mock. Reaching it would need either a `baseUrl` override added to registry
+providers — changing the program to suit the benchmark — or a hosts-file redirect plus TLS
+termination in the mock, which would put a handshake on one side of the comparison and not the other.
+
+So **multi-transport selection has no end-to-end measurement.** It is covered by unit tests in
+`crates/providers/src/format.rs` and `crates/execute/src/credentials.rs`, including one that
+enumerates the registry so a new multi-transport entry is exercised the day it lands, but no figure
+here shows the hop being skipped against a live provider. Stated rather than quietly dropped, because
+the README claims the feature and a reader deserves to know which claims have numbers behind them.
 
 ### Protocol
 

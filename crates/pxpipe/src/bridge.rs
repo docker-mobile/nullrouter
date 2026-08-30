@@ -551,10 +551,12 @@ impl Bridge {
                 // reply to whichever request comes next. Killing it is also what
                 // makes the timeout real — the transform stops with the process.
                 let timed_out = error == "timeout";
-                let detail = worker.stderr_tail().unwrap_or(if timed_out {
-                    format!("no reply within {timeout_ms}ms")
-                } else {
-                    error
+                let detail = worker.stderr_tail().unwrap_or_else(|| {
+                    if timed_out {
+                        format!("no reply within {timeout_ms}ms")
+                    } else {
+                        error
+                    }
                 });
                 let taken = slot.take();
                 drop(slot);

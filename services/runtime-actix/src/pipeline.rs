@@ -1008,15 +1008,22 @@ impl Runtime {
     async fn resolve_targets(&self, requested: &str) -> ResolvedTargets {
         let parsed = model::parse_model(requested);
         if !parsed.is_alias {
+            let mut targets: Vec<model::ModelTarget> = parsed
+                .provider
+                .map(|provider| model::ModelTarget {
+                    provider,
+                    model: parsed.model,
+                })
+                .into_iter()
+                .collect();
+            if let Some(target) = targets.first_mut()
+                && let Some(alias) = parsed.provider_alias.as_deref()
+                && let Some(provider) = self.resolve_node_prefix(alias).await
+            {
+                target.provider = provider;
+            }
             return ResolvedTargets {
-                targets: parsed
-                    .provider
-                    .map(|provider| model::ModelTarget {
-                        provider,
-                        model: parsed.model,
-                    })
-                    .into_iter()
-                    .collect(),
+                targets,
                 // A single model is not a combo, so no strategy applies.
                 strategy: ComboStrategy::Fallback,
                 tuning: fusion::FusionTuning::default(),
@@ -1082,6 +1089,40 @@ impl Runtime {
             strategy: ComboStrategy::Fallback,
             tuning: fusion::FusionTuning::default(),
         }
+    }
+
+    /// Resolve a user-defined provider-node prefix to the connection's provider id
+    /// (upstream `getModelInfo`).
+    ///
+    /// A compatible provider is addressed by the prefix its owner chose, not by the
+    /// opaque node id: `myllm/some-model`, where the connection's provider is
+    /// `openai-compatible-chat-<uuid>`. Without this a migrated install can only be
+    /// reached by that uuid, so every client config that worked against 9Router breaks.
+    ///
+    /// Returns `None` for a registry provider, and that check comes first for a reason:
+    /// `routing_context` is an HTTP hop to the state service, and `provider/model` is the
+    /// common path. Consulting connections unconditionally would put a round trip on every
+    /// request. It also keeps a user's prefix from shadowing a built-in id or alias, which
+    /// is upstream's `RESERVED_PROVIDER_PREFIXES` guard.
+    async fn resolve_node_prefix(&self, alias: &str) -> Option<String> {
+        if nullrouter_providers::registry::entry(alias).is_some() {
+            return None;
+        }
+        // `parse_model` already mapped registry aliases, so a name that still resolves to
+        // a known provider is reserved too.
+        if nullrouter_providers::registry::entry(
+            nullrouter_providers::registry::resolve_provider_id(alias),
+        )
+        .is_some()
+        {
+            return None;
+        }
+        let context = self.state.routing_context().await;
+        context
+            .connections
+            .iter()
+            .find(|connection| connection.prefix.as_deref() == Some(alias))
+            .map(|connection| connection.provider.clone())
     }
 
     /// One account attempt.
