@@ -1,0 +1,23 @@
+label: 9router
+date: 2026-08-30T13:54:31Z
+ports: 20127
+processes: 1
+  1995497 next-server (v1
+window: 20s at 0.1s
+
+per-process (peak RSS, CPU-seconds over the window)
+  next-server (v1 (1995497)       228.3 MiB    0.01 s
+
+processes:          1
+samples:            181
+steady-state RSS:   228.3 MiB (median of summed samples)
+peak RSS:           228.3 MiB (sum of per-process peaks)
+CPU-seconds:        0.01 over 20s
+
+Note: peak RSS sums each process's own peak, which slightly overstates a true
+simultaneous peak -- the peaks need not coincide. Stated rather than smoothed,
+because the alternative is sampling the sum and missing short spikes entirely.
+
+To make CPU comparable across routers, divide by the request count the load tool
+reported for the same window: CPU-seconds per 1000 requests is the honest
+efficiency figure. Instantaneous CPU%% is not, and neither is this number alone.
