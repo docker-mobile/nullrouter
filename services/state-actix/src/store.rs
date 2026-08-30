@@ -33,6 +33,16 @@ pub struct StateStore {
 struct StoreInner {
     path: Option<PathBuf>,
     snapshot: RwLock<StateSnapshot>,
+    #[cfg(test)]
+    persist_pause: std::sync::Mutex<Option<Arc<PersistPause>>>,
+    /// Serialises file snapshots independently of the in-memory state lock.
+    ///
+    /// A durable save and the background flush can otherwise write their snapshots out of order:
+    /// flush clones A, durable writes newer B and clears `dirty`, then flush writes stale A after it.
+    /// The process then believes B is durable while the disk contains A. Both persistence paths take
+    /// this lock *before* the snapshot lock, so a flush cannot overtake a durable save and there is
+    /// no inverse lock order to deadlock on.
+    persist: std::sync::Mutex<()>,
     /// Set when the in-memory snapshot has changes not yet on disk.
     ///
     /// Every mutation used to serialise and write the whole state file inline — 490KB of JSON,
@@ -49,6 +59,28 @@ struct StoreInner {
 
 /// How often the background flush writes a dirty snapshot to disk.
 pub const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// A deterministic persistence barrier for the lost-update regression test.
+///
+/// It is deliberately compiled only into the state crate's unit tests. The barrier pauses after
+/// `write_snapshot` has acquired both production locks and reached `persist`; a deferred mutation
+/// must therefore stay blocked until the durable snapshot reaches disk.
+#[cfg(test)]
+#[derive(Debug)]
+struct PersistPause {
+    started: std::sync::Barrier,
+    resume: std::sync::Barrier,
+}
+
+#[cfg(test)]
+impl PersistPause {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            started: std::sync::Barrier::new(2),
+            resume: std::sync::Barrier::new(2),
+        })
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -568,6 +600,9 @@ impl StateStore {
             inner: Arc::new(StoreInner {
                 path,
                 snapshot: RwLock::new(snapshot),
+                #[cfg(test)]
+                persist_pause: std::sync::Mutex::new(None),
+                persist: std::sync::Mutex::new(()),
                 dirty: std::sync::atomic::AtomicBool::new(false),
             }),
         }
@@ -1519,17 +1554,19 @@ impl StateStore {
         &self,
         mutate: impl FnOnce(&mut StateSnapshot) -> T,
     ) -> Result<T, StoreError> {
-        let (result, snapshot) = {
-            let mut snapshot = self
-                .inner
-                .snapshot
-                .write()
-                .map_err(|_| StoreError::Poisoned)?;
-            let result = mutate(&mut snapshot);
-            (result, snapshot.clone())
-        };
+        // Persist and snapshot locks are always taken in this order; see StoreInner::persist.
+        let _persist = self
+            .inner
+            .persist
+            .lock()
+            .map_err(|_| StoreError::Poisoned)?;
+        let mut snapshot = self
+            .inner
+            .snapshot
+            .write()
+            .map_err(|_| StoreError::Poisoned)?;
+        let result = mutate(&mut snapshot);
         self.persist(&snapshot)?;
-        // Anything the background flush was going to write is now on disk.
         self.inner
             .dirty
             .store(false, std::sync::atomic::Ordering::Release);
@@ -1572,6 +1609,13 @@ impl StateStore {
         {
             return Ok(false);
         }
+        // Serialize snapshots with durable writes. The snapshot is cloned only after that lock is
+        // held, so a later durable save cannot reach disk before this older flush.
+        let _persist = self
+            .inner
+            .persist
+            .lock()
+            .map_err(|_| StoreError::Poisoned)?;
         let snapshot = self.read_snapshot()?;
         match self.persist(&snapshot) {
             Ok(()) => Ok(true),
@@ -1586,7 +1630,32 @@ impl StateStore {
         }
     }
 
+    #[cfg(test)]
+    fn pause_persist_for_test(&self) -> Result<Arc<PersistPause>, StoreError> {
+        let pause = PersistPause::new();
+        let mut slot = self
+            .inner
+            .persist_pause
+            .lock()
+            .map_err(|_| StoreError::Poisoned)?;
+        *slot = Some(pause.clone());
+        Ok(pause)
+    }
+
     fn persist(&self, snapshot: &StateSnapshot) -> Result<(), StoreError> {
+        #[cfg(test)]
+        let pause = self
+            .inner
+            .persist_pause
+            .lock()
+            .map_err(|_| StoreError::Poisoned)?
+            .take();
+        #[cfg(test)]
+        if let Some(pause) = pause {
+            pause.started.wait();
+            pause.resume.wait();
+        }
+
         let Some(path) = self.inner.path.as_ref() else {
             return Ok(());
         };
@@ -1778,4 +1847,71 @@ fn current_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_millis())
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use std::{sync::mpsc, time::Duration};
+
+    use super::StateStore;
+
+    #[test]
+    fn durable_save_cannot_clear_a_deferred_write_that_arrives_during_persist() {
+        // Regression for a real lost-update race. The old durable path cloned A, released the
+        // snapshot lock, then wrote A and cleared `dirty`. A deferred B could land while A was
+        // being written, set dirty=true, and have that bit cleared afterwards — leaving B only in
+        // memory forever. Pause durable persistence at exactly that point. With the production
+        // lock order, the deferred writer cannot obtain the snapshot lock until A is durable.
+        let tempdir = tempfile::tempdir().expect("temporary state directory");
+        let path = tempdir.path().join("state.json");
+        let store = StateStore::file(&path).expect("state store");
+        let pause = store
+            .pause_persist_for_test()
+            .expect("install persistence pause");
+
+        let durable = store.clone();
+        let durable_save = std::thread::spawn(move || {
+            durable.write_snapshot(|snapshot| {
+                snapshot.settings.tunnel_url = "durable".to_owned();
+            })
+        });
+        pause.started.wait();
+
+        let deferred = store.clone();
+        let (deferred_done, deferred_finished) = mpsc::channel();
+        let deferred_save = std::thread::spawn(move || {
+            let result = deferred.write_snapshot_deferred(|snapshot| {
+                snapshot.settings.tailscale_url = "deferred".to_owned();
+            });
+            let _ = deferred_done.send(());
+            result
+        });
+
+        assert!(
+            deferred_finished
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "a deferred mutation must wait for the paused durable snapshot; otherwise a durable              write can clear its dirty bit after persisting an older clone"
+        );
+
+        pause.resume.wait();
+        durable_save
+            .join()
+            .expect("durable writer thread")
+            .expect("durable writer succeeds");
+        deferred_save
+            .join()
+            .expect("deferred writer thread")
+            .expect("deferred writer succeeds");
+
+        let after_durable = std::fs::read_to_string(&path).expect("durable snapshot exists");
+        assert!(after_durable.contains("durable"));
+        assert!(
+            !after_durable.contains("deferred"),
+            "the deferred mutation happened after the durable file write"
+        );
+        assert!(store.flush_if_dirty().expect("flush deferred write"));
+        let after_flush = std::fs::read_to_string(&path).expect("flushed snapshot exists");
+        assert!(after_flush.contains("deferred"));
+    }
 }

@@ -4,7 +4,10 @@ use actix_web::{
     http::{StatusCode, header},
     web,
 };
-use nullrouter_contracts::{INTERNAL_API_KEY_VALIDATE_PATH, ValidateApiKeyRequest};
+use nullrouter_contracts::{
+    ApiKeyGateRequest, ApiKeyGateResponse, INTERNAL_API_KEY_GATE_PATH,
+    INTERNAL_API_KEY_VALIDATE_PATH, ValidateApiKeyRequest,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{StateStore, StoreError, responses};
@@ -27,6 +30,11 @@ pub(crate) fn configure(config: &mut web::ServiceConfig) {
         .service(
             web::resource(INTERNAL_API_KEY_VALIDATE_PATH)
                 .route(web::post().to(validate_key))
+                .route(web::route().to(method_not_allowed)),
+        )
+        .service(
+            web::resource(INTERNAL_API_KEY_GATE_PATH)
+                .route(web::post().to(gate))
                 .route(web::route().to(method_not_allowed)),
         );
 }
@@ -140,6 +148,54 @@ async fn validate_key(
             |_| internal_error(StatusCode::INTERNAL_SERVER_ERROR, "State service error"),
             |response| internal_json(StatusCode::OK, &response),
         )
+}
+
+/// Read the live gate setting and validate the presented key under one snapshot lock.
+async fn gate(
+    peer_addr: Option<PeerAddr>,
+    content_type: Option<web::Header<header::ContentType>>,
+    store: web::Data<StateStore>,
+    body: web::Bytes,
+) -> HttpResponse {
+    if !is_loopback(peer_addr) {
+        return internal_error(
+            StatusCode::FORBIDDEN,
+            "Internal route requires loopback peer",
+        );
+    }
+    if !is_json(content_type.as_ref()) {
+        return internal_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Content-Type must be application/json",
+        );
+    }
+    let Ok(request) = serde_json::from_slice::<ApiKeyGateRequest>(&body) else {
+        return internal_error(StatusCode::BAD_REQUEST, "Invalid JSON body");
+    };
+    let result = store.with_snapshot(|snapshot| {
+        let candidate = request
+            .api_key
+            .as_ref()
+            .map(|key| crate::api_keys::digest_secret(key.expose_secret()));
+        let mut matched = None;
+        if let Some(candidate) = candidate.as_ref() {
+            for key in &snapshot.api_keys {
+                if key.matches_digest(candidate) {
+                    matched = Some((key.id.clone(), key.is_active));
+                }
+            }
+        }
+        ApiKeyGateResponse {
+            require_api_key: snapshot.settings.require_api_key,
+            valid: matched.is_some(),
+            active: matched.as_ref().is_some_and(|(_, active)| *active),
+            key_id: matched.map(|(id, _)| id),
+        }
+    });
+    result.map_or_else(
+        |_| internal_error(StatusCode::INTERNAL_SERVER_ERROR, "State service error"),
+        |response| internal_json(StatusCode::OK, &response),
+    )
 }
 
 async fn method_not_allowed(peer_addr: Option<PeerAddr>) -> HttpResponse {

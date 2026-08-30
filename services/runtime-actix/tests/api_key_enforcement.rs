@@ -53,6 +53,122 @@ async fn state_stub(
     (addr, seen)
 }
 
+/// A state stub whose `requireApiKey` answer changes between admission decisions.
+///
+/// The first answer reports the gate off; the second models the dashboard toggling it on. The
+/// runtime must ask state on every request rather than reusing any cached routing context.
+async fn toggling_state_stub(valid_key: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let addr = listener.local_addr().expect("addr").to_string();
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&seen);
+    let contexts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let sink = Arc::clone(&recorded);
+            let contexts = Arc::clone(&contexts);
+            tokio::spawn(async move {
+                let _ = serve_toggling(stream, valid_key, sink, contexts).await;
+            });
+        }
+    });
+    (addr, seen)
+}
+
+async fn serve_toggling(
+    mut stream: TcpStream,
+    valid_key: &str,
+    seen: Arc<Mutex<Vec<String>>>,
+    contexts: Arc<std::sync::atomic::AtomicUsize>,
+) -> std::io::Result<()> {
+    let mut buffer = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    let (head_end, content_length) = loop {
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 {
+            break (buffer.len(), 0);
+        }
+        buffer.extend_from_slice(chunk.get(..read).unwrap_or_default());
+        if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(buffer.get(..position).unwrap_or_default());
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())?
+                })
+                .unwrap_or(0);
+            break (position + 4, length);
+        }
+    };
+    while buffer.len() < head_end + content_length {
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        buffer.extend_from_slice(chunk.get(..read).unwrap_or_default());
+    }
+    let raw = String::from_utf8_lossy(&buffer).into_owned();
+    let path = raw
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("/")
+        .to_owned();
+    if let Ok(mut sink) = seen.lock() {
+        sink.push(path.clone());
+    }
+    let reply = if path.contains("/internal/v1/keys/gate") {
+        // First answer says public; every later one says the dashboard turned the gate on.
+        let required = contexts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0;
+        let body = raw.get(head_end..).unwrap_or_default();
+        let presented = serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("apiKey")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default();
+        let matches = presented == valid_key;
+        json!({"requireApiKey": required, "valid": matches, "active": matches}).to_string()
+    } else if path.contains("/internal/v1/routing-context") {
+        json!({"combos": [], "connections": [], "settings": {"requireApiKey": false}}).to_string()
+    } else if path.contains("/internal/v1/keys/validate") {
+        let body = raw.get(head_end..).unwrap_or_default();
+        let presented = serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("apiKey")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default();
+        let matches = presented == valid_key;
+        json!({"valid": matches, "active": matches}).to_string()
+    } else if path.contains("/internal/v1/credentials/select") {
+        json!({"status":"no_credentials","message":"gate passed"}).to_string()
+    } else {
+        json!({"ok":true}).to_string()
+    };
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        reply.len(),
+        reply
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
 async fn serve(
     mut stream: TcpStream,
     require_api_key: bool,
@@ -107,6 +223,24 @@ async fn serve(
             "combos": [],
             "connections": [],
             "settings": { "requireApiKey": require_api_key },
+        })
+        .to_string()
+    } else if path.contains("/internal/v1/keys/gate") {
+        // One call answers both halves, as the real state service does.
+        let presented = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|parsed| {
+                parsed
+                    .get("apiKey")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default();
+        let matches = presented == valid_key;
+        json!({
+            "requireApiKey": require_api_key,
+            "valid": matches,
+            "active": matches,
         })
         .to_string()
     } else if path.contains("/internal/v1/keys/validate") {
@@ -258,12 +392,19 @@ async fn no_key_is_needed_when_the_setting_is_off() -> TestResult {
         response.body
     );
     let paths = seen.lock().map(|seen| seen.clone()).unwrap_or_default();
-    // With enforcement off, no validation call is made at all.
+    // The one-call gate still reads the live requirement setting, but never makes the old second
+    // validation call when the setting is disabled.
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.contains("/internal/v1/keys/gate")),
+        "the live gate must be consulted, saw {paths:?}"
+    );
     assert!(
         !paths
             .iter()
             .any(|path| path.contains("/internal/v1/keys/validate")),
-        "validation must be skipped when disabled, saw {paths:?}"
+        "the retired validation hop must not be used, saw {paths:?}"
     );
     Ok(())
 }
@@ -285,6 +426,63 @@ async fn enforcement_fails_closed_when_state_is_unreachable() -> TestResult {
         StatusCode::SERVICE_UNAVAILABLE,
         "{}",
         dead.body
+    );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn toggle_on_is_not_bypassed_by_a_cached_public_context() -> TestResult {
+    // The bypass a reviewer found. `StateClient` caches routing context for 250ms, and that context
+    // carries `requireApiKey`. If the gate reads it from the cache, then a dashboard toggling the
+    // gate on leaves /v1 open for up to the TTL -- and when the gateway's static
+    // NULLROUTER_REQUIRE_API_KEY is off, nothing else is checking.
+    //
+    // One `Runtime` for both requests, deliberately: a fresh Runtime per request has an empty cache
+    // and cannot reproduce this. The stub reports requireApiKey=false on its first admission
+    // decision and true afterwards, so request one seeds a "public" cache entry and request two
+    // must still be rejected.
+    let (addr, seen) = toggling_state_stub("sk-valid").await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(app_config()))
+            .app_data(web::Data::new(Runtime::with_state_addr(&addr)))
+            .configure(configure),
+    )
+    .await;
+
+    let unauthenticated = || {
+        test::TestRequest::default()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .insert_header((header::CONTENT_TYPE, "application/json"))
+            .set_payload(r#"{"model":"openai/gpt-5","messages":[{"role":"user","content":"hi"}]}"#)
+            .to_request()
+    };
+
+    let first = test::call_service(&app, unauthenticated()).await;
+    assert_ne!(
+        first.status(),
+        StatusCode::UNAUTHORIZED,
+        "the first context reports the gate off, so this one passes"
+    );
+
+    let second = test::call_service(&app, unauthenticated()).await;
+    let status = second.status();
+    let body = String::from_utf8(to_bytes(second.into_body()).await?.to_vec())?;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a toggle-on must take effect immediately, not after the cache TTL: {body}"
+    );
+
+    let paths = seen.lock().map(|paths| paths.clone()).unwrap_or_default();
+    assert!(
+        paths
+            .iter()
+            .filter(|path| path.contains("/internal/v1/keys/gate"))
+            .count()
+            >= 2,
+        "the gate must ask state on each request rather than reuse a cached setting: {paths:?}"
     );
     Ok(())
 }

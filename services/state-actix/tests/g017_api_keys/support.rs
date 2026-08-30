@@ -7,6 +7,7 @@ use actix_web::{
     test, web,
 };
 use nullrouter_contracts::{
+    ApiKeyGateRequest, ApiKeyGateResponse, INTERNAL_API_KEY_GATE_PATH,
     INTERNAL_API_KEY_VALIDATE_PATH, SecretString, ValidateApiKeyRequest, ValidateApiKeyResponse,
 };
 use nullrouter_state::{StateStore, configure};
@@ -126,6 +127,22 @@ pub(crate) async fn create_key(store: StateStore, name: &str) -> TestResult<Crea
         secret: string_field(&body, "key")?,
         body,
     })
+}
+
+pub(crate) async fn gate_key(store: StateStore, secret: Option<&str>) -> TestResult<JsonResponse> {
+    let payload = serde_json::to_string(&ApiKeyGateRequest {
+        api_key: secret.map(SecretString::new),
+    })?;
+    request_json(
+        store,
+        request(Method::POST, INTERNAL_API_KEY_GATE_PATH, payload.as_str())
+            .peer_addr(loopback_addr()?),
+    )
+    .await
+}
+
+pub(crate) fn gate(response: &JsonResponse) -> TestResult<ApiKeyGateResponse> {
+    serde_json::from_slice(&response.body).map_err(Into::into)
 }
 
 pub(crate) async fn validate_key(store: StateStore, secret: &str) -> TestResult<JsonResponse> {

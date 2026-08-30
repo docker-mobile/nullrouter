@@ -157,7 +157,7 @@ pub(super) fn generate_secret() -> Result<String, StoreError> {
     Ok(secret)
 }
 
-pub(super) fn digest_secret(secret: &str) -> [u8; RANDOM_BYTES] {
+pub(crate) fn digest_secret(secret: &str) -> [u8; RANDOM_BYTES] {
     Sha256::digest(secret.as_bytes()).into()
 }
 

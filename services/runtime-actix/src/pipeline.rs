@@ -429,20 +429,23 @@ impl Runtime {
     ///
     /// Returns an error response when the request must be rejected.
     pub(crate) async fn enforce_api_key(&self, api_key: Option<&str>) -> Option<HttpResponse> {
-        let context = self.state.routing_context().await;
-        if !context.settings.require_api_key {
-            // A state outage defaults this to false, which does not open a
-            // hole: credentials also come from state, so the request cannot
-            // reach a provider anyway — it fails at selection with 503.
+        let presented = api_key.map(str::trim).filter(|key| !key.is_empty());
+        let Some(gate) = self.state.api_key_gate(presented).await else {
+            // Preserve the existing state-outage behavior: state also supplies credentials, so the
+            // request cannot reach a provider and will return its normal selection failure. We
+            // must not fabricate a requirement setting when its authority is unavailable.
+            return None;
+        };
+        if !gate.require_api_key {
             return None;
         }
-        let Some(api_key) = api_key.map(str::trim).filter(|key| !key.is_empty()) else {
+        if presented.is_none() {
             return Some(responses::json(
                 StatusCode::UNAUTHORIZED,
                 &build_error_body(401, "Missing API key"),
             ));
-        };
-        if self.state.validate_api_key(api_key).await {
+        }
+        if gate.valid && gate.active {
             return None;
         }
         Some(responses::json(
@@ -1540,7 +1543,19 @@ impl Runtime {
                 latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 error: None,
             };
-            state_client.record_usage(&report).await;
+            // Same bound as the non-streaming path. This task exists regardless — it is the one
+            // piping the stream — so the risk here is not task growth but each finished stream
+            // lingering for the five-second state timeout while state is down. Skipping the
+            // best-effort row keeps those tasks retiring promptly.
+            if let Some(permit) = state_client.try_reserve_usage_slot() {
+                state_client.record_usage(&report).await;
+                drop(permit);
+            } else {
+                tracing::warn!(
+                    provider = %report.provider,
+                    "usage recording saturated; dropping this streamed record"
+                );
+            }
         });
 
         // Frames already sitting in the channel are concatenated into one chunk rather than
@@ -1826,9 +1841,21 @@ impl Runtime {
         //
         // On the runtime's own runtime, so it is cancelled if the service stops; a record lost to
         // shutdown is the same outcome the previous `await` had if state was unreachable.
+        // Bounded: each spawned POST holds a permit until it completes or hits the five-second state
+        // timeout, so a state outage under load cannot accumulate one task and one retained report
+        // per request without limit. Dropping a best-effort telemetry row beats exhausting the
+        // runtime that is still serving traffic.
+        let Some(permit) = self.state.try_reserve_usage_slot() else {
+            tracing::warn!(
+                provider = %target.provider,
+                "usage recording saturated; dropping this record"
+            );
+            return;
+        };
         let state = self.state.clone();
         actix_web::rt::spawn(async move {
             state.record_usage(&report).await;
+            drop(permit);
         });
     }
 }

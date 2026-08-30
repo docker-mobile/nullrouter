@@ -4,7 +4,8 @@ use nullrouter_state::StateStore;
 
 use super::support::{
     TestResult, assert_denied, assert_denied_json, assert_inactive, assert_json_response,
-    create_key, field, loopback_addr, remote_addr, request, request_json, validate_key,
+    create_key, field, gate, gate_key, loopback_addr, remote_addr, request, request_json,
+    validate_key,
 };
 
 #[actix_rt::test]
@@ -176,5 +177,38 @@ async fn internal_validation_wrong_method_returns_structured_405() -> TestResult
     assert_eq!(response.status, StatusCode::METHOD_NOT_ALLOWED);
     assert_json_response(&response);
     assert_eq!(field(&response.json()?, "error")?, "Method not allowed");
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn gate_reads_requirement_and_key_verdict_from_one_snapshot() -> TestResult {
+    let store = StateStore::memory();
+    let key = create_key(store.clone(), "gate").await?;
+
+    let initially_public = gate_key(store.clone(), None).await?;
+    assert_eq!(initially_public.status, StatusCode::OK);
+    let decision = gate(&initially_public)?;
+    assert!(!decision.require_api_key);
+    assert!(!decision.valid);
+    assert!(!decision.active);
+
+    request_json(
+        store.clone(),
+        request(Method::PUT, "/api/settings", r#"{"requireApiKey":true}"#),
+    )
+    .await?;
+    let permitted = gate_key(store.clone(), Some(&key.secret)).await?;
+    let decision = gate(&permitted)?;
+    assert!(decision.require_api_key);
+    assert!(decision.valid);
+    assert!(decision.active);
+    assert_eq!(decision.key_id.as_deref(), Some(key.id.as_str()));
+
+    let missing = gate_key(store, None).await?;
+    let decision = gate(&missing)?;
+    assert!(decision.require_api_key);
+    assert!(!decision.valid);
+    assert!(!decision.active);
+    assert!(decision.key_id.is_none());
     Ok(())
 }

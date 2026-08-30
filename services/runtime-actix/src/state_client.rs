@@ -92,8 +92,6 @@ pub(crate) struct ConnectionSummary {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RoutingSettings {
-    #[serde(default)]
-    pub require_api_key: bool,
     /// How a combo picks among its models: `fallback`, `round-robin`, `fusion`.
     ///
     /// Absent or unrecognised reads as `fallback`, the upstream default, so a
@@ -174,6 +172,39 @@ pub(crate) struct Cooldown<'a> {
 }
 
 /// Client for the state service.
+///
+/// Maximum usage reports allowed to be awaiting a state-service POST.
+///
+/// Usage is best-effort and must not turn a five-second state timeout into an unbounded task queue
+/// under load. Once the limit is reached, new reports are dropped with a warning rather than
+/// retaining their payloads and timers until state comes back.
+const MAX_INFLIGHT_USAGE_REPORTS: usize = 1024;
+
+#[derive(Debug)]
+struct UsageQueue {
+    permits: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl UsageQueue {
+    fn new() -> Self {
+        Self {
+            permits: std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_INFLIGHT_USAGE_REPORTS)),
+        }
+    }
+
+    fn try_acquire(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.permits.clone().try_acquire_owned().ok()
+    }
+}
+
+impl Clone for UsageQueue {
+    fn clone(&self) -> Self {
+        Self {
+            permits: self.permits.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StateClient {
     client: reqwest::Client,
@@ -190,6 +221,12 @@ pub(crate) struct StateClient {
     /// every request too. 250ms bounds how long a dashboard change takes to take effect, which is
     /// below the point a user would notice, and it needs no wiring between services.
     context: std::sync::Arc<std::sync::RwLock<Option<(std::time::Instant, RoutingContext)>>>,
+    /// Bounds how many spawned usage POSTs can be awaiting state at once.
+    ///
+    /// Usage recording is fire-and-forget, and each POST can block for the five-second state
+    /// timeout. Without a bound, a state outage under load accumulates one task and one retained
+    /// report per request for the whole timeout window.
+    usage_slots: UsageQueue,
 }
 
 /// How long a cached routing context stays usable.
@@ -218,6 +255,7 @@ impl StateClient {
                 .unwrap_or_default(),
             base: format!("http://{addr}"),
             context: std::sync::Arc::default(),
+            usage_slots: UsageQueue::new(),
         }
     }
 
@@ -340,6 +378,15 @@ impl StateClient {
         }
     }
 
+    /// Reserve a bounded slot for a spawned usage POST.
+    ///
+    /// The returned permit is held by the task until its POST completes or times out. `None` means
+    /// state is already slow enough that retaining another best-effort report would be worse than
+    /// dropping it.
+    pub(crate) fn try_reserve_usage_slot(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.usage_slots.try_acquire()
+    }
+
     /// Record usage. Best-effort: telemetry must never fail a request.
     pub(crate) async fn record_usage(&self, report: &UsageReport) {
         let url = format!("{}/internal/v1/usage", self.base);
@@ -348,26 +395,32 @@ impl StateClient {
         }
     }
 
-    /// Validate a client-supplied managed API key.
+    /// Ask state for one live `/v1` admission decision.
     ///
-    /// Returns `false` when the key is unknown, inactive, or state cannot be
-    /// reached — enforcement fails closed, since the caller only asks when
-    /// `requireApiKey` is on.
-    pub(crate) async fn validate_api_key(&self, api_key: &str) -> bool {
+    /// The required setting and key verdict must be read atomically from state. Neither belongs in
+    /// the routing-context cache: stale `requireApiKey=false` is an authorization bypass, and a
+    /// cached valid key would accept a revocation during its TTL.
+    pub(crate) async fn api_key_gate(
+        &self,
+        api_key: Option<&str>,
+    ) -> Option<nullrouter_contracts::ApiKeyGateResponse> {
         let url = format!(
             "{}{}",
             self.base,
-            nullrouter_contracts::INTERNAL_API_KEY_VALIDATE_PATH
+            nullrouter_contracts::INTERNAL_API_KEY_GATE_PATH
         );
         let payload = json!({ "apiKey": api_key });
         match self.client.post(&url).json(&payload).send().await {
-            Ok(response) => response
-                .json::<nullrouter_contracts::ValidateApiKeyResponse>()
-                .await
-                .is_ok_and(|parsed| parsed.valid && parsed.active),
+            Ok(response) => match response.json().await {
+                Ok(gate) => Some(gate),
+                Err(error) => {
+                    tracing::warn!(%error, "API-key gate response was invalid; denying request");
+                    None
+                }
+            },
             Err(error) => {
-                tracing::warn!(%error, "API key validation failed; denying request");
-                false
+                tracing::warn!(%error, "API-key gate request failed; denying request");
+                None
             }
         }
     }
@@ -451,4 +504,30 @@ pub(crate) struct ProbeTarget {
     pub connection_id: String,
     pub provider: String,
     pub credentials: Credentials,
+}
+
+#[cfg(test)]
+mod usage_queue_tests {
+    use super::{MAX_INFLIGHT_USAGE_REPORTS, UsageQueue};
+
+    #[test]
+    fn usage_queue_is_bounded_and_recovers_when_permits_drop() {
+        // A state outage must not create unbounded five-second usage POST tasks. Every permit
+        // corresponds to exactly one such task; the next report is dropped until one completes.
+        let queue = UsageQueue::new();
+        let mut held = Vec::with_capacity(MAX_INFLIGHT_USAGE_REPORTS);
+        for _ in 0..MAX_INFLIGHT_USAGE_REPORTS {
+            held.push(queue.try_acquire().expect("capacity should remain"));
+        }
+        assert!(
+            queue.try_acquire().is_none(),
+            "the queue must have a hard ceiling"
+        );
+        let permit = held.pop();
+        drop(permit);
+        assert!(
+            queue.try_acquire().is_some(),
+            "a completed POST should free its slot"
+        );
+    }
 }

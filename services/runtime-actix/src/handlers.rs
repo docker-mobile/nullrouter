@@ -68,6 +68,9 @@ pub(crate) async fn openai_models(
     runtime: web::Data<Runtime>,
     request: actix_web::HttpRequest,
 ) -> HttpResponse {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return rejection;
+    }
     responses::json(
         StatusCode::OK,
         &runtime
@@ -81,6 +84,9 @@ pub(crate) async fn openai_models_by_kind(
     kind: web::Path<String>,
     request: actix_web::HttpRequest,
 ) -> HttpResponse {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return rejection;
+    }
     let kind = kind.into_inner();
     // `image-to-text` is spelled `imageToText` in the registry's serviceKinds.
     let resolved = match kind.as_str() {
@@ -96,15 +102,26 @@ pub(crate) async fn openai_models_by_kind(
 }
 
 pub(crate) async fn model_info(
+    runtime: web::Data<Runtime>,
+    request: HttpRequest,
     query: web::Query<ModelInfoQuery>,
 ) -> Result<HttpResponse, RuntimeError> {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return Ok(rejection);
+    }
     let id = query.required_id()?;
     let info =
         models::model_info(id, query.kind()).ok_or_else(|| RuntimeError::not_found_model(id))?;
     Ok(responses::json(StatusCode::OK, &info))
 }
 
-pub(crate) async fn gemini_models() -> HttpResponse {
+pub(crate) async fn gemini_models(
+    runtime: web::Data<Runtime>,
+    request: HttpRequest,
+) -> HttpResponse {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return rejection;
+    }
     responses::json(StatusCode::OK, &models::gemini_models())
 }
 
@@ -225,7 +242,14 @@ pub(crate) async fn responses_compact(
     chat_entrypoint(&runtime, &request, &body, StreamDefault::Disabled).await
 }
 
-pub(crate) async fn count_tokens(body: web::Bytes) -> Result<HttpResponse, RuntimeError> {
+pub(crate) async fn count_tokens(
+    runtime: web::Data<Runtime>,
+    request: HttpRequest,
+    body: web::Bytes,
+) -> Result<HttpResponse, RuntimeError> {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return Ok(rejection);
+    }
     let request: CountTokensRequest = parse_json(&body)?;
     Ok(responses::json(
         StatusCode::OK,
@@ -315,7 +339,13 @@ fn header_str<'a>(request: &'a HttpRequest, name: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) async fn audio_voices() -> HttpResponse {
+pub(crate) async fn audio_voices(
+    runtime: web::Data<Runtime>,
+    request: HttpRequest,
+) -> HttpResponse {
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return rejection;
+    }
     responses::json(StatusCode::OK, &models::voices())
 }
 

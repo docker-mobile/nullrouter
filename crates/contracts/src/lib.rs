@@ -4,7 +4,8 @@ mod auth;
 mod errors;
 
 pub use auth::{
-    AuthorizeRequest, AuthorizeResponse, INTERNAL_API_KEY_VALIDATE_PATH, INTERNAL_AUTHORIZE_PATH,
+    ApiKeyGateRequest, ApiKeyGateResponse, AuthorizeRequest, AuthorizeResponse,
+    INTERNAL_API_KEY_GATE_PATH, INTERNAL_API_KEY_VALIDATE_PATH, INTERNAL_AUTHORIZE_PATH,
     SecretString, ValidateApiKeyRequest, ValidateApiKeyResponse,
 };
 pub use errors::{
