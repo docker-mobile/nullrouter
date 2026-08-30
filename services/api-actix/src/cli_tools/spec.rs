@@ -263,7 +263,9 @@ pub(crate) const TOOLS: &[Tool] = &[
             indirect: None,
         }),
         // `!!(settings?.env?.ANTHROPIC_BASE_URL)`
-        marker: Marker::Json(|settings| !string_at(settings, &["env", "ANTHROPIC_BASE_URL"]).is_empty()),
+        marker: Marker::Json(|settings| {
+            !string_at(settings, &["env", "ANTHROPIC_BASE_URL"]).is_empty()
+        }),
         writable: Writable::Yes,
     },
     Tool {
@@ -280,7 +282,8 @@ pub(crate) const TOOLS: &[Tool] = &[
         // tree, so a file where the provider block exists but is not selected still counts. That
         // distinction is upstream's to make, so it is preserved.
         marker: Marker::Text(|text| {
-            text.contains("model_provider = \"9router\"") || text.contains("[model_providers.9router]")
+            text.contains("model_provider = \"9router\"")
+                || text.contains("[model_providers.9router]")
         }),
         writable: Writable::Yes,
     },
@@ -296,7 +299,10 @@ pub(crate) const TOOLS: &[Tool] = &[
         }),
         // `config.provider["9router"]`
         marker: Marker::Json(|config| {
-            config.get("provider").and_then(|providers| providers.get("9router")).is_some()
+            config
+                .get("provider")
+                .and_then(|providers| providers.get("9router"))
+                .is_some()
         }),
         writable: Writable::Yes,
     },
@@ -498,9 +504,9 @@ pub(crate) const TOOLS: &[Tool] = &[
                 return false;
             };
             providers.contains_key("9router")
-                || providers.values().any(|provider| {
-                    string_at(provider, &["base_url"]).contains("localhost:20128")
-                })
+                || providers
+                    .values()
+                    .any(|provider| string_at(provider, &["base_url"]).contains("localhost:20128"))
         }),
         writable: Writable::Yes,
     },
@@ -645,7 +651,10 @@ mod tests {
             });
             for segment in config.segments.iter().chain(roots) {
                 assert!(
-                    !segment.contains('/') && !segment.contains('\\') && *segment != ".." && !segment.is_empty(),
+                    !segment.contains('/')
+                        && !segment.contains('\\')
+                        && *segment != ".."
+                        && !segment.is_empty(),
                     "{} has a suspicious path segment {segment:?}",
                     tool.id
                 );
@@ -763,14 +772,18 @@ mod tests {
         let Marker::Json(check) = tool.marker else {
             panic!("claude should have a JSON marker")
         };
-        assert!(check(&json!({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:20128/v1"}})));
+        assert!(check(
+            &json!({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:20128/v1"}})
+        ));
         // Present but empty is falsy in JS, and must be here too.
         assert!(!check(&json!({"env": {"ANTHROPIC_BASE_URL": ""}})));
         assert!(!check(&json!({"env": {}})));
         assert!(!check(&json!({})));
         // A *different* base URL still counts: the user pointed Claude Code somewhere, and
         // upstream's check is presence, not identity.
-        assert!(check(&json!({"env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}})));
+        assert!(check(
+            &json!({"env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}})
+        ));
     }
 
     #[test]
@@ -825,10 +838,18 @@ mod tests {
         let Marker::Json(check) = tool.marker else {
             panic!("kilo should have a JSON marker")
         };
-        assert!(check(&json!({"openai-compatible": {"baseUrl": "http://127.0.0.1:20128/v1"}})));
-        assert!(check(&json!({"openai-compatible": {"baseURL": "http://localhost:20128/v1"}})));
-        assert!(check(&json!({"9router": {"baseUrl": "http://9router.local/v1"}})));
-        assert!(!check(&json!({"openai-compatible": {"baseUrl": "https://api.openai.com/v1"}})));
+        assert!(check(
+            &json!({"openai-compatible": {"baseUrl": "http://127.0.0.1:20128/v1"}})
+        ));
+        assert!(check(
+            &json!({"openai-compatible": {"baseURL": "http://localhost:20128/v1"}})
+        ));
+        assert!(check(
+            &json!({"9router": {"baseUrl": "http://9router.local/v1"}})
+        ));
+        assert!(!check(
+            &json!({"openai-compatible": {"baseUrl": "https://api.openai.com/v1"}})
+        ));
         assert!(!check(&json!({})));
     }
 
@@ -869,7 +890,9 @@ mod tests {
             "inferenceProvider": "9router",
             "inferenceGatewayBaseUrl": "http://x",
         })));
-        assert!(!check(&json!({"inferenceProvider": "gateway", "baseUrl": "http://x"})));
+        assert!(!check(
+            &json!({"inferenceProvider": "gateway", "baseUrl": "http://x"})
+        ));
     }
 
     #[test]
@@ -922,7 +945,10 @@ mod tests {
             "sanity: the only 9router text is inside the placeholder key"
         );
         let parsed = crate::cli_tools::detect::parse_config(written, Format::Toml).expect("parses");
-        assert!(check(&parsed), "the config upstream writes must match: {parsed}");
+        assert!(
+            check(&parsed),
+            "the config upstream writes must match: {parsed}"
+        );
 
         // And a remote OpenAI config does not.
         let remote = "provider = \"openai\"\n\n[providers.openai]\n\

@@ -179,7 +179,11 @@ async fn a_timeout_is_reported_as_a_timeout() -> TestResult {
 
 #[actix_web::test]
 async fn a_missing_proxy_url_is_a_bad_request() -> TestResult {
-    for payload in [json!({}), json!({"proxyUrl": ""}), json!({"proxyUrl": "   "})] {
+    for payload in [
+        json!({}),
+        json!({"proxyUrl": ""}),
+        json!({"proxyUrl": "   "}),
+    ] {
         let (status, body) = proxy_test(payload.clone()).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{payload} gave {body}");
         assert_eq!(body["ok"], false);
@@ -215,10 +219,7 @@ async fn a_local_test_url_is_refused_before_dialling() -> TestResult {
         .await?;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{target} gave {body}");
         let error = body["error"].as_str().unwrap_or_default();
-        assert!(
-            error.contains("Refusing to dial"),
-            "{target}: {error:?}"
-        );
+        assert!(error.contains("Refusing to dial"), "{target}: {error:?}");
     }
     Ok(())
 }
@@ -278,8 +279,9 @@ async fn the_configuration_export_refuses_rather_than_returning_an_empty_backup(
         .to_request();
     let res = test::call_service(&app, req).await;
     let status = res.status();
-    let body: Value =
-        serde_json::from_str(&String::from_utf8(to_bytes(res.into_body()).await?.to_vec())?)?;
+    let body: Value = serde_json::from_str(&String::from_utf8(
+        to_bytes(res.into_body()).await?.to_vec(),
+    )?)?;
 
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
     assert_eq!(body["success"], false);

@@ -191,7 +191,11 @@ fn tool_status_body(tool: &spec::Tool) -> serde_json::Value {
     // `configPath` for codex and copilot, `authPath` for kilo, `globalStatePath` for cline. All of
     // them are sent so whichever the dashboard reads is present, rather than picking one and
     // leaving a pane blank.
-    if let Some(path) = status.config_path.as_ref().map(|path| path.display().to_string()) {
+    if let Some(path) = status
+        .config_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+    {
         for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
             body[key] = serde_json::Value::String(path.clone());
         }

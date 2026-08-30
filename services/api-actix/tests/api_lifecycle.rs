@@ -44,11 +44,7 @@ const fn app_config() -> AppConfig {
 /// report that it cannot stop anything rather than claiming success. `handle: true` registers one
 /// that is never filled, which behaves the same way; authorised shutdowns therefore go through
 /// [`shutdown_a_real_server`] instead, and this helper is for refusals only.
-async fn post(
-    uri: &str,
-    token: Option<&str>,
-    handle: bool,
-) -> TestResult<(StatusCode, Value)> {
+async fn post(uri: &str, token: Option<&str>, handle: bool) -> TestResult<(StatusCode, Value)> {
     let mut app = App::new()
         .app_data(web::Data::new(app_config()))
         .app_data(web::Data::new(StateClient::new(UNREACHABLE)))
@@ -207,7 +203,9 @@ async fn shutdown_a_real_server(uri: &str, token: &str) -> TestResult<(u16, Valu
     // And the port is genuinely released, not merely no longer serving.
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     assert!(
-        actix_web::rt::net::TcpStream::connect(address).await.is_err(),
+        actix_web::rt::net::TcpStream::connect(address)
+            .await
+            .is_err(),
         "port {port} still accepts connections after {uri}"
     );
     Ok((status, body))
@@ -230,7 +228,10 @@ async fn a_correct_token_stops_a_real_server_and_reports_what_keeps_running() ->
     );
     // And when siblings *are* up, the warning must accompany them. This is not hypothetical: the
     // suite may well run on a machine where the dev services are listening.
-    if body["stillRunning"].as_array().is_some_and(|list| !list.is_empty()) {
+    if body["stillRunning"]
+        .as_array()
+        .is_some_and(|list| !list.is_empty())
+    {
         let warning = body["warning"].as_str().unwrap_or_default();
         assert!(
             warning.contains("/v1"),
@@ -319,8 +320,9 @@ async fn the_version_route_does_not_claim_to_be_up_to_date() -> TestResult {
         .to_request();
     let res = test::call_service(&app, req).await;
     assert_eq!(res.status(), StatusCode::OK);
-    let body: Value =
-        serde_json::from_str(&String::from_utf8(to_bytes(res.into_body()).await?.to_vec())?)?;
+    let body: Value = serde_json::from_str(&String::from_utf8(
+        to_bytes(res.into_body()).await?.to_vec(),
+    )?)?;
 
     assert_eq!(body["currentVersion"], "0.5.20");
     assert!(

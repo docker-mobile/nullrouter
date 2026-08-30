@@ -132,8 +132,8 @@ pub(crate) fn validate(
     }
     // Parsed here rather than left to the HTTP client, so a typo is a 400 naming the problem
     // instead of a generic dial failure.
-    let parsed_proxy = reqwest::Url::parse(proxy)
-        .map_err(|error| Refusal::InvalidProxyUrl(error.to_string()))?;
+    let parsed_proxy =
+        reqwest::Url::parse(proxy).map_err(|error| Refusal::InvalidProxyUrl(error.to_string()))?;
     if !matches!(
         parsed_proxy.scheme(),
         "http" | "https" | "socks5" | "socks5h"
@@ -306,7 +306,10 @@ mod tests {
     fn the_supported_proxy_schemes_are_accepted() {
         for scheme in ["http", "https", "socks5", "socks5h"] {
             let url = format!("{scheme}://proxy.example:1080");
-            assert!(validate(Some(&url), None).is_ok(), "{scheme} should be accepted");
+            assert!(
+                validate(Some(&url), None).is_ok(),
+                "{scheme} should be accepted"
+            );
         }
     }
 
@@ -366,13 +369,32 @@ mod tests {
 
     #[test]
     fn local_detection_covers_the_shapes_that_matter() {
-        for host in ["127.0.0.1", "localhost", "LOCALHOST", "app.localhost",
-                     "10.1.2.3", "192.168.0.1", "172.31.255.255", "169.254.1.1",
-                     "0.0.0.0", "::1", "[::1]", "fe80::1", "fc00::abcd"] {
+        for host in [
+            "127.0.0.1",
+            "localhost",
+            "LOCALHOST",
+            "app.localhost",
+            "10.1.2.3",
+            "192.168.0.1",
+            "172.31.255.255",
+            "169.254.1.1",
+            "0.0.0.0",
+            "::1",
+            "[::1]",
+            "fe80::1",
+            "fc00::abcd",
+        ] {
             assert!(is_local_target(host), "{host} should be local");
         }
-        for host in ["google.com", "8.8.8.8", "1.1.1.1", "2606:4700::1111",
-                     "notlocalhost.com", "172.32.0.1", "11.0.0.1"] {
+        for host in [
+            "google.com",
+            "8.8.8.8",
+            "1.1.1.1",
+            "2606:4700::1111",
+            "notlocalhost.com",
+            "172.32.0.1",
+            "11.0.0.1",
+        ] {
             assert!(!is_local_target(host), "{host} should not be local");
         }
     }

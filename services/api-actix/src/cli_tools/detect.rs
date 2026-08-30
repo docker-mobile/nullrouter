@@ -88,9 +88,7 @@ pub(crate) fn parse_config(text: &str, format: Format) -> Result<Value, String> 
             .map_err(|error| error.to_string()),
         Format::Toml => toml::from_str::<toml::Value>(text)
             .map_err(|error| error.to_string())
-            .and_then(|value| {
-                serde_json::to_value(value).map_err(|error| error.to_string())
-            }),
+            .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
         // Not parsed into a document: reported as text, which is what the dashboard shows for
         // these and what the marker checks.
         Format::DotEnv | Format::YamlBlock => Ok(Value::String(text.to_owned())),
@@ -322,7 +320,11 @@ mod tests {
                 status.source
             );
             if status.settings.is_null() {
-                assert!(!status.has_router, "{} claims a router with no config", tool.id);
+                assert!(
+                    !status.has_router,
+                    "{} claims a router with no config",
+                    tool.id
+                );
             }
         }
     }

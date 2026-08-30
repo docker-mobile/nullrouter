@@ -164,7 +164,9 @@ fn authorised(request: &HttpRequest) -> Result<(), HttpResponse> {
         && presented
             .bytes()
             .zip(secret.trim().bytes())
-            .fold(0_u8, |differences, (left, right)| differences | (left ^ right))
+            .fold(0_u8, |differences, (left, right)| {
+                differences | (left ^ right)
+            })
             == 0
     {
         Ok(())
@@ -254,10 +256,7 @@ async fn shutdown_reply(message: &str) -> HttpResponse {
     )
 }
 
-async fn shutdown(
-    request: HttpRequest,
-    handle: Option<web::Data<ShutdownHandle>>,
-) -> HttpResponse {
+async fn shutdown(request: HttpRequest, handle: Option<web::Data<ShutdownHandle>>) -> HttpResponse {
     if let Err(refusal) = authorised(&request) {
         return refusal;
     }
@@ -350,7 +349,10 @@ mod tests {
 
         for (name, port) in SIBLING_SERVICES {
             assert!(name.starts_with("nullrouter-"), "odd service name {name}");
-            assert!((20128..=20135).contains(&port), "{name} port {port} is outside the range");
+            assert!(
+                (20128..=20135).contains(&port),
+                "{name} port {port} is outside the range"
+            );
         }
     }
 

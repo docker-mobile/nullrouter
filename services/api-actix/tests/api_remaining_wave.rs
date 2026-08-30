@@ -94,7 +94,10 @@ async fn cli_tool_routes_report_what_is_actually_on_the_machine() -> TestResult 
         let has_source = status.get("source").is_some();
         assert_eq!(installed, has_source, "{tool} reported {status}");
         // A tool with no readable config cannot be pointing at this router.
-        if status.get("settings").is_none_or(serde_json::Value::is_null) {
+        if status
+            .get("settings")
+            .is_none_or(serde_json::Value::is_null)
+        {
             assert_eq!(field(status, "has9Router")?, false, "{tool}");
         }
         // And the path inspected is always named, so a user knows where to look.

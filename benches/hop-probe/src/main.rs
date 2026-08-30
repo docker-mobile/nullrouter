@@ -69,7 +69,11 @@ fn report(label: &str, mut samples: Vec<Duration>) {
             .get(index)
             .map_or(0.0, |sample| sample.as_secs_f64() * 1_000_000.0)
     };
-    println!("  {label:<28} p50 {:>9.2} us   p99 {:>9.2} us", at(0.50), at(0.99));
+    println!(
+        "  {label:<28} p50 {:>9.2} us   p99 {:>9.2} us",
+        at(0.50),
+        at(0.99)
+    );
 }
 
 #[tokio::main(flavor = "current_thread")]
