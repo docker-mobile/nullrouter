@@ -271,29 +271,65 @@ async fn serve(
     stream.flush().await
 }
 
-async fn failing_gate_stub() -> String {
+/// A state stub whose gate route fails while every other route answers normally.
+///
+/// Returns the paths it was asked for, so a test can assert what was *not* reached. Without that,
+/// a test can only see the 503 — and a 503 is also what a bypassed request would produce once it
+/// reached credential selection and that failed, so the status alone proves nothing about ordering.
+async fn failing_gate_stub() -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind loopback");
     let addr = listener.local_addr().expect("addr").to_string();
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&seen);
     tokio::spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 break;
             };
+            let sink = Arc::clone(&recorded);
             tokio::spawn(async move {
-                let mut buffer = [0_u8; 4096];
-                let _ = stream.read(&mut buffer).await;
-                let response = if String::from_utf8_lossy(&buffer).contains("/keys/gate") {
+                let mut buffer = [0_u8; 8192];
+                let read = stream.read(&mut buffer).await.unwrap_or(0);
+                let raw = String::from_utf8_lossy(buffer.get(..read).unwrap_or_default());
+                let path = raw
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_owned();
+                if let Ok(mut paths) = sink.lock() {
+                    paths.push(path.clone());
+                }
+                let response = if path.contains("/internal/v1/keys/gate") {
                     "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_owned()
                 } else {
-                    r#"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{"status":"no_credentials","message":"selection reached"}"#
+                    // A *successful* selection, so that a request which wrongly got past the gate
+                    // would proceed rather than fail here. The failure has to be the gate's alone.
+                    let body = json!({
+                        "status": "selected",
+                        "credentials": {
+                            "connectionId": "conn-1",
+                            "provider": "openai",
+                            "apiKey": "sk-upstream",
+                            "baseUrl": "http://127.0.0.1:1",
+                        },
+                    })
+                    .to_string();
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
                 };
                 let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.flush().await;
             });
         }
     });
-    addr
+    (addr, seen)
 }
 
 struct Response {
@@ -457,7 +493,15 @@ async fn enforcement_fails_closed_when_state_is_unreachable() -> TestResult {
 
 #[actix_rt::test]
 async fn gate_failure_denies_before_credential_selection() -> TestResult {
-    let addr = failing_gate_stub().await;
+    // When the one-call gate cannot answer, the request must be refused rather than proceeding on
+    // an assumed-public setting. The earlier version of this returned `None` — continue — which
+    // inferred "no key required" from *no answer at all* rather than from an answer saying so.
+    //
+    // The stub fails only `/keys/gate` and answers credential selection successfully, so a request
+    // that wrongly got past the gate would carry on rather than fail. Asserting the 503 alone would
+    // not prove ordering: a bypassed request that later failed selection also ends in a 503. The
+    // load-bearing assertion is that selection was never asked.
+    let (addr, seen) = failing_gate_stub().await;
     let response = post_with_key(&addr, None).await?;
     assert_eq!(
         response.status,
@@ -465,7 +509,25 @@ async fn gate_failure_denies_before_credential_selection() -> TestResult {
         "{}",
         response.body
     );
-    assert!(response.body.contains("API-key gate unavailable"));
+    assert!(
+        response.body.contains("API-key gate unavailable"),
+        "the refusal should name the gate, not a downstream failure: {}",
+        response.body
+    );
+
+    let paths = seen.lock().map(|paths| paths.clone()).unwrap_or_default();
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.contains("/internal/v1/keys/gate")),
+        "the gate must have been consulted: {paths:?}"
+    );
+    assert!(
+        !paths
+            .iter()
+            .any(|path| path.contains("/internal/v1/credentials/select")),
+        "a failed gate must stop the request before credential selection: {paths:?}"
+    );
     Ok(())
 }
 
