@@ -169,17 +169,25 @@ async fn translator_routes_return_defaults_and_validate_json() -> TestResult {
     let (malformed_status, malformed) =
         request_json(Method::POST, "/api/translator/translate", "{").await?;
 
-    // Then: they return JSON defaults, and malformed POST bodies fail at the boundary.
-    assert_eq!(load_status, StatusCode::OK);
+    // Then: they return JSON, and malformed POST bodies still fail at the boundary.
+    //
+    // `load`, `save` and `translate` now depend on the state and runtime services rather than
+    // answering from a stub, so in this slice — whose state and runtime addresses are a closed
+    // port — the honest answer is 503 naming the missing service. The routes' real behaviour is
+    // covered in api_translator_contract.rs and, for the translations themselves,
+    // services/runtime-actix/tests/translator_inspector.rs.
+    assert_eq!(load_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&load, "success")?, false);
     assert_eq!(logs_status, StatusCode::OK);
     assert_eq!(field(&logs, "logs")?, &serde_json::json!([]));
-    assert_eq!(save_status, StatusCode::OK);
+    assert_eq!(save_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&save, "success")?, false);
     assert_eq!(send_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&send, "success")?, false);
-    assert_eq!(translate_status, StatusCode::OK);
-    assert_eq!(field(&translate, "success")?, true);
+    assert_eq!(translate_status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(field(&translate, "success")?, false);
+    // The boundary check is the point of this row: a malformed body must fail here, before any
+    // proxying, so it stays a 400 rather than becoming a 503 about a service it never reached.
     assert_eq!(malformed_status, StatusCode::BAD_REQUEST);
     assert_eq!(field(&malformed, "error")?, "Invalid JSON body");
     Ok(())

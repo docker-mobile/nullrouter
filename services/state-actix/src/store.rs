@@ -47,6 +47,14 @@ pub(crate) struct StateSnapshot {
     settings: Settings,
     #[serde(default)]
     pub(crate) usage: crate::usage::UsageLog,
+    /// The translator inspector's saved panes, keyed by upstream's file name.
+    ///
+    /// Upstream writes these to `logs/translator/*` on the app's own working directory. They
+    /// live in state here instead, because the API service that serves them has no writable
+    /// directory of its own and, in a multi-service layout, no guarantee of sharing one with
+    /// whoever reads them back.
+    #[serde(default)]
+    pub(crate) translator_logs: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +113,13 @@ pub struct ProviderConnection {
 
 /// Account-level lock key (upstream `modelLock___all`).
 pub(crate) const MODEL_LOCK_ALL: &str = "__all";
+
+/// Per-pane cap on a saved translator log.
+///
+/// These hold whatever a user pasted into the inspector, including a full SSE capture. The
+/// whole snapshot is read into memory and rewritten on every mutation, so an uncapped pane
+/// would make one paste a permanent tax on every state write.
+const MAX_TRANSLATOR_LOG_BYTES: usize = 1024 * 1024;
 
 impl ProviderConnection {
     /// `true` when this connection is cooling down for `model`.
@@ -553,6 +568,33 @@ impl StateStore {
             .into_iter()
             .map(ProviderConnection::public)
             .collect())
+    }
+
+    /// One saved translator pane, if it has been written.
+    pub(crate) fn translator_log(&self, file: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.read_snapshot()?.translator_logs.get(file).cloned())
+    }
+
+    /// Save one translator pane.
+    ///
+    /// Size-capped per pane. These hold whatever the user pasted into the inspector, and a
+    /// 2000-frame SSE capture pasted into a pane would otherwise be persisted in full and
+    /// reloaded into memory on every state read.
+    pub(crate) fn save_translator_log(&self, file: &str, content: &str) -> Result<(), StoreError> {
+        let trimmed = if content.len() > MAX_TRANSLATOR_LOG_BYTES {
+            let mut end = MAX_TRANSLATOR_LOG_BYTES;
+            while end > 0 && !content.is_char_boundary(end) {
+                end -= 1;
+            }
+            let mut capped = content.get(..end).unwrap_or_default().to_owned();
+            capped.push_str("\n… truncated by nullrouter-state at 1 MiB");
+            capped
+        } else {
+            content.to_owned()
+        };
+        self.write_snapshot(|snapshot| {
+            snapshot.translator_logs.insert(file.to_owned(), trimmed);
+        })
     }
 
     /// Active connections **with their secrets**, for the internal probe-targets route.

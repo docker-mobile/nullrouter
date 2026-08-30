@@ -168,11 +168,22 @@ async fn translator_save_rejects_invalid_requests_as_structured_json() -> TestRe
 
 #[actix_rt::test]
 async fn translator_translate_rejects_invalid_requests_as_structured_json() -> TestResult {
-    // Given: translate requires JSON with step 1, 2, or 3 and a body object.
+    // Given: translate requires JSON with a body object and a step of 1, 2, 3 — or 5, this
+    // port's own response step, which upstream leaves to hand-pasting.
+    //
+    // Every case here is rejected at the boundary, before any proxying, so these stay 400s
+    // rather than becoming 503s about a runtime the request never reached.
     let cases = [
         (r#"{"body":{}}"#, "Step and body required"),
         (r#"{"step":1}"#, "Step and body required"),
-        (r#"{"step":4,"body":{}}"#, "Invalid step (1-3)"),
+        (
+            r#"{"step":4,"body":{}}"#,
+            "Invalid step (1-3, or 5 for a response)",
+        ),
+        (
+            r#"{"step":6,"body":{}}"#,
+            "Invalid step (1-3, or 5 for a response)",
+        ),
         ("{", "Invalid JSON body"),
     ];
 

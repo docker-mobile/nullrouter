@@ -1,10 +1,11 @@
 use actix_web::{http::Method, web};
 
-use crate::{handlers, pxpipe};
+use crate::{handlers, inspector, pxpipe};
 
 pub fn configure(config: &mut web::ServiceConfig) {
     register_health_route(config);
     pxpipe::configure(config);
+    inspector::configure(config);
     register_v1_routes(config, "/v1");
     register_v1_routes(config, "/api/v1");
     register_v1beta_routes(config, "/v1beta");

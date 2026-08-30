@@ -648,9 +648,9 @@ misleading `501`.
   implemented, and *refreshing* an existing provider token is implemented — see below.)
 - **Proxy pool testing and relay deployment** to Cloudflare/Deno/Vercel. Pool CRUD is real; deploying
   a relay is not. Per-connection outbound proxies work.
-- **Translator execution and log persistence.** Steps 1–3 validate and echo their shape; they do not
-  translate. (The translation engine itself is real and used on the live `/v1` path — this is the
-  dashboard's step-by-step inspector.)
+- **Translator `send`.** The inspector's steps run the real engine (see below); dispatching the
+  assembled body to a live provider from the inspector is not wired up yet. The live `/v1` path
+  dispatches normally.
 - **Service lifecycle** (`/api/shutdown`, `/api/version/update`).
 - **Database settings and proxy connectivity tests** under `/api/settings/*`.
 - **SAML assertion consumption** — see [Security model](#security-model).
@@ -667,6 +667,35 @@ rather than silently retried.
 `backend_connected: false` with a reason; posting a message returns 503 rather than pretending to
 deliver it. Console-log streams connect and emit an empty init frame — there is no live capture
 backend.
+
+**The translator inspector runs the real engine.** Its steps used to echo shapes back —
+`sourceFormat: "unknown"` and an empty body. Each step now runs the same translation the live `/v1`
+path runs, and the tests assert agreement with `crates/translate` by calling the engine directly
+rather than pinning literals: an inspector that showed a translation nobody performs would send a user
+chasing a discrepancy that exists only in the inspector.
+
+The steps live in `nullrouter-runtime`, which `nullrouter-api` proxies to, because each needs
+something only that service has — step 1 resolves the model, including the user-defined node prefixes
+in the connection store, and step 3 builds the outbound URL and headers from credentials. A second
+copy in the API service would be a second thing to drift.
+
+Saved panes persist in the state service rather than in `logs/translator/` on disk, since the API
+service has no writable directory it is guaranteed to share with whoever reads them back. Each pane is
+capped at 1 MiB: they hold whatever a user pasted in, and the whole snapshot is rewritten on every
+mutation. "Not saved yet" and "state is unreachable" are reported differently, which upstream cannot
+distinguish because its panes are local files.
+
+> **Credentials never appear in the headers pane.** The auth *scheme* is shown — `Bearer
+> <redacted:41 chars>` — because which scheme is in play is exactly what someone debugging auth needs,
+> and the scheme is not secret. Header names are matched by family (`-token`, `api-key`, `secret`, …),
+> so a provider-specific spelling this port has not seen is redacted by default rather than printed.
+> These panes end up in screenshots and bug reports.
+
+One addition beyond upstream: a response step. Upstream's inspector has action buttons for steps 1, 3
+and Send only, so its "OpenAI Response" and "Client Response" panes are display-only and a user
+inspecting a *response* translation pastes chunks in by hand. Step 5 runs the incremental response
+translator, threading one stream state across the chunks the way the live stream does — translating
+them independently would produce framing the live path never emits.
 
 **Model testing is real.** `POST /api/models/test` dispatches a one-token, non-streaming completion
 through the runtime — the same path real traffic takes, so a passing test means something — and reports

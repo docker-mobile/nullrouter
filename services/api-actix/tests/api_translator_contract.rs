@@ -79,11 +79,18 @@ fn assert_structured_json(response: &JsonResponse) {
     assert!(!response.body.contains("<!DOCTYPE"), "body was HTML");
 }
 
-#[actix_rt::test]
-async fn translator_load_returns_structured_json_for_allowed_file() -> TestResult {
-    // Given: the upstream translator dashboard loads one of the allowed replay log files.
+// These three tests asserted the old stubs: `load` always answered "File not found", `save`
+// declared persistence unsupported, and `translate` echoed `sourceFormat: "unknown"` with an
+// empty body. All three now do real work — panes persist in the state service and the steps run
+// the translation engine in the runtime — so what this slice can still check is the boundary
+// behaviour when neither service is reachable, which is what its closed-port address gives it.
+//
+// The real translations are asserted in `services/runtime-actix/tests/translator_inspector.rs`,
+// against `crates/translate` directly.
 
-    // When: nullrouter-api receives the load request without local translator persistence.
+#[actix_rt::test]
+async fn translator_load_reports_an_unreachable_state_service() -> TestResult {
+    // Given: a valid file name, and no reachable state service holding the panes.
     let response = request_json(
         Method::GET,
         "/api/translator/load?file=1_req_client.json",
@@ -91,20 +98,23 @@ async fn translator_load_returns_structured_json_for_allowed_file() -> TestResul
     )
     .await?;
 
-    // Then: the route returns a structured JSON not-found stub instead of HTML.
-    assert_eq!(response.status, StatusCode::OK);
+    // Then: 503, and structured JSON saying which service is missing. Deliberately distinct
+    // from the "File not found" this used to answer: a pane that was never saved and a state
+    // service that is down are different problems, and upstream cannot tell them apart
+    // because its panes are local files.
+    assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_structured_json(&response);
     assert_eq!(field(&response.json, "success")?, false);
     assert_eq!(field(&response.json, "content")?, &Value::Null);
-    assert_eq!(field(&response.json, "error")?, "File not found");
+    assert_eq!(
+        field(&response.json, "error")?,
+        "nullrouter-state is unreachable"
+    );
     Ok(())
 }
 
 #[actix_rt::test]
-async fn translator_save_returns_explicit_unsupported_json_for_valid_input() -> TestResult {
-    // Given: the dashboard sends a valid translator replay log save request.
-
-    // When: nullrouter-api handles it without local translator log persistence.
+async fn translator_save_reports_an_unreachable_state_service() -> TestResult {
     let response = request_json(
         Method::POST,
         "/api/translator/save",
@@ -112,24 +122,23 @@ async fn translator_save_returns_explicit_unsupported_json_for_valid_input() -> 
     )
     .await?;
 
-    // Then: the response is structured JSON that explicitly declares persistence unsupported.
-    assert_eq!(response.status, StatusCode::OK);
+    // No longer `unsupported: true` — persistence exists; this state service does not.
+    assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_structured_json(&response);
     assert_eq!(field(&response.json, "success")?, false);
-    assert_eq!(field(&response.json, "unsupported")?, true);
+    assert_eq!(field(&response.json, "unsupported")?, false);
     assert_eq!(
         field(&response.json, "error")?,
-        "Translator log persistence is not supported"
+        "nullrouter-state is unreachable"
     );
     Ok(())
 }
 
 #[actix_rt::test]
-async fn translator_translate_accepts_supported_steps_with_default_metadata() -> TestResult {
-    // Given: the dashboard can replay the three upstream translator stages.
-
-    for step in [1, 2, 3] {
-        // When: a supported translator step is requested.
+async fn translator_translate_reports_an_unreachable_runtime() -> TestResult {
+    // The steps are proxied to nullrouter-runtime, which owns the translation engine. With no
+    // runtime, the honest answer names it rather than fabricating a translation.
+    for step in [1, 2, 3, 5] {
         let body = serde_json::json!({
             "step": step,
             "provider": "openai",
@@ -139,19 +148,16 @@ async fn translator_translate_accepts_supported_steps_with_default_metadata() ->
         .to_string();
         let response = request_json(Method::POST, "/api/translator/translate", &body).await?;
 
-        // Then: the route returns success plus deterministic default translation metadata.
-        assert_eq!(response.status, StatusCode::OK, "step {step}");
-        assert_structured_json(&response);
-        assert_eq!(field(&response.json, "success")?, true, "step {step}");
-        let result = field(&response.json, "result")?;
-        assert_eq!(field(result, "step")?, step, "step {step}");
-        assert_eq!(field(result, "provider")?, "openai", "step {step}");
-        assert_eq!(field(result, "model")?, "gpt-5", "step {step}");
-        assert_eq!(field(result, "sourceFormat")?, "unknown", "step {step}");
-        assert_eq!(field(result, "targetFormat")?, "unknown", "step {step}");
         assert_eq!(
-            field(result, "body")?,
-            &serde_json::json!({}),
+            response.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "step {step}"
+        );
+        assert_structured_json(&response);
+        assert_eq!(field(&response.json, "success")?, false, "step {step}");
+        assert_eq!(
+            field(&response.json, "error")?,
+            "nullrouter-runtime is unreachable",
             "step {step}"
         );
     }

@@ -106,47 +106,80 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
         );
 }
 
-async fn load(query: web::Query<LoadQuery>) -> HttpResponse {
-    if query.file.as_deref().is_none_or(|file| !allowed_file(file)) {
+async fn load(query: web::Query<LoadQuery>, state: web::Data<crate::StateClient>) -> HttpResponse {
+    let Some(file) = query.file.as_deref().filter(|file| allowed_file(file)) else {
         return responses::json(
             StatusCode::BAD_REQUEST,
             &responses::error("Valid file parameter required"),
         );
+    };
+    match state.translator_log(file).await {
+        Ok(Some(content)) => responses::json(
+            StatusCode::OK,
+            &LoadResponse {
+                success: true,
+                content: Some(content),
+                error: None,
+            },
+        ),
+        Ok(None) => responses::json(
+            StatusCode::OK,
+            &LoadResponse {
+                success: false,
+                content: None,
+                error: Some("File not found"),
+            },
+        ),
+        // Upstream cannot distinguish these, because its files are on local disk. Here the
+        // panes live in the state service, so "not saved yet" and "state is down" are
+        // genuinely different and the second should not read as the first.
+        Err(()) => responses::json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &LoadResponse {
+                success: false,
+                content: None,
+                error: Some("nullrouter-state is unreachable"),
+            },
+        ),
     }
-    responses::json(
-        StatusCode::OK,
-        &LoadResponse {
-            success: false,
-            content: None,
-            error: Some("File not found"),
-        },
-    )
 }
 
-async fn save(body: web::Bytes) -> HttpResponse {
+async fn save(body: web::Bytes, state: web::Data<crate::StateClient>) -> HttpResponse {
     let request = match json_body::parse::<SaveRequest>(&body) {
         Ok(request) => request,
         Err(response) => return response,
     };
-    if request
-        .file
-        .as_deref()
-        .is_none_or(|file| !allowed_file(file))
-        || request.content.is_none()
-    {
+    let Some(file) = request.file.as_deref().filter(|file| allowed_file(file)) else {
         return responses::json(
             StatusCode::BAD_REQUEST,
             &responses::error("File and content required"),
         );
+    };
+    let Some(content) = request.content.as_deref() else {
+        return responses::json(
+            StatusCode::BAD_REQUEST,
+            &responses::error("File and content required"),
+        );
+    };
+
+    match state.save_translator_log(file, content).await {
+        Ok(()) => responses::json(
+            StatusCode::OK,
+            &SuccessResponse {
+                success: true,
+                unsupported: false,
+                error: None,
+            },
+        ),
+        Err(()) => responses::json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &SuccessResponse {
+                success: false,
+                unsupported: false,
+                error: Some("nullrouter-state is unreachable"),
+            },
+        ),
     }
-    responses::json(
-        StatusCode::OK,
-        &SuccessResponse {
-            success: false,
-            unsupported: true,
-            error: Some("Translator log persistence is not supported"),
-        },
-    )
 }
 
 async fn send(body: web::Bytes) -> HttpResponse {
@@ -173,7 +206,7 @@ async fn send(body: web::Bytes) -> HttpResponse {
     )
 }
 
-async fn translate(body: web::Bytes) -> HttpResponse {
+async fn translate(body: web::Bytes, runtime: web::Data<crate::RuntimeClient>) -> HttpResponse {
     let request = match json_body::parse::<TranslateRequest>(&body) {
         Ok(request) => request,
         Err(response) => return response,
@@ -190,27 +223,33 @@ async fn translate(body: web::Bytes) -> HttpResponse {
             &responses::error("Step and body required"),
         );
     }
-    if !matches!(step, 1..=3) {
+    // Step 5 is this port's own addition: a response translation. Upstream's inspector has
+    // action buttons for steps 1, 3 and Send only, leaving its two response panes to be
+    // filled in by hand.
+    if !matches!(step, 1..=3 | 5) {
         return responses::json(
             StatusCode::BAD_REQUEST,
-            &responses::error("Invalid step (1-3)"),
+            &responses::error("Invalid step (1-3, or 5 for a response)"),
         );
     }
 
-    responses::json(
-        StatusCode::OK,
-        &TranslateResponse {
-            success: true,
-            result: serde_json::json!({
-                "step": step,
-                "provider": request.provider,
-                "model": request.model,
-                "sourceFormat": "unknown",
-                "targetFormat": "unknown",
-                "body": {},
-            }),
-        },
-    )
+    // Proxied to the runtime, which owns the translation engine, the node-prefix resolution
+    // step 1 needs, and the credentials steps 3 and 5 need. See `RuntimeClient::translator_step`.
+    match runtime.translator_step(&body).await {
+        Some(reply) => responses::passthrough(
+            StatusCode::from_u16(reply.status).unwrap_or(StatusCode::BAD_GATEWAY),
+            &reply.content_type,
+            reply.body,
+        ),
+        None => responses::json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &SuccessResponse {
+                success: false,
+                unsupported: false,
+                error: Some("nullrouter-runtime is unreachable"),
+            },
+        ),
+    }
 }
 
 async fn console_logs() -> HttpResponse {

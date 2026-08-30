@@ -399,28 +399,41 @@ cell() {
   fi
 }
 
+# A cell that fails must not take the run with it.
+#
+# `set -e` plus a non-zero return from `cell` killed a 12-cell run after cell 6, silently and
+# with no message in the output -- so the surviving file looked like a complete set of c=1
+# results rather than like half a run. Reporting the cell and continuing is what a reader
+# needs: the missing row is visible, and the rows that did measure are still worth having.
+run_cell() {
+  if ! cell "$@"; then
+    echo "$1 c=$7: cell failed to run (see stderr above); continuing" | tee -a "$RESULT"
+  fi
+  return 0
+}
+
 echo "scenarios (overhead = through - direct, both p50 ms)" | tee -a "$RESULT"
 echo | tee -a "$RESULT"
 
 for concurrency in 1 8; do
   # S1: pure proxy, no translation.
-  cell "S1-proxy-nonstream" 1 "$MODEL_OPENAI" "openai.json" \
+  run_cell "S1-proxy-nonstream" 1 "$MODEL_OPENAI" "openai.json" \
     "/v1/chat/completions" "/v1/chat/completions" "$concurrency" json
   # S2: OpenAI client, Claude provider, non-streaming.
-  cell "S2-translate-nonstream" 1 "$MODEL_CLAUDE" "openai.json" \
+  run_cell "S2-translate-nonstream" 1 "$MODEL_CLAUDE" "openai.json" \
     "/v1/chat/completions" "/v1/messages" "$concurrency" json
   # S3: streamed, no translation.
-  cell "S3-proxy-stream-200" 200 "$MODEL_OPENAI" "openai-stream.json" \
+  run_cell "S3-proxy-stream-200" 200 "$MODEL_OPENAI" "openai-stream.json" \
     "/v1/chat/completions" "/v1/chat/completions" "$concurrency" stream
   # S4: streamed, translated.
-  cell "S4-translate-stream-200" 200 "$MODEL_CLAUDE" "openai-stream.json" \
+  run_cell "S4-translate-stream-200" 200 "$MODEL_CLAUDE" "openai-stream.json" \
     "/v1/chat/completions" "/v1/messages" "$concurrency" stream
   # S5: the headline. What a coding agent produces all day.
-  cell "S5-translate-stream-2000" 2000 "$MODEL_CLAUDE" "openai-stream.json" \
+  run_cell "S5-translate-stream-2000" 2000 "$MODEL_CLAUDE" "openai-stream.json" \
     "/v1/chat/completions" "/v1/messages" "$concurrency" stream
   # S6: S2 with the translation removed and nothing else changed. S2 - S6 is the
   # translation cost in situ, which the micro-benchmarks independently predict.
-  cell "S6-claude-native-nonstream" 1 "$MODEL_CLAUDE" "claude.json" \
+  run_cell "S6-claude-native-nonstream" 1 "$MODEL_CLAUDE" "claude.json" \
     "/v1/messages" "/v1/messages" "$concurrency" json
 done
 

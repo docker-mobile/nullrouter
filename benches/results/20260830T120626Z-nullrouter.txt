@@ -19,3 +19,6 @@ S3-proxy-stream-200          c=1   through=40.262    direct=25.270    overhead=1
   S3-proxy-stream-200        c=1   keep-alive=40.262    none=40.649    ratio=0.99
 S4-translate-stream-200      c=1   through=42.038    direct=25.287    overhead=16.781 ms  [15.512..17.392 over 3 trials]
   S4-translate-stream-200    c=1   keep-alive=42.038    none=41.098    ratio=1.02
+S5-translate-stream-2000     c=1   through=75.874    direct=25.393    overhead=50.505 ms  [47.234..52.137 over 3 trials]
+  S5-translate-stream-2000   c=1   keep-alive=75.874    none=74.134    ratio=1.02
+S6-claude-native-nonstream   c=1   through=40.767    direct=25.233    overhead=15.556 ms  [14.793..15.697 over 3 trials]

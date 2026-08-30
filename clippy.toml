@@ -5,7 +5,7 @@ too-many-lines-threshold = 100
 msrv = "1.88"
 # Product names that appear as prose in docs, not as code identifiers.
 # `..` keeps clippy's own default list.
-doc-valid-idents = ["OpenAI", "OpenAPI", ".."]
+doc-valid-idents = ["OpenAI", "OpenAPI", "OpenRouter", "OpenCode", "MiniMax", ".."]
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true

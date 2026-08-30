@@ -95,6 +95,12 @@ pub(crate) fn configure(config: &mut web::ServiceConfig) {
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         )
         .service(
+            web::resource("/internal/v1/translator-log")
+                .route(web::get().to(get_translator_log))
+                .route(web::post().to(save_translator_log))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
             web::resource("/internal/v1/auth-settings")
                 .route(web::get().to(auth_settings))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
@@ -580,6 +586,51 @@ fn now_millis() -> u64 {
 
 /// Everything the runtime needs to resolve a model string, in one call:
 /// combos and the settings that affect routing.
+/// One saved translator inspector pane.
+#[derive(Debug, Deserialize)]
+struct TranslatorLogQuery {
+    file: String,
+}
+
+/// A pane to save.
+#[derive(Debug, Deserialize)]
+struct SaveTranslatorLog {
+    file: String,
+    content: String,
+}
+
+/// Read back a saved inspector pane.
+///
+/// The allowed file names are validated by `nullrouter-api`, which owns that list, so this
+/// route treats the key as opaque. It is reachable only under `/internal/*`, which the
+/// gateway refuses, and a key that was never written simply reads as absent.
+async fn get_translator_log(
+    store: web::Data<StateStore>,
+    query: web::Query<TranslatorLogQuery>,
+) -> HttpResponse {
+    match store.translator_log(&query.file) {
+        Ok(Some(content)) => responses::json(
+            StatusCode::OK,
+            &json!({ "success": true, "content": content }),
+        ),
+        Ok(None) => responses::json(
+            StatusCode::NOT_FOUND,
+            &json!({ "success": false, "error": "File not found" }),
+        ),
+        Err(_) => internal_error(),
+    }
+}
+
+async fn save_translator_log(
+    store: web::Data<StateStore>,
+    body: web::Json<SaveTranslatorLog>,
+) -> HttpResponse {
+    match store.save_translator_log(&body.file, &body.content) {
+        Ok(()) => responses::json(StatusCode::OK, &json!({ "success": true })),
+        Err(_) => internal_error(),
+    }
+}
+
 /// Credentials for the connections whose model list can only be learned by asking
 /// the provider.
 ///

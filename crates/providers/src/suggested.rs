@@ -1,6 +1,6 @@
 //! Filtering a provider's published model catalogue down to the useful subset.
 //!
-//! Ports `src/app/api/providers/suggested-models/filters.js`. A gateway like OpenRouter
+//! Ports upstream `src/app/api/providers/suggested-models/filters.js`. A gateway like OpenRouter
 //! serves hundreds of models; the dashboard's "suggested" list is the handful worth
 //! offering, and each provider's definition of that differs.
 //!

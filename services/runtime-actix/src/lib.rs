@@ -2,6 +2,7 @@ mod combo;
 mod errors;
 mod fusion;
 mod handlers;
+mod inspector;
 mod models;
 mod pipeline;
 mod pxpipe;

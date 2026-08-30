@@ -806,17 +806,13 @@ impl Runtime {
 
     /// Build the OpenAI-compatible model list for the requested service kinds.
     ///
-    /// Backed by the registry and the caller's configured connections, so
-    /// `/v1/models` reflects what is actually reachable.
-    pub(crate) async fn models_list(&self, kinds: &[&str]) -> Value {
-        self.models_list_with(kinds, true).await
-    }
-
-    /// The model list, with probing optionally suppressed.
+    /// Backed by the registry, the caller's configured connections, and — for a compatible
+    /// provider with no configured model list — the provider's own `/models`, so `/v1/models`
+    /// reflects what is actually reachable.
     ///
-    /// `probe: false` is for a request carrying another router's probe header: answering
-    /// from configuration alone is what stops two routers pointed at each other from
-    /// probing back and forth on every call.
+    /// `probe: false` is for a request carrying another router's probe header: answering from
+    /// configuration alone is what stops two routers pointed at each other from probing back
+    /// and forth on every call.
     pub(crate) async fn models_list_with(&self, kinds: &[&str], probe: bool) -> Value {
         let context = self.state.routing_context().await;
         let probed = if probe {
@@ -1215,6 +1211,57 @@ impl Runtime {
             strategy: ComboStrategy::Fallback,
             tuning: fusion::FusionTuning::default(),
         }
+    }
+
+    /// Resolve a client model string for the translator inspector.
+    ///
+    /// Deliberately the *same* `resolve_targets` the live path uses, rather than a lookup of
+    /// its own: an inspector that resolved models differently from the request path would
+    /// show a translation nobody is actually performing, which is worse than showing nothing.
+    pub(crate) async fn inspector_target(&self, requested: &str) -> Option<model::ModelTarget> {
+        self.resolve_targets(requested)
+            .await
+            .targets
+            .into_iter()
+            .next()
+    }
+
+    /// The outbound URL and headers a dispatch would use, with credentials redacted.
+    ///
+    /// `None` when no active connection exists, which the inspector reports as such — that is
+    /// itself the answer to "why is my request not going anywhere".
+    pub(crate) async fn inspector_wire(
+        &self,
+        provider: &str,
+        model: &str,
+        dispatch: Format,
+    ) -> Option<crate::inspector::InspectorWire> {
+        let selection = self
+            .state
+            .select_credentials(provider, Some(model), &[])
+            .await;
+        let Selection::Selected(credentials) = selection else {
+            return None;
+        };
+        let mut credentials = *credentials;
+        // The inspector is asked about a specific dispatch format, which is what decides the
+        // transport for a multi-transport provider — and therefore the URL and the auth
+        // header. Setting it here makes the panes agree with what the live path would send.
+        credentials.runtime_format = Some(dispatch);
+
+        let url = nullrouter_execute::credentials::build_url(provider, &credentials, 0)?;
+        let headers = nullrouter_execute::credentials::build_headers(provider, &credentials, false)
+            .into_iter()
+            .map(|(name, value)| {
+                let shown = if crate::inspector::is_secret_header(&name) {
+                    crate::inspector::redact(&value)
+                } else {
+                    value
+                };
+                (name, shown)
+            })
+            .collect();
+        Some(crate::inspector::InspectorWire { url, headers })
     }
 
     /// Resolve a user-defined provider-node prefix to the connection's provider id

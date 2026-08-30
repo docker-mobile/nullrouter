@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// Default loopback address of `nullrouter-state`.
 const DEFAULT_STATE_ADDR: &str = "127.0.0.1:20134";
@@ -153,6 +153,23 @@ impl RuntimeClient {
         format!("{}/internal/pxpipe/{action}", self.base)
     }
 
+    /// `POST /internal/translator/step` on the runtime.
+    ///
+    /// Proxied for the same reason as pxpipe: the work needs something this service does not
+    /// have. Every inspector step needs either the connection store's node prefixes or the
+    /// credentials that decide a URL and its auth header, and a second copy of either here
+    /// would be a second thing to drift — an inspector showing a translation the live path
+    /// does not perform is worse than no inspector.
+    pub(crate) async fn translator_step(&self, body: &[u8]) -> Option<ForwardedResponse> {
+        self.relay(
+            self.client
+                .post(format!("{}/internal/translator/step", self.base))
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.to_vec()),
+        )
+        .await
+    }
+
     /// Send one request and capture the reply verbatim.
     ///
     /// The upstream status is preserved rather than normalised: the runtime answers
@@ -230,6 +247,54 @@ impl StateClient {
         let addr = std::env::var("NULLROUTER_STATE_ADDR")
             .unwrap_or_else(|_| DEFAULT_STATE_ADDR.to_owned());
         Self::new(&addr)
+    }
+
+    /// Read a saved translator inspector pane.
+    ///
+    /// `Ok(None)` for a pane that was never written; `Err(())` when state is unreachable.
+    /// Distinguished because "you have not run this step yet" and "your state service is
+    /// down" are different things for a user to do something about.
+    pub(crate) async fn translator_log(&self, file: &str) -> Result<Option<String>, ()> {
+        let url = format!("{}/internal/v1/translator-log", self.base);
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("file", file)])
+            .send()
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "state unreachable reading a translator log");
+            })?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            return Err(());
+        }
+        let body: Value = response.json().await.map_err(|_| ())?;
+        Ok(body
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::to_owned))
+    }
+
+    /// Save a translator inspector pane.
+    pub(crate) async fn save_translator_log(&self, file: &str, content: &str) -> Result<(), ()> {
+        let url = format!("{}/internal/v1/translator-log", self.base);
+        let response = self
+            .client
+            .post(&url)
+            .json(&json!({ "file": file, "content": content }))
+            .send()
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "state unreachable saving a translator log");
+            })?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     /// Client for an explicit `host:port`.
