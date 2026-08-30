@@ -33,7 +33,22 @@ pub struct StateStore {
 struct StoreInner {
     path: Option<PathBuf>,
     snapshot: RwLock<StateSnapshot>,
+    /// Set when the in-memory snapshot has changes not yet on disk.
+    ///
+    /// Every mutation used to serialise and write the whole state file inline — 490KB of JSON,
+    /// twice per request, because round-robin credential selection advances a cursor and usage
+    /// recording appends a row. Neither is worth a synchronous disk write on the request path.
+    ///
+    /// What is given up: a crash loses at most [`FLUSH_INTERVAL`] of writes. For the two hot
+    /// mutations that is a round-robin cursor position (worthless) and usage rows (best-effort by
+    /// construction — the runtime already logs and moves on when recording fails). Anything a user
+    /// initiates, such as saving a connection, is flushed immediately by
+    /// [`write_snapshot_durable`](StateStore::write_snapshot_durable).
+    dirty: std::sync::atomic::AtomicBool,
 }
+
+/// How often the background flush writes a dirty snapshot to disk.
+pub const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,9 +57,11 @@ pub(crate) struct StateSnapshot {
     pub(crate) provider_connections: Vec<ProviderConnection>,
     #[serde(default)]
     pub(crate) provider_nodes: Vec<ProviderNode>,
-    combos: Vec<Combo>,
+    // `pub(crate)` so `with_snapshot` callers can project these without a clone. They were private
+    // when every reader went through an accessor that cloned the whole snapshot.
+    pub(crate) combos: Vec<Combo>,
     proxy_pools: Vec<ProxyPool>,
-    settings: Settings,
+    pub(crate) settings: Settings,
     #[serde(default)]
     pub(crate) usage: crate::usage::UsageLog,
     /// The translator inspector's saved panes, keyed by upstream's file name.
@@ -544,30 +561,38 @@ impl StateStore {
             inner: Arc::new(StoreInner {
                 path,
                 snapshot: RwLock::new(snapshot),
+                dirty: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
 
     pub(crate) fn health(&self) -> Result<serde_json::Value, StoreError> {
-        let snapshot = self.read_snapshot()?;
-        Ok(serde_json::json!({
-            "ok": true,
-            "service": crate::SERVICE_NAME,
-            "keys": snapshot.api_keys.len(),
-            "connections": snapshot.provider_connections.len(),
-            "providerNodes": snapshot.provider_nodes.len(),
-            "combos": snapshot.combos.len(),
-            "proxyPools": snapshot.proxy_pools.len(),
-        }))
+        // Counts only, so there is no reason to clone anything: `/health` is polled by supervisors
+        // and was cloning the entire state, usage log included, to report six integers.
+        self.with_snapshot(|snapshot| {
+            serde_json::json!({
+                "ok": true,
+                "service": crate::SERVICE_NAME,
+                "keys": snapshot.api_keys.len(),
+                "connections": snapshot.provider_connections.len(),
+                "providerNodes": snapshot.provider_nodes.len(),
+                "combos": snapshot.combos.len(),
+                "proxyPools": snapshot.proxy_pools.len(),
+            })
+        })
     }
 
     pub(crate) fn list_connections(&self) -> Result<Vec<ProviderConnection>, StoreError> {
-        let mut connections = self.read_snapshot()?.provider_connections;
+        let mut connections = self.with_snapshot(|snapshot| {
+            snapshot
+                .provider_connections
+                .iter()
+                .cloned()
+                .map(ProviderConnection::public)
+                .collect::<Vec<_>>()
+        })?;
         connections.sort_by_key(|connection| connection.priority);
-        Ok(connections
-            .into_iter()
-            .map(ProviderConnection::public)
-            .collect())
+        Ok(connections)
     }
 
     /// One saved translator pane, if it has been written.
@@ -611,12 +636,18 @@ impl StateStore {
     pub(crate) fn list_connections_with_secrets(
         &self,
     ) -> Result<Vec<ProviderConnection>, StoreError> {
-        let mut connections = self.read_snapshot()?.provider_connections;
+        // Filter under the lock so only the active connections are cloned, and the usage log is
+        // not cloned at all.
+        let mut connections = self.with_snapshot(|snapshot| {
+            snapshot
+                .provider_connections
+                .iter()
+                .filter(|connection| connection.is_active)
+                .cloned()
+                .collect::<Vec<_>>()
+        })?;
         connections.sort_by_key(|connection| connection.priority);
-        Ok(connections
-            .into_iter()
-            .filter(|connection| connection.is_active)
-            .collect())
+        Ok(connections)
     }
 
     pub(crate) fn get_connection(
@@ -751,15 +782,13 @@ impl StateStore {
     }
 
     pub(crate) fn list_combos(&self) -> Result<Vec<Combo>, StoreError> {
-        Ok(self.read_snapshot()?.combos)
+        self.with_snapshot(|snapshot| snapshot.combos.clone())
     }
 
     pub(crate) fn get_combo(&self, id: &str) -> Result<Option<Combo>, StoreError> {
-        Ok(self
-            .read_snapshot()?
-            .combos
-            .into_iter()
-            .find(|combo| combo.id == id))
+        self.with_snapshot(|snapshot| {
+            snapshot.combos.iter().find(|combo| combo.id == id).cloned()
+        })
     }
 
     pub(crate) fn combo_name_exists(
@@ -926,7 +955,9 @@ impl StateStore {
     }
 
     pub(crate) fn settings(&self) -> Result<Settings, StoreError> {
-        Ok(self.read_snapshot()?.settings)
+        // Projected, not cloned-then-discarded: this is on the credential-selection path, which is
+        // on the request path, and the full snapshot carries a 350KB usage log.
+        self.with_snapshot(|snapshot| snapshot.settings.clone())
     }
 
     /// Apply a settings patch.
@@ -1016,7 +1047,7 @@ impl StateStore {
         let now_ms = now_millis();
         // Selection mutates lastUsedAt for round-robin, so it takes the write
         // lock: two concurrent requests must not pick the same sticky slot.
-        self.write_snapshot(|snapshot| {
+        self.write_snapshot_deferred(|snapshot| {
             let matching: Vec<usize> = snapshot
                 .provider_connections
                 .iter()
@@ -1180,7 +1211,7 @@ impl StateStore {
         update: &MarkUnavailableRequest<'_>,
     ) -> Result<bool, StoreError> {
         let now_ms = now_millis();
-        self.write_snapshot(|snapshot| {
+        self.write_snapshot_deferred(|snapshot| {
             let Some(connection) = snapshot
                 .provider_connections
                 .iter_mut()
@@ -1215,7 +1246,7 @@ impl StateStore {
         model: Option<&str>,
     ) -> Result<bool, StoreError> {
         let now_ms = now_millis();
-        self.write_snapshot(|snapshot| {
+        self.write_snapshot_deferred(|snapshot| {
             let Some(connection) = snapshot
                 .provider_connections
                 .iter_mut()
@@ -1372,7 +1403,7 @@ impl StateStore {
         input: crate::usage::UsageInput,
     ) -> Result<crate::usage::UsageRecord, StoreError> {
         let now_ms = now_millis();
-        self.write_snapshot(|snapshot| snapshot.usage.record(input, now_ms))
+        self.write_snapshot_deferred(|snapshot| snapshot.usage.record(input, now_ms))
     }
 
     /// Aggregate usage stats.
@@ -1450,6 +1481,32 @@ impl StateStore {
             .map(|snapshot| snapshot.clone())
     }
 
+    /// Read part of the snapshot under the lock, without cloning the whole thing.
+    ///
+    /// [`read_snapshot`](Self::read_snapshot) clones every field, and the usage log alone is 350KB
+    /// at its 1000-record cap — so a handler wanting only `settings` paid for the log, the API
+    /// keys and the translator panes as well. `/internal/v1/routing-context` called three such
+    /// accessors and so cloned the entire state three times per request, discarding ~1MB of it
+    /// untouched. That was most of the endpoint's 1.7ms.
+    ///
+    /// The closure runs while the read lock is held, so it must not block or take another state
+    /// lock. Projecting the fields it needs and returning owned data is the intended use.
+    pub(crate) fn with_snapshot<T>(
+        &self,
+        project: impl FnOnce(&StateSnapshot) -> T,
+    ) -> Result<T, StoreError> {
+        self.inner
+            .snapshot
+            .read()
+            .map_err(|_| StoreError::Poisoned)
+            .map(|snapshot| project(&snapshot))
+    }
+
+    /// Mutate the snapshot and write it to disk before returning.
+    ///
+    /// For anything a user initiated: they pressed save, so the write must survive a crash a
+    /// moment later. Costs a 490KB serialise-and-write, which is why the hot paths use
+    /// [`write_snapshot`](Self::write_snapshot) instead.
     pub(crate) fn write_snapshot<T>(
         &self,
         mutate: impl FnOnce(&mut StateSnapshot) -> T,
@@ -1464,7 +1521,61 @@ impl StateStore {
             (result, snapshot.clone())
         };
         self.persist(&snapshot)?;
+        // Anything the background flush was going to write is now on disk.
+        self.inner
+            .dirty
+            .store(false, std::sync::atomic::Ordering::Release);
         Ok(result)
+    }
+
+    /// Mutate the snapshot and leave the disk write to the background flush.
+    ///
+    /// The in-memory snapshot is the source of truth for reads, so a caller sees its own write
+    /// immediately; only durability is deferred. See the `dirty` field for what that costs.
+    pub(crate) fn write_snapshot_deferred<T>(
+        &self,
+        mutate: impl FnOnce(&mut StateSnapshot) -> T,
+    ) -> Result<T, StoreError> {
+        let result = {
+            let mut snapshot = self
+                .inner
+                .snapshot
+                .write()
+                .map_err(|_| StoreError::Poisoned)?;
+            mutate(&mut snapshot)
+        };
+        self.inner
+            .dirty
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(result)
+    }
+
+    /// Write the snapshot to disk if it has unflushed changes.
+    ///
+    /// Returns whether a write happened, so the flush task and the tests can tell the difference
+    /// between "nothing to do" and "written".
+    pub fn flush_if_dirty(&self) -> Result<bool, StoreError> {
+        // Cleared before the write, not after: a mutation landing during the write sets it again,
+        // so the next tick picks that up. Clearing afterwards could drop it.
+        if !self
+            .inner
+            .dirty
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            return Ok(false);
+        }
+        let snapshot = self.read_snapshot()?;
+        match self.persist(&snapshot) {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                // Put the flag back so the failure is retried rather than silently dropping the
+                // only copy of these changes.
+                self.inner
+                    .dirty
+                    .store(true, std::sync::atomic::Ordering::Release);
+                Err(error)
+            }
+        }
     }
 
     fn persist(&self, snapshot: &StateSnapshot) -> Result<(), StoreError> {

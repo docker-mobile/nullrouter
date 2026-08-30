@@ -1786,7 +1786,17 @@ impl Runtime {
             latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             error,
         };
-        self.state.record_usage(&report).await;
+        // Spawned rather than awaited. The caller is holding a finished response, and the client
+        // was waiting on this round trip — ~1.7ms of the router's overhead spent after the answer
+        // already existed. Usage is best-effort by construction (`record_usage` logs and moves on),
+        // so nothing downstream reads its result.
+        //
+        // On the runtime's own runtime, so it is cancelled if the service stops; a record lost to
+        // shutdown is the same outcome the previous `await` had if state was unreachable.
+        let state = self.state.clone();
+        actix_web::rt::spawn(async move {
+            state.record_usage(&report).await;
+        });
     }
 }
 

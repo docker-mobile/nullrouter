@@ -25,6 +25,8 @@ serde_json.workspace = true
 sha2 = "0.10"
 subtle = "2"
 thiserror.workspace = true
+# A failed background flush means state is silently not being saved, which needs to be sayable.
+tracing.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true

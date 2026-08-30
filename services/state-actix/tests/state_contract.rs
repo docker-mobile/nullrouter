@@ -263,6 +263,84 @@ async fn file_store_reloads_state_across_service_instances() -> TestResult {
     Ok(())
 }
 
+#[actix_rt::test]
+async fn a_user_initiated_write_is_on_disk_before_the_response_returns() -> TestResult {
+    // The durability line. Creating a key is something a user pressed a button for, so it must
+    // survive a crash immediately afterwards — no flush tick in between. The hot-path mutations
+    // (round-robin cursor, usage rows) deliberately do not have this property; see
+    // `StoreInner::dirty`.
+    let tempdir = tempfile::tempdir()?;
+    let state_file = tempdir.path().join("state.json");
+    let store = StateStore::file(&state_file)?;
+
+    let (status, _) = request_json(
+        store.clone(),
+        Method::POST,
+        "/api/keys",
+        r#"{"name":"durable"}"#,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Read the file directly, without flushing and without going through the store.
+    let on_disk = std::fs::read_to_string(&state_file)?;
+    assert!(
+        on_disk.contains("durable"),
+        "a user-initiated write must be persisted before the response, got {} bytes",
+        on_disk.len()
+    );
+    // And nothing is left pending, so the next flush tick has no work.
+    assert!(
+        !store.flush_if_dirty()?,
+        "a durable write should leave the snapshot clean"
+    );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn usage_records_reach_disk_on_flush_rather_than_on_write() -> TestResult {
+    // The other side of the same line: recording usage must not pay a 490KB disk write on the
+    // request path, but it must not be lost either. So it is in memory immediately and on disk
+    // after a flush.
+    let tempdir = tempfile::tempdir()?;
+    let state_file = tempdir.path().join("state.json");
+    let store = StateStore::file(&state_file)?;
+
+    let (status, _) = request_json(
+        store.clone(),
+        Method::POST,
+        "/internal/v1/usage",
+        r#"{"provider":"openai","model":"gpt-5","status":"success","promptTokens":1,
+            "completionTokens":2,"cachedTokens":0,"latencyMs":3}"#,
+    )
+    .await?;
+    assert!(
+        status.is_success(),
+        "recording usage should succeed, got {status}"
+    );
+
+    // Visible to readers straight away: the in-memory snapshot is the source of truth.
+    let (stats_status, stats) = get_json(store.clone(), "/internal/v1/usage/stats").await?;
+    assert_eq!(stats_status, StatusCode::OK);
+    assert_ne!(
+        field(&stats, "totalRequests")?,
+        &serde_json::json!(0),
+        "the record should be readable immediately: {stats}"
+    );
+
+    // Not yet on disk, and then it is.
+    assert!(
+        store.flush_if_dirty()?,
+        "a deferred write should leave the snapshot dirty for the flush"
+    );
+    let on_disk = std::fs::read_to_string(&state_file)?;
+    assert!(on_disk.contains("gpt-5"), "flush should have written the record");
+
+    // Flushing again is a no-op rather than a second write.
+    assert!(!store.flush_if_dirty()?, "nothing should be left to flush");
+    Ok(())
+}
+
 fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
     Box::new(std::io::Error::other(message.into()))
 }

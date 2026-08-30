@@ -7,7 +7,7 @@ mod routes;
 mod store;
 mod usage;
 
-pub use store::{ProviderConnection, StateStore, StoreError};
+pub use store::{FLUSH_INTERVAL, ProviderConnection, StateStore, StoreError};
 
 pub const SERVICE_NAME: &str = "nullrouter-state";
 pub const DEFAULT_HOST: &str = "127.0.0.1";

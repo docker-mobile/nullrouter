@@ -8,14 +8,41 @@ async fn main() -> std::io::Result<()> {
     let server = ServerConfig::from_env();
     let store = build_store(server.state_file.as_ref())?;
 
-    HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(store.clone()))
-            .configure(configure)
+    // The two hottest mutations — advancing the round-robin cursor and appending a usage row —
+    // defer their disk write, so something has to perform it. See `StoreInner::dirty`.
+    let flusher = store.clone();
+    let flush_task = actix_web::rt::spawn(async move {
+        let mut ticker = actix_web::rt::time::interval(nullrouter_state::FLUSH_INTERVAL);
+        loop {
+            ticker.tick().await;
+            if let Err(error) = flusher.flush_if_dirty() {
+                // Logged rather than fatal: the flag is put back, so the next tick retries. A
+                // permanently unwritable state file will say so once per tick, which is the
+                // intended noise level for "your state is not being saved".
+                tracing::error!(%error, "could not flush state to disk");
+            }
+        }
+    });
+
+    let running = HttpServer::new({
+        let store = store.clone();
+        move || {
+            App::new()
+                .app_data(web::Data::new(store.clone()))
+                .configure(configure)
+        }
     })
     .bind((server.host.as_str(), server.port))?
     .run()
-    .await
+    .await;
+
+    // Stop ticking, then write whatever the last tick did not: a clean shutdown must not lose the
+    // usage rows recorded in its final 250ms.
+    flush_task.abort();
+    if let Err(error) = store.flush_if_dirty() {
+        tracing::error!(%error, "could not flush state to disk on shutdown");
+    }
+    running
 }
 
 #[derive(Debug)]

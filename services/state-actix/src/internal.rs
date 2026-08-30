@@ -671,14 +671,18 @@ async fn probe_targets(store: web::Data<StateStore>) -> HttpResponse {
     responses::json(StatusCode::OK, &json!({ "targets": targets }))
 }
 
+/// Routing inputs for the runtime: combos, active connections, routing settings.
+///
+/// The hottest read in the system — the runtime asks for it on the request path — so it takes the
+/// state lock once and projects out what it needs. It used to call three accessors that each
+/// cloned the whole snapshot, which meant cloning the 350KB usage log three times per request and
+/// reading none of it. See [`StateStore::with_snapshot`].
 async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
-    let Ok(settings) = store.settings() else {
-        return internal_error();
-    };
-    let combos: Vec<serde_json::Value> = store
-        .list_combos()
-        .unwrap_or_default()
-        .into_iter()
+    let Ok(body) = store.with_snapshot(|snapshot| {
+    let settings = &snapshot.settings;
+    let combos: Vec<serde_json::Value> = snapshot
+        .combos
+        .iter()
         .map(|combo| {
             json!({
                 "id": combo.id,
@@ -690,17 +694,16 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
         .collect();
 
     // Only active connections, and only their non-secret routing fields.
-    let connections: Vec<serde_json::Value> = store
-        .list_connections()
-        .unwrap_or_default()
-        .into_iter()
+    let connections: Vec<serde_json::Value> = snapshot
+        .provider_connections
+        .iter()
         .filter(|connection| connection.is_active)
         .map(|connection| {
-            let settings = connection.provider_specific_data.unwrap_or_default();
+            let extra = connection.provider_specific_data.clone().unwrap_or_default();
             json!({
                 "provider": connection.provider,
-                "prefix": settings.get("prefix").and_then(serde_json::Value::as_str),
-                "enabledModels": settings
+                "prefix": extra.get("prefix").and_then(serde_json::Value::as_str),
+                "enabledModels": extra
                     .get("enabledModels")
                     .and_then(serde_json::Value::as_array)
                     .map(|models| {
@@ -714,9 +717,7 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
         })
         .collect();
 
-    responses::json(
-        StatusCode::OK,
-        &json!({
+        json!({
             "combos": combos,
             "connections": connections,
             "settings": {
@@ -730,8 +731,11 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
                 "pxpipeTimeoutMs": settings.pxpipe_timeout_ms,
                 "comboStrategies": settings.combo_strategies,
             },
-        }),
-    )
+        })
+    }) else {
+        return internal_error();
+    };
+    responses::json(StatusCode::OK, &body)
 }
 
 /// The dashboard SSO configuration, **including secrets**, for

@@ -67,13 +67,21 @@ impl StateStore {
         secret: &str,
     ) -> Result<ValidateApiKeyResponse, StoreError> {
         let candidate = digest_secret(secret);
-        let snapshot = self.read_snapshot()?;
-        let mut matched = None;
-        for key in snapshot.api_keys {
-            if key.matches_digest(&candidate) {
-                matched = Some((key.id, key.is_active));
+        // Projected rather than cloned: this runs on every request when `requireApiKey` is on, and
+        // the full snapshot carries a 350KB usage log this has no use for.
+        //
+        // The loop still visits every key after a match instead of breaking early. That is
+        // deliberate — an early exit makes the response time depend on the matched key's position,
+        // which leaks it — and it is why the match is recorded rather than returned.
+        let matched = self.with_snapshot(|snapshot| {
+            let mut matched = None;
+            for key in &snapshot.api_keys {
+                if key.matches_digest(&candidate) {
+                    matched = Some((key.id.clone(), key.is_active));
+                }
             }
-        }
+            matched
+        })?;
         Ok(match matched {
             Some((key_id, active)) => ValidateApiKeyResponse {
                 valid: true,
