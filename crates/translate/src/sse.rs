@@ -243,16 +243,65 @@ mod tests {
     fn the_same_bytes_split_differently_yield_the_same_lines() {
         // Chunk boundaries are the network's business, not the caller's, so the line sequence must
         // not depend on them. This is the invariant the buffer exists to provide, and the one an
-        // off-by-one in the new offset arithmetic would break.
-        let source = "data: one\n\ndata: two\r\ndata: [DONE]\n";
+        // off-by-one in the offset arithmetic would break.
+        //
+        // Multi-byte content on purpose: the rewrite works in byte offsets and ends with
+        // `drain(..start)`, which panics if `start` is not a char boundary. It cannot be — `start`
+        // is always one past a `\n`, which is single-byte — but that invariant is worth a test
+        // rather than a comment, and provider content is full of non-ASCII.
+        let source = "data: {\"t\":\"héllo→世界\"}\n\ndata: {\"t\":\"ünïcodé\"}\r\ndata: [DONE]\n";
         let whole = LineBuffer::new().push(source);
+        assert_eq!(whole.len(), 4, "sanity: three frames and the blank line");
 
         for split in 1..source.len() {
+            // A split mid-character is not something a UTF-8 `&str` can express, so those indices
+            // are skipped; `push` takes `&str`, and a chunk arriving mid-character is the byte
+            // layer's problem, handled before this point.
+            if !source.is_char_boundary(split) {
+                continue;
+            }
             let mut buffer = LineBuffer::new();
             let mut lines = buffer.push(source.get(..split).unwrap_or_default());
             lines.extend(buffer.push(source.get(split..).unwrap_or_default()));
             assert_eq!(lines, whole, "split at {split} changed the line sequence");
         }
+    }
+
+    #[test]
+    fn a_crlf_straddling_two_chunks_still_yields_one_clean_line() {
+        // The classic off-by-one: `\r` ends one chunk and `\n` starts the next. The `\r` must not
+        // survive into the line, and the line must not be emitted early.
+        let mut buffer = LineBuffer::new();
+        assert!(
+            buffer.push("data: one\r").is_empty(),
+            "a line ending in a bare \\r is not yet terminated"
+        );
+        assert_eq!(buffer.push("\ndata: two\n"), vec!["data: one", "data: two"]);
+    }
+
+    #[test]
+    fn a_carriage_return_inside_a_line_is_left_alone() {
+        // Only a `\r` immediately before `\n` is a line ending. One in the middle is content, and
+        // stripping it would corrupt a payload.
+        let mut buffer = LineBuffer::new();
+        assert_eq!(buffer.push("a\rb\n"), vec!["a\rb"]);
+        // And a `\r` that follows a newline belongs to the *next* line.
+        let mut buffer = LineBuffer::new();
+        assert_eq!(buffer.push("a\n\rb\n"), vec!["a", "\rb"]);
+    }
+
+    #[test]
+    fn one_character_at_a_time_matches_one_chunk() {
+        // The worst chunking a network can produce.
+        let source = "data: {\"t\":\"世界\"}\ndata: [DONE]\n";
+        let whole = LineBuffer::new().push(source);
+        let mut buffer = LineBuffer::new();
+        let mut lines = Vec::new();
+        for character in source.chars() {
+            lines.extend(buffer.push(&character.to_string()));
+        }
+        assert_eq!(lines, whole);
+        assert!(buffer.is_empty());
     }
 
     #[test]
