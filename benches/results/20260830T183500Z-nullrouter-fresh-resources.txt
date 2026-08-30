@@ -1,0 +1,37 @@
+label: nullrouter-fresh
+date: 2026-08-30T18:35:01Z
+ports: 20128,20129,20130,20131,20132,20133,20134,20135
+processes: 8
+  2571318 nullrouter-gate
+  2571228 nullrouter-api
+  2571296 nullrouter-dash
+  2571246 nullrouter-cata
+  2571222 nullrouter-runt
+  2571236 nullrouter-even
+  2571196 nullrouter-stat
+  2571267 nullrouter-auth
+window: 15s at 0.1s
+
+per-process (peak RSS, CPU-seconds over the window)
+  nullrouter-gate (2571318)         6.9 MiB    0.01 s
+  nullrouter-api (2571228)         23.2 MiB    0.03 s
+  nullrouter-dash (2571296)        16.0 MiB    0.02 s
+  nullrouter-cata (2571246)         4.6 MiB    0.03 s
+  nullrouter-runt (2571222)        18.6 MiB    0.02 s
+  nullrouter-even (2571236)        16.1 MiB    0.03 s
+  nullrouter-stat (2571196)        17.7 MiB    0.03 s
+  nullrouter-auth (2571267)         5.7 MiB    0.02 s
+
+processes:          8
+samples:            113
+steady-state RSS:   108.8 MiB (median of summed samples)
+peak RSS:           108.8 MiB (sum of per-process peaks)
+CPU-seconds:        0.19 over 15s
+
+Note: peak RSS sums each process's own peak, which slightly overstates a true
+simultaneous peak -- the peaks need not coincide. Stated rather than smoothed,
+because the alternative is sampling the sum and missing short spikes entirely.
+
+To make CPU comparable across routers, divide by the request count the load tool
+reported for the same window: CPU-seconds per 1000 requests is the honest
+efficiency figure. Instantaneous CPU%% is not, and neither is this number alone.
