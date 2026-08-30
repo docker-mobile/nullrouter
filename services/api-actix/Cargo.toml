@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 actix-web.workspace = true
+futures-util.workspace = true
 nullrouter-contracts.workspace = true
 nullrouter-providers.workspace = true
 nullrouter-pxpipe.workspace = true
@@ -20,12 +21,17 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Codex, jcode, deepseek-tui and grok-build keep TOML configs.
+toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
 actix-rt.workspace = true
+# The lifecycle suite posts to a real `HttpServer` over a socket, because `init_service` cannot
+# exercise a shutdown handle. Integration tests do not inherit `[dependencies]`.
+reqwest.workspace = true
 
 [lints]
 workspace = true

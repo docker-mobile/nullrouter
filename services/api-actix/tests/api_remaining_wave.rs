@@ -70,10 +70,12 @@ fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
 }
 
 #[actix_rt::test]
-async fn cli_tool_routes_return_default_status_json() -> TestResult {
-    // Given: the Actix API does not inspect or modify host CLI configuration.
+async fn cli_tool_routes_report_what_is_actually_on_the_machine() -> TestResult {
+    // This test used to assert `installed: false` for every tool, matching a handler that returned
+    // a fixed struct. That was not a refusal, it was a false claim — on a machine with Claude Code
+    // installed the route said it was not. The handler now looks, so the assertion cannot be a
+    // fixed value either: what must hold is that the report is *coupled to evidence*.
 
-    // When: CLI tool status endpoints are requested.
     let (all_status, all) = get_json("/api/cli-tools/all-statuses").await?;
     let setting_routes = [
         "/api/cli-tools/codex-settings",
@@ -84,19 +86,31 @@ async fn cli_tool_routes_return_default_status_json() -> TestResult {
     ];
     let (mitm_status, mitm) = get_json("/api/cli-tools/antigravity-mitm").await?;
 
-    // Then: each tool is represented as unconfigured JSON instead of a route miss.
     assert_eq!(all_status, StatusCode::OK);
     for tool in ["codex", "claude", "cline", "opencode", "copilot"] {
         let status = field(&all, tool)?;
-        assert_eq!(field(status, "installed")?, false, "{tool}");
-        assert_eq!(field(status, "has9Router")?, false, "{tool}");
+        // `installed` is true exactly when a source was found — a binary on PATH or a config file.
+        let installed = field(status, "installed")?.as_bool().unwrap_or_default();
+        let has_source = status.get("source").is_some();
+        assert_eq!(installed, has_source, "{tool} reported {status}");
+        // A tool with no readable config cannot be pointing at this router.
+        if status.get("settings").is_none_or(serde_json::Value::is_null) {
+            assert_eq!(field(status, "has9Router")?, false, "{tool}");
+        }
+        // And the path inspected is always named, so a user knows where to look.
+        assert!(status.get("configPath").is_some() || !installed, "{tool}");
     }
     for uri in setting_routes {
         let (status, json) = get_json(uri).await?;
         assert_eq!(status, StatusCode::OK, "{uri}");
-        assert_eq!(field(&json, "installed")?, false, "{uri}");
-        assert_eq!(field(&json, "has9Router")?, false, "{uri}");
+        let installed = field(&json, "installed")?.as_bool().unwrap_or_default();
+        assert_eq!(installed, json.get("source").is_some(), "{uri} gave {json}");
+        assert!(json.get("displayName").is_some(), "{uri}");
     }
+    // An unknown tool is a 404 rather than a filesystem lookup on a caller-supplied name.
+    let (unknown_status, _) = get_json("/api/cli-tools/not-a-real-tool").await?;
+    assert_eq!(unknown_status, StatusCode::NOT_FOUND);
+
     assert_eq!(mitm_status, StatusCode::OK);
     assert_eq!(field(&mitm, "running")?, false);
     assert_eq!(field(&mitm, "certTrusted")?, false);
@@ -218,14 +232,25 @@ async fn media_and_settings_routes_return_default_json() -> TestResult {
     assert_eq!(field(&voices, "languages")?, &serde_json::json!([]));
     assert_eq!(provider_voices_status, StatusCode::OK);
     assert_eq!(field(&provider_voices, "voices")?, &serde_json::json!([]));
-    assert_eq!(database_status, StatusCode::OK);
-    assert_eq!(field(&database, "success")?, true);
+    // `GET /api/settings/database` used to answer `success: true` with empty arrays — a file that
+    // looked like a backup, validated like a backup, and contained none of the user's providers or
+    // keys. It now refuses, because a faithful export is every credential in plaintext and the
+    // password re-authentication upstream gates it behind is not ported.
+    assert_eq!(database_status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(field(&database, "success")?, false);
+    assert_eq!(field(&database, "unsupported")?, true);
     // `GET /api/settings/require-login` is deliberately absent: dashboard login is
     // unconditional in nullrouter, so there is no value to report. A 200 here
     // would mean the route came back and is answering with an invented flag.
     assert_eq!(require_login_status, StatusCode::NOT_FOUND);
-    assert_eq!(proxy_test_status, StatusCode::NOT_IMPLEMENTED);
+    // The proxy test really dials now. Nothing is listening on 127.0.0.1:8080 in this suite, so it
+    // reports a failed test — with a 200, because the *test* completed and its result is the body.
+    assert_eq!(proxy_test_status, StatusCode::OK);
     assert_eq!(field(&proxy_test, "ok")?, false);
+    assert!(
+        proxy_test.get("error").is_some(),
+        "a failed dial must say why: {proxy_test}"
+    );
     assert_eq!(malformed_status, StatusCode::BAD_REQUEST);
     assert_eq!(field(&malformed, "error")?, "Invalid JSON body");
     Ok(())
@@ -256,12 +281,16 @@ async fn provider_node_and_shutdown_routes_return_structured_outcomes() -> TestR
     assert_eq!(field(&malformed, "error")?, "Invalid JSON body");
     assert_eq!(node_status, StatusCode::NOT_FOUND);
     assert_eq!(field(&node, "error")?, "Provider node not found");
-    assert_eq!(shutdown_status, StatusCode::NOT_IMPLEMENTED);
+    // The shutdown routes really stop the service now, so with no `NULLROUTER_SHUTDOWN_SECRET`
+    // configured they are disabled outright — 403, not 501. A 501 here would mean the gate had
+    // stopped being a gate. `api_lifecycle.rs` covers the authorised path against a real server.
+    assert_eq!(shutdown_status, StatusCode::FORBIDDEN);
     assert_eq!(field(&shutdown, "success")?, false);
+    assert_eq!(version_shutdown_status, StatusCode::FORBIDDEN);
+    assert_eq!(field(&version_shutdown, "success")?, false);
+    // Self-replacement stays refused: this port does not own its own binary.
     assert_eq!(update_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&update, "success")?, false);
-    assert_eq!(version_shutdown_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&version_shutdown, "success")?, false);
     Ok(())
 }
 

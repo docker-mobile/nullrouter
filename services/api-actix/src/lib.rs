@@ -19,6 +19,7 @@ mod provider_tools;
 mod providers;
 mod proxy_pool_tools;
 mod proxy_pools;
+mod proxy_test;
 mod pxpipe;
 mod responses;
 mod routes;
@@ -28,6 +29,7 @@ mod translator;
 mod tunnel;
 mod usage;
 
+pub use lifecycle::ShutdownHandle;
 pub use routes::configure;
 pub use state_client::{RuntimeClient, StateClient};
 

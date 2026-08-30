@@ -3,38 +3,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{json_body, responses};
 
+mod detect;
 mod mitm;
+mod spec;
 
 const TOOL_UNSUPPORTED: &str = "CLI tool configuration is not supported by nullrouter-api";
 const MCP_UNSUPPORTED: &str = "Cowork MCP discovery is not supported by nullrouter-api";
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToolStatus {
-    installed: bool,
-    has_9_router: bool,
-    config: Option<&'static str>,
-    settings: Option<&'static str>,
-    config_path: Option<&'static str>,
-    message: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-struct AllStatuses {
-    claude: ToolStatus,
-    codex: ToolStatus,
-    opencode: ToolStatus,
-    droid: ToolStatus,
-    openclaw: ToolStatus,
-    hermes: ToolStatus,
-    cowork: ToolStatus,
-    copilot: ToolStatus,
-    cline: ToolStatus,
-    kilo: ToolStatus,
-    #[serde(rename = "deepseek-tui")]
-    deepseek_tui: ToolStatus,
-    jcode: ToolStatus,
-}
+// `ToolStatus` and `AllStatuses` lived here as fixed structs full of `&'static str`, which is what
+// a hardcoded answer looks like in the type system: there was nowhere to put a real path or a real
+// parsed config. Statuses are now built as `serde_json::Value` by `tool_status_body`, keyed by the
+// same short ids `AllStatuses` had as fields.
 
 #[derive(Debug, Deserialize)]
 struct ToolMutationRequest {}
@@ -99,36 +78,47 @@ async fn no_content() -> HttpResponse {
     responses::empty(StatusCode::NO_CONTENT)
 }
 
+/// Every tool at once, keyed by short id, as upstream's `all-statuses` does.
+///
+/// Each entry costs a `PATH` walk and one small file read. Run concurrently on the blocking pool:
+/// fourteen synchronous file reads on an actix worker would stall every other request on that
+/// worker, and the dashboard polls this.
 async fn all_statuses() -> HttpResponse {
-    let status = default_tool_status();
-    responses::json(
-        StatusCode::OK,
-        &AllStatuses {
-            claude: status,
-            codex: status,
-            opencode: status,
-            droid: status,
-            openclaw: status,
-            hermes: status,
-            cowork: status,
-            copilot: status,
-            cline: status,
-            kilo: status,
-            deepseek_tui: status,
-            jcode: status,
-        },
-    )
+    let statuses = actix_web::rt::task::spawn_blocking(|| {
+        let mut map = serde_json::Map::new();
+        for tool in spec::TOOLS {
+            map.insert(tool.short_id().to_owned(), tool_status_body(tool));
+        }
+        map
+    })
+    .await;
+
+    match statuses {
+        Ok(map) => responses::json(StatusCode::OK, &serde_json::Value::Object(map)),
+        Err(error) => responses::json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &serde_json::json!({ "error": format!("Could not read CLI tool statuses: {error}") }),
+        ),
+    }
 }
 
 async fn tool_status(path: web::Path<String>) -> HttpResponse {
-    let tool = path.into_inner();
-    if is_settings_tool(&tool) {
-        return responses::json(StatusCode::OK, &default_tool_status());
+    let segment = path.into_inner();
+    let Some(tool) = spec::Tool::parse(&segment) else {
+        return responses::json(
+            StatusCode::NOT_FOUND,
+            &responses::error("CLI tool route not found"),
+        );
+    };
+    match actix_web::rt::task::spawn_blocking(move || tool_status_body(tool)).await {
+        Ok(body) => responses::json(StatusCode::OK, &body),
+        Err(error) => responses::json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &serde_json::json!({
+                "error": format!("Could not read {} status: {error}", tool.id),
+            }),
+        ),
     }
-    responses::json(
-        StatusCode::NOT_FOUND,
-        &responses::error("CLI tool route not found"),
-    )
 }
 
 async fn cowork_mcp_registry() -> HttpResponse {
@@ -182,31 +172,44 @@ async fn mutate_tool(body: web::Bytes) -> HttpResponse {
     )
 }
 
-const fn default_tool_status() -> ToolStatus {
-    ToolStatus {
-        installed: false,
-        has_9_router: false,
-        config: None,
-        settings: None,
-        config_path: None,
-        message: TOOL_UNSUPPORTED,
-    }
-}
+/// One tool's status as the dashboard reads it.
+///
+/// Built from a real filesystem look, not a constant. The field names follow upstream's response
+/// so the dashboard needs no changes; the two extra fields (`source`, `configError`) are additions
+/// this port makes because it has the information and hiding it helps nobody.
+fn tool_status_body(tool: &spec::Tool) -> serde_json::Value {
+    let status = detect::status(tool);
+    let mut body = serde_json::json!({
+        "installed": status.installed,
+        "has9Router": status.has_router,
+        "settings": status.settings,
+        "displayName": tool.display_name,
+        "writable": status.installed && tool.writable == spec::Writable::Yes,
+    });
 
-fn is_settings_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "codex-settings"
-            | "claude-settings"
-            | "cline-settings"
-            | "opencode-settings"
-            | "copilot-settings"
-            | "droid-settings"
-            | "openclaw-settings"
-            | "hermes-settings"
-            | "cowork-settings"
-            | "kilo-settings"
-            | "deepseek-tui-settings"
-            | "jcode-settings"
-    )
+    // Upstream names this field differently per tool: `settingsPath` for claude and droid,
+    // `configPath` for codex and copilot, `authPath` for kilo, `globalStatePath` for cline. All of
+    // them are sent so whichever the dashboard reads is present, rather than picking one and
+    // leaving a pane blank.
+    if let Some(path) = status.config_path.as_ref().map(|path| path.display().to_string()) {
+        for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
+            body[key] = serde_json::Value::String(path.clone());
+        }
+    }
+    if let Some(source) = status.source {
+        body["source"] = serde_json::Value::String(source);
+    }
+    if let Some(error) = status.parse_error {
+        // Reported alongside `settings: null` rather than as a 500: upstream swallows the error so
+        // the UI does not read it as "not installed", but swallowing it silently means a user with
+        // a stray comma sees "not configured" and no reason.
+        body["configError"] = serde_json::Value::String(error);
+    }
+    if !status.installed {
+        body["message"] = serde_json::Value::String(format!(
+            "{} is not installed: no binary on PATH and no config file.",
+            tool.display_name
+        ));
+    }
+    body
 }
