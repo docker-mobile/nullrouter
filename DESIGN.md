@@ -101,8 +101,10 @@ Remaining debt:
   `501` with `"unsupported": true`. Headroom detection is the exception: it probes for real.
 - Combo `fallback`, `round-robin`, and `fusion` strategies all route for real, including sticky
   limits, cross-model fallback, and the fusion panel/judge fan-out with quorum-grace collection.
-  Per-combo strategy overrides (`comboStrategies[name]`) are not ported: the global
-  `comboStrategy` setting applies to every combo.
+  Per-combo strategy overrides (`comboStrategies[name]`) are ported: an entry overrides
+  `comboStrategy` for that combo alone, and may carry fusion tuning with it. An absent key and a
+  key naming the default mean the same thing, as upstream's dashboard prunes an entry back to
+  nothing when it returns to the default.
 - SAML assertion consumption is refused rather than deferred: verifying a signature needs exclusive
   XML canonicalisation, and a subtly wrong implementation is an authentication bypass. Metadata and
   outbound `AuthnRequest` generation are complete.

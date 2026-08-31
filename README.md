@@ -668,29 +668,61 @@ nullrouter would rather return an explicit `501` with `"unsupported": true` than
 success. Requests are still validated first, so you get a `400` for a malformed body rather than a
 misleading `501`.
 
-**Refused with an explicit 501:**
+**Refused because this process does not own the subsystem.** No amount of further work in this
+repository implements these; each names the thing it does not own.
 
-- **Bespoke provider executors** — the six protocols listed [above](#what-executes-and-what-refuses).
-- **Headroom process control.** Detection is real: it finds a Python ≥ 3.10, asks pip which packages
-  it holds, and reads the install log. Installing extras and starting/restarting the daemon are
-  refused, because this service does not own that Python environment and has no supervisor for a
-  detached daemon. A fake `{"success":true}` here would be the worst available lie — you would believe
-  your prompts were being compressed while being billed for full-size requests.
-- **Tunnel / Tailscale control.** Status reports honestly; every mutation is refused.
-- **MITM control** (`/api/cli-tools/antigravity-mitm`) and its alias map. URL validation is real.
-- **CLI tool config mutation** and Cowork MCP registry/tool discovery.
-- **Provider OAuth *authorisation* flows** (`/api/oauth/*`) — device-code, PKCE browser flows, and
-  vendor token imports for codex/cursor/kiro/gitlab/iflow. Getting a provider token for the first time
-  has to happen outside this port. (Dashboard *sign-in* via OIDC is a separate subsystem and is fully
-  implemented, and *refreshing* an existing provider token is implemented — see below.)
-- **Proxy pool testing and relay deployment** to Cloudflare/Deno/Vercel. Pool CRUD is real; deploying
-  a relay is not. Per-connection outbound proxies work.
+- **Headroom process control** — *the Python environment*. Detection is real: it finds a Python ≥ 3.10,
+  asks pip which packages it holds, and reads the install log. Installing extras and starting or
+  restarting the daemon are refused, because this service does not own that interpreter and has no
+  supervisor for a detached daemon. A fake `{"success":true}` here would be the worst available lie —
+  you would believe your prompts were being compressed while being billed for full-size requests.
+- **Tunnel / Tailscale control** — *the tunnel daemons*. Status reports honestly; every mutation is
+  refused. Starting a tunnel means driving a daemon with its own lifecycle and credentials.
+- **MITM control** (`/api/cli-tools/antigravity-mitm`) — *the intercepting proxy and its certificate
+  authority*. URL validation is real. Issuing a CA and rewriting a machine's trust store is not
+  something a router should do on a user's behalf.
+- **Relay deployment to Cloudflare / Deno / Vercel** — *third-party deploy targets*. Proxy pool CRUD
+  and per-connection outbound proxies are real; deploying a relay needs credentials for, and API
+  compatibility with, platforms this port has no account on.
+- **Provider OAuth *authorisation* flows** (`/api/oauth/*`) — *the provider's own consent screen*.
+  Device-code, PKCE browser flows, and vendor token imports for codex/cursor/kiro/gitlab/iflow.
+  Getting a provider token for the first time requires a browser session with that provider.
+  (Dashboard *sign-in* via OIDC is a separate subsystem and is fully implemented, and *refreshing* an
+  existing provider token is implemented — see below.)
+- **Self-replacing update** (`POST /api/version/update`) — *this port's own binary*. Upstream
+  overwrites its binary and exits; this one is built and placed by whatever packaged it, so
+  overwriting it would silently defeat a package manager or an image build. `GET /api/version`
+  reports the compiled version and reports `latestVersion: null` rather than claiming to be current
+  without checking. Graceful shutdown itself is implemented and stops a real server.
+- **The six bespoke provider executors** — *provider accounts to test against*. Listed
+  [above](#what-executes-and-what-refuses). Their protocols are undocumented and cannot be
+  implemented blind; each needs a real account to verify against.
+
+**Refused on security grounds**, where a wrong implementation is worse than none:
+
+- **SAML assertion consumption.** Verifying a signature needs exclusive XML canonicalisation, and a
+  subtly wrong C14N is an authentication bypass rather than a bug. Metadata and outbound
+  `AuthnRequest` generation are complete. See [Security model](#security-model).
+- **Configuration export / import** (`/api/settings/database`). A faithful export is every provider
+  credential in plaintext. Upstream gates it on an `x-9r-password` re-authentication over and above
+  the dashboard session; that gate is not ported, so exporting behind a session cookie alone would
+  widen credential exposure. Both directions return `501` with the reason. The *proxy* connectivity
+  test under `/api/settings/proxy-test` is fully implemented and dials for real.
+
+**Unported but portable.** Nothing external blocks these; they are simply not done yet.
+
+- **CLI tool config mutation** and Cowork MCP registry/tool discovery. Detection is real and reads
+  each tool's actual config; writing router settings back into those files is not wired up.
+- **MCP SSE backend.** `/api/mcp/{plugin}/sse` connects and then reports `backend_connected: false`
+  with a reason; posting a message returns `503` rather than pretending to deliver it.
+- **Console-log live capture.** Streams connect and emit an empty init frame; there is no capture
+  backend behind them.
 - **Translator `send`.** The inspector's steps run the real engine (see below); dispatching the
-  assembled body to a live provider from the inspector is not wired up yet. The live `/v1` path
+  assembled body to a live provider from the inspector is not wired up. The live `/v1` path
   dispatches normally.
-- **Service lifecycle** (`/api/shutdown`, `/api/version/update`).
-- **Database settings and proxy connectivity tests** under `/api/settings/*`.
-- **SAML assertion consumption** — see [Security model](#security-model).
+
+Everything above validates its input first, so a malformed body is a `400` rather than a misleading
+`501`, and every refusal carries `"unsupported": true` with a stated reason.
 
 **Provider token refresh is real.** A token within its provider's refresh lead time is exchanged
 before the call rather than after a 401, the rotation is persisted, and concurrent requests on one
