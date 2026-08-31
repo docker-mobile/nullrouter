@@ -250,6 +250,10 @@ async fn state_with(
         ),
         ("/internal/v1/usage", Reply::json(r#"{"ok":true}"#)),
         (
+            "/internal/v1/keys/gate",
+            Reply::json(r#"{"requireApiKey":false,"valid":false,"active":false}"#),
+        ),
+        (
             "/internal/v1/routing-context",
             Reply::json(r#"{"combos":[],"connections":[],"settings":{}}"#),
         ),

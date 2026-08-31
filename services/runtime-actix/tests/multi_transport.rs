@@ -189,6 +189,10 @@ async fn state_service(provider_base: &str) -> Recorder {
         ("/internal/v1/credentials/unavailable", "{}".to_owned()),
         ("/internal/v1/usage", r#"{"ok":true}"#.to_owned()),
         (
+            "/internal/v1/keys/gate",
+            r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+        ),
+        (
             "/internal/v1/routing-context",
             json!({ "combos": [], "connections": [], "settings": {} }).to_string(),
         ),

@@ -153,6 +153,10 @@ async fn state_service(provider_base: &str, settings: Value) -> Recorder {
         },
     });
     Recorder::start(vec![
+        (
+            "/internal/v1/keys/gate",
+            r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+        ),
         ("/internal/v1/credentials/select", credentials.to_string()),
         ("/internal/v1/credentials/clear-error", "{}".to_owned()),
         ("/internal/v1/credentials/unavailable", "{}".to_owned()),

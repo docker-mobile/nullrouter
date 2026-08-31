@@ -204,6 +204,13 @@ async fn state_service(provider_base: &str, enabled_models: Vec<&str>) -> Record
         }],
     });
     Recorder::start(vec![
+        (
+            "/internal/v1/keys/gate",
+            (
+                200,
+                r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+            ),
+        ),
         ("/internal/v1/routing-context", (200, routing.to_string())),
         ("/internal/v1/probe-targets", (200, targets.to_string())),
     ])
@@ -390,6 +397,13 @@ async fn a_key_pool_probes_once_and_follows_the_first_connection() -> TestResult
         ],
     });
     let state = Recorder::start(vec![
+        (
+            "/internal/v1/keys/gate",
+            (
+                200,
+                r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+            ),
+        ),
         ("/internal/v1/routing-context", (200, routing.to_string())),
         ("/internal/v1/probe-targets", (200, targets.to_string())),
     ])
@@ -445,6 +459,13 @@ async fn a_pool_whose_first_connection_has_a_list_is_not_probed() -> TestResult 
         }],
     });
     let state = Recorder::start(vec![
+        (
+            "/internal/v1/keys/gate",
+            (
+                200,
+                r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+            ),
+        ),
         ("/internal/v1/routing-context", (200, routing.to_string())),
         ("/internal/v1/probe-targets", (200, targets.to_string())),
     ])

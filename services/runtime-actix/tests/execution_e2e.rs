@@ -195,6 +195,10 @@ async fn fake_state(provider_base: &str) -> FakeServer {
         ("/internal/v1/credentials/unavailable", Reply::json("{}")),
         ("/internal/v1/usage", Reply::json(r#"{"ok":true}"#)),
         (
+            "/internal/v1/keys/gate",
+            Reply::json(r#"{"requireApiKey":false,"valid":false,"active":false}"#),
+        ),
+        (
             "/internal/v1/routing-context",
             Reply::json(r#"{"combos":[],"connections":[],"settings":{}}"#),
         ),
@@ -696,6 +700,10 @@ async fn fake_state_with_combo(provider_base: &str, models: &[&str], strategy: &
         ("/internal/v1/credentials/clear-error", Reply::json("{}")),
         ("/internal/v1/credentials/unavailable", Reply::json("{}")),
         ("/internal/v1/usage", Reply::json(r#"{"ok":true}"#)),
+        (
+            "/internal/v1/keys/gate",
+            Reply::json(r#"{"requireApiKey":false,"valid":false,"active":false}"#),
+        ),
         (
             "/internal/v1/routing-context",
             Reply::json(routing.to_string()),

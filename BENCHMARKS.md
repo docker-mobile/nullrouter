@@ -339,8 +339,12 @@ read. The enforced path now makes **one** state call where it previously made tw
 | stale `requireApiKey` window | up to 250 ms | none | none |
 | revocation delay | none | none | none |
 
-Measured, not assumed: `20260830T221127Z-nullrouter-final` is the fresh-read version and
-`20260830T222*-nullrouter-gate` the one-call version. Both are in `benches/results/`.
+Measured, not assumed: `20260830T221127Z-nullrouter-final` is the fresh-read version. The follow-up
+one-call-gate run is `20260830T224856Z-nullrouter-gate`: its S1 c=1 overhead is 1.313 ms versus
+1.423 ms in the fresh-read run, consistent with removing one loopback call. Its S4 c=8 direct leg
+was rejected by the harness (0.000 ms against a 25 ms mock), so it is evidence for the one-call
+attribution, **not** a replacement twelve-cell headline; `benches/ratios.py` correctly reports 11
+comparable cells for it. Both raw files are in `benches/results/`.
 
 ### What the remaining overhead is, measured rather than reasoned about
 

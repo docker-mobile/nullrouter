@@ -176,7 +176,10 @@ async fn serve_state(mut stream: TcpStream, provider_base: &str) -> std::io::Res
         .unwrap_or("/")
         .to_owned();
 
-    let body = if path.contains("/internal/v1/credentials/select") {
+    let body = if path.contains("/internal/v1/keys/gate") {
+        // Admission is consulted on every /v1 call; declare the gate public.
+        json!({ "requireApiKey": false, "valid": false, "active": false }).to_string()
+    } else if path.contains("/internal/v1/credentials/select") {
         json!({
             "status": "selected",
             "credentials": {

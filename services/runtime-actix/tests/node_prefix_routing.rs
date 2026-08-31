@@ -217,6 +217,10 @@ async fn state_service(provider_base: &str) -> Recorder {
         ("/internal/v1/credentials/clear-error", "{}".to_owned()),
         ("/internal/v1/credentials/unavailable", "{}".to_owned()),
         ("/internal/v1/usage", r#"{"ok":true}"#.to_owned()),
+        (
+            "/internal/v1/keys/gate",
+            r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+        ),
         ("/internal/v1/routing-context", routing.to_string()),
     ])
     .await
@@ -249,6 +253,10 @@ async fn state_service_declining(prefix: &str) -> Recorder {
         ("/internal/v1/credentials/clear-error", "{}".to_owned()),
         ("/internal/v1/credentials/unavailable", "{}".to_owned()),
         ("/internal/v1/usage", r#"{"ok":true}"#.to_owned()),
+        (
+            "/internal/v1/keys/gate",
+            r#"{"requireApiKey":false,"valid":false,"active":false}"#.to_owned(),
+        ),
         ("/internal/v1/routing-context", routing.to_string()),
     ])
     .await

@@ -1,4 +1,8 @@
-#![allow(clippy::future_not_send)]
+#![allow(
+    clippy::future_not_send,
+    clippy::expect_used,
+    reason = "test helper: failing to bind a loopback socket should abort the test"
+)]
 
 use actix_web::{
     App,
@@ -7,14 +11,57 @@ use actix_web::{
     test, web,
 };
 use serde_json::Value;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
 
 use nullrouter_runtime::{Runtime, app_config, configure};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-/// A closed loopback port: credential lookup fails deterministically as
-/// "state unavailable", so these route-shape tests need no state service.
-const UNREACHABLE_STATE_ADDR: &str = "127.0.0.1:1";
+/// State stub for route-shape tests.
+///
+/// The dynamic API-key gate is consulted by every public runtime endpoint, even when it reports
+/// that keys are not required. A closed port would therefore test only the gate's fail-closed path,
+/// not the aliases' contracts. This stub declares the gate public and otherwise supplies the
+/// ordinary no-credentials failure used by the provider-backed alias tests.
+async fn public_state_stub() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let addr = listener.local_addr().expect("addr").to_string();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buffer = [0_u8; 8192];
+                let read = stream.read(&mut buffer).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(buffer.get(..read).unwrap_or_default());
+                let body = if request.contains("/internal/v1/keys/gate") {
+                    serde_json::json!({"requireApiKey": false, "valid": false, "active": false})
+                } else if request.contains("/internal/v1/routing-context") {
+                    serde_json::json!({"combos": [], "connections": [], "settings": {}})
+                } else if request.contains("/internal/v1/credentials/select") {
+                    serde_json::json!({"status": "unavailable", "message": "state stub"})
+                } else {
+                    serde_json::json!({"ok": true})
+                }
+                .to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.flush().await;
+            });
+        }
+    });
+    addr
+}
 
 struct RuntimeResponse {
     status: StatusCode,
@@ -23,12 +70,11 @@ struct RuntimeResponse {
 }
 
 async fn request(method: Method, uri: &str, body: &str) -> TestResult<RuntimeResponse> {
+    let state_addr = public_state_stub().await;
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(app_config()))
-            .app_data(web::Data::new(Runtime::with_state_addr(
-                UNREACHABLE_STATE_ADDR,
-            )))
+            .app_data(web::Data::new(Runtime::with_state_addr(&state_addr)))
             .configure(configure),
     )
     .await;

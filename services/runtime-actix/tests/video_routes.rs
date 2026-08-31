@@ -6,7 +6,11 @@
 //! without video support is refused rather than silently rerouted to the one that
 //! has it, and that a malformed body is rejected before any account is selected.
 
-#![allow(clippy::future_not_send)]
+#![allow(
+    clippy::future_not_send,
+    clippy::expect_used,
+    reason = "test helper: failing to bind a loopback socket should abort the test"
+)]
 
 use actix_web::{
     App,
@@ -19,9 +23,8 @@ use serde_json::Value;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-/// A closed loopback port: credential selection fails deterministically, so these
-/// route-shape assertions need no state service.
-const UNREACHABLE_STATE_ADDR: &str = "127.0.0.1:1";
+#[path = "support/public_gate.rs"]
+mod public_gate;
 
 struct Reply {
     status: StatusCode,
@@ -34,7 +37,7 @@ async fn call(method: Method, uri: &str, content_type: &str, body: &str) -> Test
         App::new()
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(Runtime::with_state_addr(
-                UNREACHABLE_STATE_ADDR,
+                &public_gate::start().await,
             )))
             .configure(configure),
     )

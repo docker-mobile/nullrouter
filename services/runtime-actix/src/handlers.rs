@@ -68,9 +68,6 @@ pub(crate) async fn openai_models(
     runtime: web::Data<Runtime>,
     request: actix_web::HttpRequest,
 ) -> HttpResponse {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return rejection;
-    }
     responses::json(
         StatusCode::OK,
         &runtime
@@ -84,9 +81,6 @@ pub(crate) async fn openai_models_by_kind(
     kind: web::Path<String>,
     request: actix_web::HttpRequest,
 ) -> HttpResponse {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return rejection;
-    }
     let kind = kind.into_inner();
     // `image-to-text` is spelled `imageToText` in the registry's serviceKinds.
     let resolved = match kind.as_str() {
@@ -102,26 +96,15 @@ pub(crate) async fn openai_models_by_kind(
 }
 
 pub(crate) async fn model_info(
-    runtime: web::Data<Runtime>,
-    request: HttpRequest,
     query: web::Query<ModelInfoQuery>,
 ) -> Result<HttpResponse, RuntimeError> {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return Ok(rejection);
-    }
     let id = query.required_id()?;
     let info =
         models::model_info(id, query.kind()).ok_or_else(|| RuntimeError::not_found_model(id))?;
     Ok(responses::json(StatusCode::OK, &info))
 }
 
-pub(crate) async fn gemini_models(
-    runtime: web::Data<Runtime>,
-    request: HttpRequest,
-) -> HttpResponse {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return rejection;
-    }
+pub(crate) async fn gemini_models() -> HttpResponse {
     responses::json(StatusCode::OK, &models::gemini_models())
 }
 
@@ -132,10 +115,10 @@ pub(crate) async fn gemini_generation(
     path: web::Path<String>,
     body: web::Bytes,
 ) -> Result<HttpResponse, RuntimeError> {
+    let payload: Value = parse_json(&body)?;
     if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
         return Ok(rejection);
     }
-    let payload: Value = parse_json(&body)?;
     let tail = path.into_inner();
     let stream = tail.contains(":streamGenerateContent");
     let model = gemini_model_from_tail(&tail);
@@ -242,14 +225,7 @@ pub(crate) async fn responses_compact(
     chat_entrypoint(&runtime, &request, &body, StreamDefault::Disabled).await
 }
 
-pub(crate) async fn count_tokens(
-    runtime: web::Data<Runtime>,
-    request: HttpRequest,
-    body: web::Bytes,
-) -> Result<HttpResponse, RuntimeError> {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return Ok(rejection);
-    }
+pub(crate) async fn count_tokens(body: web::Bytes) -> Result<HttpResponse, RuntimeError> {
     let request: CountTokensRequest = parse_json(&body)?;
     Ok(responses::json(
         StatusCode::OK,
@@ -264,9 +240,6 @@ pub(crate) async fn video_create(
     path: web::Path<String>,
     body: web::Bytes,
 ) -> Result<HttpResponse, RuntimeError> {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return Ok(rejection);
-    }
     let segment = path.into_inner();
     let Some(action) = video::VideoAction::parse(&segment) else {
         // The route pattern already restricts this, so reaching here means the
@@ -276,6 +249,10 @@ pub(crate) async fn video_create(
             &nullrouter_execute::build_error_body(404, &format!("Unknown video action: {segment}")),
         ));
     };
+
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return Ok(rejection);
+    }
 
     Ok(runtime
         .execute_video(&video::VideoRequest {
@@ -296,15 +273,15 @@ pub(crate) async fn video_status(
     request: HttpRequest,
     path: web::Path<String>,
 ) -> Result<HttpResponse, RuntimeError> {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return Ok(rejection);
-    }
     let job_id = path.into_inner();
     if job_id.trim().is_empty() {
         return Ok(responses::json(
             StatusCode::BAD_REQUEST,
             &nullrouter_execute::build_error_body(400, "Missing video request id"),
         ));
+    }
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
+        return Ok(rejection);
     }
 
     Ok(runtime
@@ -339,13 +316,7 @@ fn header_str<'a>(request: &'a HttpRequest, name: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) async fn audio_voices(
-    runtime: web::Data<Runtime>,
-    request: HttpRequest,
-) -> HttpResponse {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(&request)).await {
-        return rejection;
-    }
+pub(crate) async fn audio_voices() -> HttpResponse {
     responses::json(StatusCode::OK, &models::voices())
 }
 
@@ -385,12 +356,12 @@ async fn chat_entrypoint(
     body: &[u8],
     stream_default: StreamDefault,
 ) -> Result<HttpResponse, RuntimeError> {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(request)).await {
-        return Ok(rejection);
-    }
     let payload: Value = parse_json(body)?;
     let typed: ChatPayload = parse_json(body)?;
     let model = typed.required_model()?.to_owned();
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(request)).await {
+        return Ok(rejection);
+    }
     let endpoint = request.path();
 
     // Endpoint wins over body shape, matching upstream precedence.
@@ -422,9 +393,6 @@ async fn passthrough_entrypoint(
     body: &[u8],
     required: &[&str],
 ) -> Result<HttpResponse, RuntimeError> {
-    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(request)).await {
-        return Ok(rejection);
-    }
     let payload: Value = parse_json(body)?;
 
     // Upstream validates the routing target before the endpoint-specific
@@ -463,7 +431,9 @@ async fn passthrough_entrypoint(
             ));
         }
     }
-
+    if let Some(rejection) = runtime.enforce_api_key(extract_api_key(request)).await {
+        return Ok(rejection);
+    }
     // Taken owned before `payload` moves, since `model` borrows from it.
     let requested_model = model.to_owned();
     Ok(runtime

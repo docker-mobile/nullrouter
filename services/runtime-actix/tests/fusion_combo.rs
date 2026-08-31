@@ -228,6 +228,10 @@ async fn fusion_state_with_settings(
         ("/internal/v1/credentials/unavailable", Reply::json("{}")),
         ("/internal/v1/usage", Reply::json(r#"{"ok":true}"#)),
         (
+            "/internal/v1/keys/gate",
+            Reply::json(r#"{"requireApiKey":false,"valid":false,"active":false}"#),
+        ),
+        (
             "/internal/v1/routing-context",
             Reply::json(routing.to_string()),
         ),

@@ -1,0 +1,45 @@
+run: 20260830T224856Z-nullrouter-gate
+label: nullrouter-gate
+date: 2026-08-30T22:48:56Z
+host: Linux 7.1.6-firecracker x86_64
+cpus: 16
+mem: 15.6 GiB
+load-tool: oha oha 1.16.0
+node: v18.20.4
+rustc: rustc 1.98.0 (88d9e12ae 2026-08-18)
+mock: port=8099 sleep_ms=25
+router-port: 20128
+duration-per-cell: 10s  trials: 3  warmup: 200
+
+scenarios (overhead = through - direct, both p50 ms)
+
+S1-proxy-nonstream           c=1   through=26.541    direct=25.228    overhead=1.313 ms  [1.305..1.543 over 3 trials]
+S2-translate-nonstream       c=1   through=26.716    direct=25.239    overhead=1.477 ms  [1.156..1.632 over 3 trials]
+S3-proxy-stream-200          c=1   through=27.603    direct=25.273    overhead=2.330 ms  [2.327..2.539 over 3 trials]
+  S3-proxy-stream-200        c=1   keep-alive=27.603    none=28.078    ratio=0.98
+S4-translate-stream-200      c=1   through=27.666    direct=25.251    overhead=2.445 ms  [2.369..2.758 over 3 trials]
+  S4-translate-stream-200    c=1   keep-alive=27.666    none=28.221    ratio=0.98
+S5-translate-stream-2000     c=1   through=37.501    direct=25.339    overhead=12.162 ms  [12.112..12.548 over 3 trials]
+  S5-translate-stream-2000   c=1   keep-alive=37.501    none=37.684    ratio=1.00
+S6-claude-native-nonstream   c=1   through=26.584    direct=25.228    overhead=1.356 ms  [1.058..1.497 over 3 trials]
+S1-proxy-nonstream           c=8   through=26.957    direct=25.206    overhead=1.765 ms  [1.360..2.660 over 3 trials]
+S2-translate-nonstream       c=8   through=26.739    direct=25.196    overhead=1.543 ms  [1.379..1.588 over 3 trials]
+S3-proxy-stream-200          c=8   through=27.520    direct=25.218    overhead=2.296 ms  [2.183..2.303 over 3 trials]
+  S3-proxy-stream-200        c=8   keep-alive=27.520    none=27.836    ratio=0.99
+S4-translate-stream-200 c=8: direct leg measured 0.000ms against a 25ms mock
+  outside [12.5, 85] -- the harness is mis-measuring; overhead not reported
+S5-translate-stream-2000     c=8   through=40.057    direct=25.316    overhead=14.752 ms  [11.945..14.774 over 3 trials]
+  S5-translate-stream-2000   c=8   keep-alive=40.057    none=38.402    ratio=1.04
+S6-claude-native-nonstream   c=8   through=26.815    direct=25.217    overhead=1.598 ms  [1.506..1.637 over 3 trials]
+
+written to benches/results/20260830T224856Z-nullrouter-gate.txt
+
+Reading this:
+  * `overhead` is the router's cost. `direct` is the mock's own service time and should
+    sit near --mock-sleep-ms; if it does not, the mock or the machine is the problem and
+    the overhead column is not trustworthy.
+  * If overhead lands on a round fraction of --mock-sleep-ms, suspect the harness rather
+    than celebrating the result: it is probably timing the mock.
+  * A wide [min..max] means a noisy machine, not a fast router. Re-run before quoting.
+  * S5 is the headline: per-frame cost multiplies, and it is the shape real agent traffic
+    takes.

@@ -1,4 +1,8 @@
-#![allow(clippy::future_not_send)]
+#![allow(
+    clippy::future_not_send,
+    clippy::expect_used,
+    reason = "test helper: failing to bind a loopback socket should abort the test"
+)]
 
 use actix_web::{
     App,
@@ -12,9 +16,8 @@ use nullrouter_runtime::{Runtime, app_config, configure};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-/// A closed loopback port: credential lookup fails deterministically as
-/// "state unavailable", so these route-shape tests need no state service.
-const UNREACHABLE_STATE_ADDR: &str = "127.0.0.1:1";
+#[path = "support/public_gate.rs"]
+mod public_gate;
 
 struct RuntimeResponse {
     status: StatusCode,
@@ -38,7 +41,7 @@ async fn request(method: Method, uri: &str, body: &str) -> TestResult<RuntimeRes
         App::new()
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(Runtime::with_state_addr(
-                UNREACHABLE_STATE_ADDR,
+                &public_gate::start().await,
             )))
             .configure(configure),
     )
