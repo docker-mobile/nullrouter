@@ -1,6 +1,8 @@
+mod mcp;
 mod routes;
 mod usage_stream;
 
+pub use mcp::McpBridge;
 pub use routes::configure;
 
 pub const SERVICE_NAME: &str = "nullrouter-events";

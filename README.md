@@ -697,6 +697,11 @@ repository implements these; each names the thing it does not own.
 - **The six bespoke provider executors** — *provider accounts to test against*. Listed
   [above](#what-executes-and-what-refuses). Their protocols are undocumented and cannot be
   implemented blind; each needs a real account to verify against.
+- **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP
+  bridge that starts it is implemented and tested (see below), and it will spawn the server on
+  request. What this port cannot supply is the browser it drives: without Chrome and the Browser MCP
+  extension installed in it, the server starts and then every tool call fails. The plugin's
+  `externalRequirement` says so rather than leaving a user to discover it as an intermittent bug.
 
 **Refused on security grounds**, where a wrong implementation is worse than none:
 
@@ -713,8 +718,6 @@ repository implements these; each names the thing it does not own.
 
 - **CLI tool config mutation** and Cowork MCP registry/tool discovery. Detection is real and reads
   each tool's actual config; writing router settings back into those files is not wired up.
-- **MCP SSE backend.** `/api/mcp/{plugin}/sse` connects and then reports `backend_connected: false`
-  with a reason; posting a message returns `503` rather than pretending to deliver it.
 - **Console-log live capture.** Streams connect and emit an empty init frame; there is no capture
   backend behind them.
 - **Translator `send`.** The inspector's steps run the real engine (see below); dispatching the
@@ -732,10 +735,26 @@ instead of retrying forever. Five providers (`kiro`, `github`, `vertex`, `vertex
 declare no refresh endpoint in upstream's own registry and are reported as needing manual replacement
 rather than silently retried.
 
-**Honest-but-empty surfaces:** MCP SSE at `/api/mcp/{plugin}/sse` connects and then reports
-`backend_connected: false` with a reason; posting a message returns 503 rather than pretending to
-deliver it. Console-log streams connect and emit an empty init frame — there is no live capture
-backend.
+**The MCP bridge spawns a real server.** `/api/mcp/{plugin}/sse` starts the plugin's MCP server as a
+child process, relays its stdout as SSE frames, and writes messages posted to
+`/api/mcp/{plugin}/message` to its stdin. Replies arrive on the SSE stream correlated by JSON-RPC id,
+so the POST returns `202` rather than a second copy of the answer. Only names on a compile-time
+whitelist may spawn — a plugin name arrives in a URL path, so a lookup that fell through to "run what
+was asked for" would be remote command execution. A plugin that is not on it still gets a connected
+stream reporting `backendConnected: false` with a reason, because the SSE side genuinely is connected
+and the backend genuinely is not.
+
+Oversized tool results are shrunk on the way out: repeated same-role siblings collapse and a text
+block is capped, which is what keeps one browser-snapshot result from spending a client's whole
+context. Children are reaped when their last listener disconnects and again at service shutdown, so
+no `npx` process outlives the request that started it.
+
+The one whitelisted plugin, `browsermcp`, additionally needs a running Chrome with its extension
+installed — see the does-not-own list above. The bridge itself is verified against a loopback MCP
+server in `services/events-actix`.
+
+**Honest-but-empty surfaces:** Console-log streams connect and emit an empty init frame — there is no
+live capture backend.
 
 **The translator inspector runs the real engine.** Its steps used to echo shapes back —
 `sourceFormat: "unknown"` and an empty body. Each step now runs the same translation the live `/v1`

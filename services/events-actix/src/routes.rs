@@ -14,6 +14,12 @@ const NO_ACTIVE_MCP_BACKEND: &str = "no active MCP backend";
 
 pub fn configure(config: &mut web::ServiceConfig) {
     config
+        // Registered here rather than demanded from every caller: `configure` is the whole public
+        // surface of this crate, so a route that needed extra `app_data` would break each existing
+        // caller and every test at once. `app_data` does not replace a registration the caller
+        // already made, so a `main` that wants to reap children at shutdown can still supply its
+        // own bridge and keep the handle.
+        .app_data(web::Data::new(crate::mcp::bridge::Bridge::default()))
         .route("/health", web::get().to(health))
         .service(
             web::resource("/api/usage/stream")
@@ -35,6 +41,46 @@ pub fn configure(config: &mut web::ServiceConfig) {
                 .route(web::post().to(mcp_message))
                 .route(web::route().guard(guard::Options()).to(options)),
         );
+}
+
+/// Resolve the plugin and attach a listener, or say why not.
+///
+/// The refusal shape is the one this route already returned when there was no backend at all, so a
+/// dashboard that handled "not connected" keeps working: an unknown plugin and an unstartable
+/// server are both `backend_connected: false` with a reason, differing only in the code.
+async fn mcp_attach(
+    bridge: &crate::mcp::bridge::Bridge,
+    plugin: &str,
+) -> Result<crate::mcp::bridge::Listener, HttpResponse> {
+    let Some(spec) = crate::mcp::plugins::find(plugin) else {
+        let error = crate::mcp::bridge::SpawnError::UnknownPlugin;
+        let message = error.message();
+        return Err(json_response(
+            StatusCode::NOT_FOUND,
+            &McpMessageDefaultResponse {
+                ok: false,
+                plugin,
+                backend_connected: false,
+                error: error.code(),
+                message: &message,
+                message_kind: "attach",
+            },
+        ));
+    };
+    bridge.attach(spec).await.map_err(|error| {
+        let message = error.message();
+        json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &McpMessageDefaultResponse {
+                ok: false,
+                plugin,
+                backend_connected: false,
+                error: error.code(),
+                message: &message,
+                message_kind: "attach",
+            },
+        )
+    })
 }
 
 async fn health() -> HttpResponse {
@@ -84,12 +130,78 @@ async fn console_logs_stream() -> HttpResponse {
     sse_body_response(console_logs_stream_body())
 }
 
-async fn mcp_sse(path: web::Path<PluginPath>) -> HttpResponse {
+/// Relay one MCP server's stdout as SSE for as long as the client stays connected.
+///
+/// The `endpoint` event goes first, as upstream does, so the client learns where to POST before any
+/// server frame arrives. Frames after that are the child's own JSON-RPC lines, filtered.
+async fn mcp_sse(
+    bridge: web::Data<crate::mcp::bridge::Bridge>,
+    path: web::Path<PluginPath>,
+) -> HttpResponse {
+    use futures_util::stream;
+
     let plugin = path.into_inner().plugin;
-    sse_body_response(mcp_stream_body(&plugin))
+
+    // A plugin that cannot spawn still gets a connected stream reporting `backendConnected: false`,
+    // which is the contract this route already had and the honest answer: the SSE side really is
+    // connected, and the backend really is not. Returning an error status instead would make a
+    // dashboard treat an un-spawnable plugin as a broken route.
+    let listener = mcp_attach(bridge.get_ref(), &plugin).await.ok();
+    let connected = listener.is_some();
+
+    let opening = match mcp_stream_body(&plugin, connected) {
+        Ok(opening) => opening,
+        Err(error) => return sse_body_response(Err(error)),
+    };
+
+    // Nothing to relay without a child: emit the opening frames and end, exactly as before.
+    let Some(listener) = listener else {
+        return sse_body_response(Ok(opening));
+    };
+
+    // `unfold` owns the listener, so the child is reaped when the response body is dropped —
+    // which is what a client disconnect does. No separate disconnect watcher is needed.
+    let body = stream::unfold(Some((listener, opening)), move |state| async move {
+        let (mut listener, opening) = state?;
+        if !opening.is_empty() {
+            return Some((
+                Ok::<web::Bytes, actix_web::Error>(web::Bytes::from(opening)),
+                Some((listener, String::new())),
+            ));
+        }
+        match listener.next_frame().await {
+            Some(frame) => {
+                let mut chunk = String::new();
+                push_sse_event(
+                    &mut chunk,
+                    "message",
+                    &serde_json::json!({ "frame": frame }),
+                )
+                .unwrap_or_default();
+                Some((Ok(web::Bytes::from(chunk)), Some((listener, String::new()))))
+            }
+            None => {
+                // Child's stdout closed. Detach explicitly rather than relying on drop order, so
+                // the reap happens before the response completes.
+                listener.detach().await;
+                None
+            }
+        }
+    });
+
+    let mut builder = HttpResponse::Ok();
+    insert_cors_headers(&mut builder);
+    builder
+        .content_type("text/event-stream")
+        .insert_header(("cache-control", "no-cache, no-transform"))
+        .streaming(Box::pin(body))
 }
 
-async fn mcp_message(path: web::Path<PluginPath>, body: web::Bytes) -> HttpResponse {
+async fn mcp_message(
+    bridge: web::Data<crate::mcp::bridge::Bridge>,
+    path: web::Path<PluginPath>,
+    body: web::Bytes,
+) -> HttpResponse {
     let plugin = path.into_inner().plugin;
     let message = match parse_mcp_message(&body) {
         Ok(message) => message,
@@ -105,17 +217,48 @@ async fn mcp_message(path: web::Path<PluginPath>, body: web::Bytes) -> HttpRespo
         }
     };
 
-    json_response(
-        StatusCode::SERVICE_UNAVAILABLE,
-        &McpMessageDefaultResponse {
-            ok: false,
-            plugin: &plugin,
-            backend_connected: false,
-            error: "mcp_backend_unavailable",
-            message: "MCP messages cannot be delivered because no backend is connected",
-            message_kind: message.kind(),
-        },
-    )
+    // Delivered to the child's stdin. The reply is not returned here: MCP answers on the SSE
+    // stream, correlated by JSON-RPC id, so a body here would be a second answer the client would
+    // have to reconcile. Upstream does the same.
+    match bridge.send(&plugin, &String::from_utf8_lossy(&body)).await {
+        Ok(true) => json_response(
+            StatusCode::ACCEPTED,
+            &McpMessageDefaultResponse {
+                ok: true,
+                plugin: &plugin,
+                backend_connected: true,
+                error: "",
+                message: "delivered to the MCP server; the reply arrives on the SSE stream",
+                message_kind: message.kind(),
+            },
+        ),
+        // No session: nothing is listening, so there is no stream for a reply to arrive on.
+        Ok(false) => json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &McpMessageDefaultResponse {
+                ok: false,
+                plugin: &plugin,
+                backend_connected: false,
+                error: "mcp_backend_unavailable",
+                message: "no MCP server is running for this plugin; open its SSE stream first",
+                message_kind: message.kind(),
+            },
+        ),
+        Err(reason) => {
+            let detail = format!("the MCP server stopped accepting input: {reason}");
+            json_response(
+                StatusCode::BAD_GATEWAY,
+                &McpMessageDefaultResponse {
+                    ok: false,
+                    plugin: &plugin,
+                    backend_connected: false,
+                    error: "mcp_write_failed",
+                    message: &detail,
+                    message_kind: message.kind(),
+                },
+            )
+        }
+    }
 }
 
 async fn options() -> HttpResponse {
@@ -156,7 +299,12 @@ fn console_logs_stream_body() -> Result<String, serde_json::Error> {
     Ok(body)
 }
 
-fn mcp_stream_body(plugin: &str) -> Result<String, serde_json::Error> {
+/// The three frames every MCP stream opens with.
+///
+/// `backend_connected` is a parameter rather than a constant `false` now that a whitelisted plugin
+/// really can have a child behind it. The frame order and field names are unchanged, so a client
+/// written against the honest-but-empty version keeps working.
+fn mcp_stream_body(plugin: &str, backend_connected: bool) -> Result<String, serde_json::Error> {
     let endpoint = format!("/api/mcp/{plugin}/message");
     let mut body = String::new();
     push_sse_event(
@@ -165,7 +313,7 @@ fn mcp_stream_body(plugin: &str) -> Result<String, serde_json::Error> {
         &McpEndpointPayload {
             plugin,
             endpoint: &endpoint,
-            backend_connected: false,
+            backend_connected,
         },
     )?;
     push_sse_event(
@@ -174,8 +322,12 @@ fn mcp_stream_body(plugin: &str) -> Result<String, serde_json::Error> {
         &McpConnectedPayload {
             plugin,
             sse_connected: true,
-            backend_connected: false,
-            message: "SSE stream is connected; MCP backend is not connected",
+            backend_connected,
+            message: if backend_connected {
+                "SSE stream is connected; MCP backend is running"
+            } else {
+                "SSE stream is connected; MCP backend is not connected"
+            },
         },
     )?;
     push_sse_event(
@@ -183,8 +335,12 @@ fn mcp_stream_body(plugin: &str) -> Result<String, serde_json::Error> {
         "backend_state",
         &McpBackendStatePayload {
             plugin,
-            connected: false,
-            reason: NO_ACTIVE_MCP_BACKEND,
+            connected: backend_connected,
+            reason: if backend_connected {
+                "MCP backend is running"
+            } else {
+                NO_ACTIVE_MCP_BACKEND
+            },
         },
     )?;
     Ok(body)
@@ -345,7 +501,8 @@ struct McpMessageDefaultResponse<'a> {
     plugin: &'a str,
     backend_connected: bool,
     error: &'static str,
-    message: &'static str,
+    /// Borrowed rather than `&'static`: a spawn failure's reason comes from the OS at run time.
+    message: &'a str,
     message_kind: &'static str,
 }
 

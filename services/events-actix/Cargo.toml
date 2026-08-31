@@ -17,16 +17,23 @@ path = "src/main.rs"
 
 [dependencies]
 tracing.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "sync", "time"] }
 reqwest.workspace = true
 futures-util.workspace = true
 actix-web.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[[bin]]
+name = "mock-mcp-server"
+path = "tests/mock_mcp_server.rs"
+
 [dev-dependencies]
 futures-util.workspace = true
 actix-rt.workspace = true
+# `macros` and `rt` for `#[tokio::test]`: the bridge tests drive real child processes, which needs a
+# tokio runtime rather than actix-rt's single-threaded one.
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 
 [lints]
 workspace = true

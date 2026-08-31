@@ -1,17 +1,26 @@
 use actix_web::{App, HttpServer, web};
-use nullrouter_events::{DEFAULT_HOST, DEFAULT_PORT, UsageReader, configure};
+use nullrouter_events::{DEFAULT_HOST, DEFAULT_PORT, McpBridge, UsageReader, configure};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let server = ServerConfig::from_env();
     // Holds a connection pool, so it is built once and shared across workers.
     let usage = web::Data::new(UsageReader::from_env());
+    // One bridge for the whole process, not one per worker: an MCP child is a process, and a
+    // per-worker bridge would spawn N children for one plugin and reap only the ones its own
+    // worker started.
+    let mcp = McpBridge::new();
+    let reaper = mcp.clone();
 
-    HttpServer::new(move || {
+    let result = HttpServer::new(move || {
+        let mcp = mcp.clone();
         App::new()
             // The live usage stream extracts this; without it the route would
             // fail at runtime.
             .app_data(usage.clone())
+            // Before `configure`: it registers a default bridge only when none is present, so
+            // registering after this would orphan every child from `reaper`.
+            .configure(move |config| mcp.register(config))
             .configure(configure)
     })
     // TCP_NODELAY, for the same reason as `nullrouter-runtime` — see the long note in
@@ -25,7 +34,13 @@ async fn main() -> std::io::Result<()> {
     })
     .bind((server.host.as_str(), server.port))?
     .run()
-    .await
+    .await;
+
+    // After the server stops accepting, and on the way out of either outcome: a bind failure
+    // returns earlier with `?`, so reaching here means children may exist. Not reaping them would
+    // leave an `npx` process per plugin running with nothing to talk to.
+    reaper.shutdown().await;
+    result
 }
 
 #[derive(Debug)]
