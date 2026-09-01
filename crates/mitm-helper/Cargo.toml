@@ -1,0 +1,29 @@
+[package]
+name = "nullrouter-mitm-helper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Narrow root/admin helper for nullrouter MITM trust and hosts changes"
+repository.workspace = true
+
+[[bin]]
+name = "nullrouter-mitm-helper"
+path = "src/main.rs"
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rcgen.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

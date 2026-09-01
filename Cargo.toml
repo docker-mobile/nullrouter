@@ -7,6 +7,7 @@ members = [
     "crates/contracts",
     "crates/execute",
     "crates/logship",
+    "crates/mitm-helper",
     "crates/procctl",
     "crates/providers",
     "crates/pxpipe",
@@ -68,6 +69,7 @@ leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
 mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
 nullrouter-logship = { path = "crates/logship" }
+nullrouter-mitm-helper = { path = "crates/mitm-helper" }
 nullrouter-execute = { path = "crates/execute" }
 nullrouter-procctl = { path = "crates/procctl" }
 # Graceful shutdown of a supervised child needs SIGTERM. `tokio::process::Child::kill` is
@@ -84,6 +86,7 @@ futures-util = "0.3"
 getrandom = "0.3"
 # Bundled so a 9Router import works without a system SQLite present.
 rusqlite = { version = "0.32", features = ["bundled"] }
+rcgen = "0.14.10"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "stream",
