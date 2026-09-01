@@ -332,6 +332,50 @@ fn an_empty_override_falls_through_to_the_normal_lookup() {
 }
 
 #[test]
+fn a_caller_discovered_path_gets_the_same_checks() {
+    // A Python interpreter is chosen by version and by what it can import, so the search is
+    // the caller's. The checks must not be, or a discovered binary would be trusted more
+    // easily than a configured one.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let good = write_with_mode(dir.path(), "python3", b"#!/bin/sh\nexit 0\n", 0o755);
+
+    let resolved = nullrouter_procctl::binary::Executable::verified(good.clone(), "python3")
+        .expect("a 0755 absolute path must be accepted");
+    assert_eq!(resolved.path(), good);
+    assert_eq!(resolved.name(), "python3");
+
+    // World-writable is refused here too.
+    let open = write_with_mode(dir.path(), "python3-open", b"#!/bin/sh\nexit 0\n", 0o777);
+    let error = nullrouter_procctl::binary::Executable::verified(open, "python3")
+        .expect_err("must refuse");
+    match error {
+        BinaryError::Unusable { reason, .. } => {
+            assert!(reason.contains("writable by group or others"), "{reason}");
+        }
+        other => panic!("expected Unusable, got {other:?}"),
+    }
+
+    // As is a relative path, which cannot be checked meaningfully.
+    let error = nullrouter_procctl::binary::Executable::verified(
+        std::path::PathBuf::from("python3"),
+        "python3",
+    )
+    .expect_err("must refuse");
+    assert!(matches!(error, BinaryError::Unusable { .. }), "{error:?}");
+
+    // And a non-executable file.
+    let plain = write_with_mode(dir.path(), "notes.txt", b"text", 0o644);
+    let error = nullrouter_procctl::binary::Executable::verified(plain, "python3")
+        .expect_err("must refuse");
+    match error {
+        BinaryError::Unusable { reason, .. } => {
+            assert!(reason.contains("not executable"), "{reason}");
+        }
+        other => panic!("expected Unusable, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_real_system_binary_resolves_through_the_search_path() {
     let _guard = env_lock();
     // `sh` exists on every unix this runs on, and exercises the search-directory branch

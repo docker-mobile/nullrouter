@@ -35,6 +35,9 @@ const HOST_ONLY_PREFIXES: &[&str] = &[
     "/api/auth/reset-password",
     "/api/headroom/start",
     "/api/headroom/stop",
+    // Added when restart stopped being a refusal: it signals a process on this host, which is
+    // the same authority `start` and `stop` carry.
+    "/api/headroom/restart",
     "/api/headroom/proxy",
     // `npm install pxpipe-proxy@latest`, whose lifecycle scripts run as the API
     // service. The package name is fixed and never taken from the request, so it is
@@ -63,7 +66,13 @@ const HOST_ONLY_PREFIXES: &[&str] = &[
 /// This is additive: a path already in [`HOST_ONLY_PREFIXES`] stays host-only for every
 /// method. `cowork-settings` and `antigravity-mitm` are there and are not relaxed by being
 /// covered here too.
-const HOST_ONLY_WRITE_PREFIXES: &[&str] = &["/api/cli-tools"];
+const HOST_ONLY_WRITE_PREFIXES: &[&str] = &[
+    "/api/cli-tools",
+    // `POST` installs packages into a Python interpreter on this host and `DELETE` removes them;
+    // `GET` reports which extras are present, which is the panel's compression pane. Splitting by
+    // method is what lets the pane stay readable remotely without exposing the install.
+    "/api/headroom/extras",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessRequirement {

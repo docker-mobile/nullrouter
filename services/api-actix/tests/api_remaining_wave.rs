@@ -130,9 +130,9 @@ async fn cli_tool_routes_report_what_is_actually_on_the_machine() -> TestResult 
 
 #[actix_rt::test]
 async fn headroom_and_tunnel_routes_return_safe_defaults() -> TestResult {
-    // Given: this service cannot start local Headroom, and neither cloudflared nor tailscale
-    // is installed on this machine. The tunnel routes are real now, so what they must do here
-    // is name the missing dependency rather than claim the feature does not exist.
+    // Given: neither the headroom binary, cloudflared nor tailscale is installed on this
+    // machine. All three route families are real now, so what they must do here is name the
+    // missing dependency rather than claim the feature does not exist.
 
     // When: status and mutation endpoints are requested.
     let (headroom_status, headroom) = get_json("/api/headroom/status").await?;
@@ -151,10 +151,14 @@ async fn headroom_and_tunnel_routes_return_safe_defaults() -> TestResult {
     // Then: process-changing routes are explicit no-ops and status routes stay structured.
     assert_eq!(headroom_status, StatusCode::OK);
     assert_eq!(field(&headroom, "running")?, false);
-    assert_eq!(headroom_start_status, StatusCode::NOT_IMPLEMENTED);
+    // Start needs the headroom binary, which is not installed here: 503 naming the dependency,
+    // not 501. Stop succeeds, because stopping nothing is not a failure.
+    assert_eq!(headroom_start_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&headroom_start, "success")?, false);
-    assert_eq!(headroom_stop_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&headroom_stop, "success")?, false);
+    assert_eq!(field(&headroom_start, "code")?, "NOT_INSTALLED");
+    assert_eq!(headroom_stop_status, StatusCode::OK);
+    assert_eq!(field(&headroom_stop, "success")?, true);
+    assert_eq!(field(&headroom_stop, "running")?, false);
     assert_eq!(proxy_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&proxy, "unsupported")?, true);
     assert_eq!(tunnel_status, StatusCode::OK);

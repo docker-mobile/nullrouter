@@ -70,6 +70,13 @@ enum Charset {
     Token,
     /// Filesystem paths: token characters plus `/`, `\`, `:`, `+`, `@` and space.
     Path,
+    /// A package requirement: token characters plus `[`, `]`, `,`, `=`, `<`, `>`.
+    ///
+    /// Its own charset because `headroom-ai[proxy,code]` is not an identifier and is not a path,
+    /// and giving it a bypass instead would put a hole in the one place every value is checked.
+    /// The comparison characters are here so a pinned requirement stays expressible; note that
+    /// none of the additions can start a command, open a subshell, or redirect.
+    Requirement,
 }
 
 impl Charset {
@@ -78,6 +85,7 @@ impl Charset {
         match self {
             Self::Token => "an identifier",
             Self::Path => "a path",
+            Self::Requirement => "a package requirement",
         }
     }
 
@@ -88,6 +96,7 @@ impl Charset {
         match self {
             Self::Token => token,
             Self::Path => token || matches!(character, '/' | '\\' | ':' | '+' | '@' | ' '),
+            Self::Requirement => token || matches!(character, '[' | ']' | ',' | '=' | '<' | '>'),
         }
     }
 }
@@ -168,6 +177,18 @@ impl Argv {
         debug_assert!(flag.starts_with('-'), "{flag:?} is not a flag");
         check(field, value, Charset::Token)?;
         self.0.push(format!("{flag}={value}"));
+        Ok(self)
+    }
+
+    /// Append a validated package requirement, such as `headroom-ai[proxy,code]`.
+    ///
+    /// Separate from [`Argv::token`] because a requirement carries brackets and commas that an
+    /// identifier must not. It is still checked, and still refuses a leading `-`: a requirement
+    /// that reads as a flag would change what the package manager does rather than what it
+    /// installs.
+    pub fn requirement(mut self, field: &'static str, value: &str) -> Result<Self, ArgError> {
+        check(field, value, Charset::Requirement)?;
+        self.0.push(value.to_owned());
         Ok(self)
     }
 
@@ -391,6 +412,45 @@ mod tests {
             argv.into_vec(),
             vec!["--socket", "/var/run/tailscale/tailscaled.sock"]
         );
+    }
+
+    #[test]
+    fn a_requirement_may_carry_brackets_and_commas() {
+        let argv = Argv::new()
+            .word("install")
+            .requirement("requirement", "headroom-ai[proxy,code,ml]")
+            .expect("a real extras requirement is valid");
+
+        assert_eq!(argv.into_vec(), vec!["install", "headroom-ai[proxy,code,ml]"]);
+        assert!(
+            Argv::new()
+                .requirement("requirement", "headroom-ai==1.2.3")
+                .is_ok(),
+            "a pinned requirement must stay expressible"
+        );
+    }
+
+    #[test]
+    fn a_requirement_cannot_carry_a_url_a_path_or_a_metacharacter() {
+        // The shapes that would turn an install into something else entirely: a package fetched
+        // from an attacker's index, a local file, a second command.
+        for hostile in [
+            "https://evil.example.com/x.whl",
+            "/tmp/evil.whl",
+            "a;id",
+            "a$(id)",
+            "a b",
+            "a|b",
+            "--index-url=https://evil.example.com",
+            "-r requirements.txt",
+            "a`id`",
+            "",
+        ] {
+            assert!(
+                Argv::new().requirement("requirement", hostile).is_err(),
+                "{hostile:?} was accepted as a requirement"
+            );
+        }
     }
 
     #[test]

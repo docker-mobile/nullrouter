@@ -276,6 +276,108 @@ async fn a_spawned_rule_is_ready_without_any_output() {
 }
 
 #[tokio::test]
+async fn survival_alone_counts_as_ready_when_the_needle_never_appears() {
+    // The rule that mirrors upstream's headroom check: it waits eight seconds and accepts a
+    // process that is still alive. A child whose startup wording changed must not be reported as
+    // a failed start when the original would have accepted it.
+    let supervisor = Supervisor::spawn("survivor", 50);
+    let start = std::time::Instant::now();
+
+    supervisor
+        .start(spec(
+            "echo something else entirely; sleep 60",
+            ReadyRule::SurvivesOr {
+                needle: "never printed",
+                grace: Duration::from_millis(400),
+            },
+        ))
+        .await
+        .expect("surviving the grace period must be enough");
+
+    assert!(
+        start.elapsed() >= Duration::from_millis(400),
+        "returned after {:?}, before the grace period elapsed",
+        start.elapsed()
+    );
+    assert!(supervisor.snapshot().is_running());
+    supervisor.stop().await;
+}
+
+#[tokio::test]
+async fn the_needle_ends_the_wait_early_when_it_does_appear() {
+    // The stronger signal is preferred: a child that announces itself should not be held for the
+    // whole grace period, or every start pays a delay it does not need.
+    let supervisor = Supervisor::spawn("announcer", 50);
+    let start = std::time::Instant::now();
+
+    supervisor
+        .start(spec(
+            "echo Uvicorn running on port 8787; sleep 60",
+            ReadyRule::SurvivesOr {
+                needle: "Uvicorn running",
+                grace: Duration::from_secs(20),
+            },
+        ))
+        .await
+        .expect("the needle must satisfy the rule");
+
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "waited {:?}; the needle should have ended the wait",
+        start.elapsed()
+    );
+    supervisor.stop().await;
+}
+
+#[tokio::test]
+async fn a_child_that_dies_inside_the_grace_period_still_fails() {
+    // The half of upstream's check that carries the weight: an early exit is a failed start, and
+    // accepting survival must not weaken that.
+    let supervisor = Supervisor::spawn("early-death", 50);
+
+    let error = supervisor
+        .start(spec(
+            "echo binding to port 8787 1>&2; sleep 0.1; exit 1",
+            ReadyRule::SurvivesOr {
+                needle: "never printed",
+                grace: Duration::from_secs(5),
+            },
+        ))
+        .await
+        .expect_err("a child that dies inside the grace period has not started");
+
+    match error {
+        StartError::ExitedEarly { tail, .. } => {
+            assert!(tail.contains("binding to port 8787"), "{tail}");
+        }
+        other => panic!("expected ExitedEarly, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_grace_longer_than_the_startup_timeout_is_clamped() {
+    // Otherwise the rule would be harsher than the one it mirrors: survival would be unreachable
+    // and the deadline would fire first, failing every start.
+    let mut spec = spec(
+        "sleep 60",
+        ReadyRule::SurvivesOr {
+            needle: "never printed",
+            grace: Duration::from_secs(600),
+        },
+    );
+    spec.startup_timeout = Duration::from_millis(500);
+    let supervisor = Supervisor::spawn("clamped", 50);
+
+    supervisor
+        .start(spec)
+        .await
+        .expect("the grace must be clamped to the startup timeout, not exceed it");
+
+    assert!(supervisor.snapshot().is_running());
+    supervisor.stop().await;
+}
+
+#[tokio::test]
 async fn stop_terminates_the_child_gracefully() {
     let supervisor = Supervisor::spawn("graceful-child", 50);
     supervisor

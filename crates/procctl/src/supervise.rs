@@ -66,6 +66,22 @@ pub enum ReadyRule {
         /// How many times it has to appear.
         times: usize,
     },
+    /// The substring, or simply having survived `grace` — whichever comes first.
+    ///
+    /// For a child whose startup line is not a contract. `headroom proxy` is a Python
+    /// application that prints uvicorn's banner, and the exact wording is uvicorn's to change;
+    /// requiring it outright would fail a start that upstream would have accepted, since
+    /// upstream's own check is nothing more than "still alive after eight seconds".
+    ///
+    /// So the needle is preferred when it appears — it is the real signal, and it arrives in
+    /// well under the grace period — and the grace period is the floor. A child that dies inside
+    /// it still fails, which is the part of upstream's check that carries the weight.
+    SurvivesOr {
+        /// The substring that ends the wait early.
+        needle: &'static str,
+        /// How long survival alone counts as ready.
+        grace: Duration,
+    },
     /// A line yields a value, which becomes the start's result.
     ///
     /// A quick tunnel's hostname is only ever printed; this is how it is captured.
@@ -81,6 +97,11 @@ impl std::fmt::Debug for ReadyRule {
                 .debug_struct("Occurrences")
                 .field("needle", needle)
                 .field("times", times)
+                .finish(),
+            Self::SurvivesOr { needle, grace } => formatter
+                .debug_struct("SurvivesOr")
+                .field("needle", needle)
+                .field("grace", grace)
                 .finish(),
             Self::Extract(_) => formatter.write_str("Extract(fn)"),
         }

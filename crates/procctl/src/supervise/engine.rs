@@ -43,6 +43,11 @@ enum Slot {
     Starting {
         running: Running,
         deadline: Instant,
+        /// When mere survival counts as ready, under [`ReadyRule::SurvivesOr`].
+        ///
+        /// Always earlier than `deadline`: it is a floor on how long the child must last, not a
+        /// second way to give up.
+        survives_at: Option<Instant>,
         /// `None` once the watcher has dropped its sender without signalling, which means
         /// readiness can no longer arrive. Kept distinct from a signal so that a closed
         /// channel cannot be mistaken for a met rule — the bug this shape prevents.
@@ -164,12 +169,14 @@ async fn run(
                     Slot::Starting {
                         running,
                         deadline,
+                        survives_at,
                         reply,
                         attempt,
                         ready: _closed,
                     } => Slot::Starting {
                         running,
                         deadline,
+                        survives_at,
                         ready: None,
                         reply,
                         attempt,
@@ -205,6 +212,7 @@ async fn next_event(slot: &mut Slot, commands: &mut mpsc::Receiver<Command>) -> 
         Slot::Starting {
             running,
             deadline,
+            survives_at,
             ready,
             ..
         } => {
@@ -212,6 +220,7 @@ async fn next_event(slot: &mut Slot, commands: &mut mpsc::Receiver<Command>) -> 
                 command = commands.recv() => Event::Command(command),
                 status = running.child.wait() => Event::Exited(status.ok()),
                 event = readiness(ready) => event,
+                () = survival(survives_at.as_ref()) => Event::Ready(None),
                 () = sleep_until((*deadline).into()) => Event::Deadline,
             }
         }
@@ -227,6 +236,14 @@ async fn next_event(slot: &mut Slot, commands: &mut mpsc::Receiver<Command>) -> 
                 () = sleep_until((*at).into()) => Event::RestartDue,
             }
         }
+    }
+}
+
+/// Await the moment survival alone counts as ready, or never when no rule wants that.
+async fn survival(at: Option<&Instant>) {
+    match at {
+        None => std::future::pending().await,
+        Some(instant) => sleep_until((*instant).into()).await,
     }
 }
 
@@ -506,8 +523,18 @@ fn begin(
     });
     tracing::info!(program, ?pid, attempt, "supervised child spawned");
 
+    let survives_at = match &spec.ready {
+        // Clamped below the startup deadline, so a grace longer than the timeout cannot make
+        // survival unreachable — the rule would then be strictly harsher than the one it mirrors.
+        ReadyRule::SurvivesOr { grace, .. } => {
+            Some(Instant::now() + (*grace).min(spec.startup_timeout))
+        }
+        _other => None,
+    };
+
     Slot::Starting {
         deadline: Instant::now() + spec.startup_timeout,
+        survives_at,
         running: Running {
             child,
             pid,
@@ -573,6 +600,14 @@ fn watch_output(
             match &spec.ready {
                 // Decided elsewhere: at spawn, or at a zero exit.
                 ReadyRule::Spawned | ReadyRule::CompletesSuccessfully => {}
+                ReadyRule::SurvivesOr { needle, .. } => {
+                    // The early exit. Survival is the engine's timer, not this task's.
+                    if clean.contains(needle)
+                        && let Some(sender) = ready.take()
+                    {
+                        let _sent = sender.send(None);
+                    }
+                }
                 ReadyRule::Occurrences { needle, times } => {
                     // Counted per line rather than per chunk: upstream counts matches in
                     // whatever chunk the pipe happened to deliver, which double-counts a

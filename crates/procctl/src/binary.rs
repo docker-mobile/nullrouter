@@ -114,6 +114,27 @@ pub struct Executable {
 }
 
 impl Executable {
+    /// Accept a path found by the caller's own search, applying the same checks.
+    ///
+    /// [`BinarySpec`] covers a program installed at a predictable location. A Python
+    /// interpreter is not that: which one to use depends on its version and on which
+    /// distributions it can see, so the search is the caller's. This is the door for a path
+    /// chosen that way, and it is the same door: the checks below are the ones a spec-resolved
+    /// binary passes, so a discovered interpreter is not held to a lower standard than a
+    /// configured one.
+    pub fn verified(path: PathBuf, name: &'static str) -> Result<Self, BinaryError> {
+        if !path.is_absolute() {
+            return Err(BinaryError::Unusable {
+                path,
+                reason: "it is not an absolute path".to_owned(),
+            });
+        }
+        if let Err(reason) = usable(&path) {
+            return Err(BinaryError::Unusable { path, reason });
+        }
+        Ok(Self { path, name })
+    }
+
     /// The verified path.
     #[must_use]
     pub fn path(&self) -> &Path {

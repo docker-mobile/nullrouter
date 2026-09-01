@@ -208,6 +208,54 @@ fn cli_tool_config_writes_are_host_only_while_reads_are_not() {
 }
 
 #[test]
+fn headroom_process_control_is_host_only_and_its_extras_writes_are_too() {
+    // Given: start, stop and restart signal a process on this host, and POSTing extras installs
+    // packages into a Python interpreter on it. Reading extras is the panel's compression pane.
+    let config = GatewayConfig::default();
+
+    for path in [
+        "/api/headroom/start",
+        "/api/headroom/stop",
+        "/api/headroom/restart",
+        "/api/headroom/proxy/v1/models",
+    ] {
+        for method in [Method::GET, Method::POST, Method::DELETE] {
+            // When: the request arrives from another machine with a valid session.
+            let remote = config.access_requirement(path, &method, Some(REMOTE));
+
+            // Then: refused before routing, and not a bypass from this host either.
+            assert_eq!(remote, AccessRequirement::Forbidden, "{method} {path}");
+            assert_eq!(
+                remote.decision(AuthorizationState::Authorized),
+                AccessDecision::Forbidden,
+                "{method} {path} allowed a remote peer holding a valid session"
+            );
+            assert_eq!(
+                config.access_requirement(path, &method, Some(LOOPBACK)),
+                AccessRequirement::ApiSession,
+                "{method} {path}"
+            );
+        }
+    }
+
+    // The extras route splits by method: installing is host-only, reading is not.
+    for method in [Method::POST, Method::DELETE, Method::PATCH, Method::PUT] {
+        assert_eq!(
+            config.access_requirement("/api/headroom/extras", &method, Some(REMOTE)),
+            AccessRequirement::Forbidden,
+            "{method} /api/headroom/extras installs or removes packages on this host"
+        );
+    }
+    for method in [Method::GET, Method::HEAD, Method::OPTIONS] {
+        assert_eq!(
+            config.access_requirement("/api/headroom/extras", &method, Some(REMOTE)),
+            AccessRequirement::ApiSession,
+            "{method} /api/headroom/extras is the compression pane and should stay readable"
+        );
+    }
+}
+
+#[test]
 fn every_tunnel_route_is_host_only_including_its_reads() {
     // Given: the tunnel routes drive `cloudflared` and `tailscaled`. Unlike the CLI-tool reads
     // above, the reads here are held to loopback too: the operation catalog is a list of ways

