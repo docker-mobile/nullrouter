@@ -104,43 +104,75 @@ async fn proxy_pool_test_returns_unsupported_json_when_network_testing_is_unavai
 }
 
 #[actix_rt::test]
-async fn proxy_pool_deploy_routes_return_targeted_unsupported_json_for_valid_input() -> TestResult {
-    // Given: deploy requests include the provider credentials required by the upstream routes.
+async fn proxy_pool_deploy_routes_report_an_unreachable_platform() -> TestResult {
+    // Given: the three deploy routes, with the platform APIs pointed at a closed port.
+    //
+    // Pointed deliberately: these routes really deploy now, so without the override this case would
+    // make outbound requests to Cloudflare, Deno and Vercel with a dummy token every time the suite
+    // ran. The success paths are covered in tests/relay_deploy.rs against a local stub.
+    let _guards = (
+        ApiBase::new("NULLROUTER_CLOUDFLARE_API", "http://127.0.0.1:1"),
+        ApiBase::new("NULLROUTER_DENO_API", "http://127.0.0.1:1"),
+        ApiBase::new("NULLROUTER_VERCEL_API", "http://127.0.0.1:1"),
+    );
+
     let cases = [
-        (
-            "/api/proxy-pools/vercel-deploy",
-            r#"{"vercelToken":"token"}"#,
-            "vercel",
-        ),
+        ("/api/proxy-pools/vercel-deploy", r#"{"vercelToken":"token"}"#),
         (
             "/api/proxy-pools/cloudflare-deploy",
             r#"{"accountId":"account","apiToken":"token"}"#,
-            "cloudflare",
         ),
         (
             "/api/proxy-pools/deno-deploy",
             r#"{"denoToken":"token","orgDomain":"example.com"}"#,
-            "deno",
         ),
     ];
 
-    for (uri, body, target) in cases {
-        // When: the deploy helper route is called.
+    for (uri, body) in cases {
+        // When: the deploy is attempted.
         let response = request_json(Method::POST, uri, body).await?;
 
-        // Then: it returns structured 501 JSON without attempting an external deployment.
-        assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED, "{uri}");
+        // Then: it is a 502 naming the platform it could not reach, rather than a 500 that would
+        // read as this router's own bug.
+        assert_eq!(response.status, StatusCode::BAD_GATEWAY, "{uri}");
         assert_structured_json(&response);
         assert_eq!(field(&response.json, "success")?, false, "{uri}");
-        assert_eq!(field(&response.json, "target")?, target, "{uri}");
-        assert_eq!(field(&response.json, "unsupported")?, true, "{uri}");
-        assert_eq!(
-            field(&response.json, "error")?,
-            "Proxy relay deployment is not supported by nullrouter-api",
-            "{uri}"
+        assert!(
+            field(&response.json, "error")?
+                .as_str()
+                .is_some_and(|error| error.contains("Could not reach")),
+            "{uri}: {}",
+            response.json
         );
     }
     Ok(())
+}
+
+/// Points one platform's API base somewhere harmless for the duration of a case.
+struct ApiBase {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl ApiBase {
+    fn new(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(name);
+        // SAFETY: this binary's cases run on one thread each and only this helper touches these
+        // variables, which are restored on drop.
+        unsafe { std::env::set_var(name, value) };
+        Self { name, previous }
+    }
+}
+
+impl Drop for ApiBase {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            // SAFETY: as above.
+            Some(value) => unsafe { std::env::set_var(self.name, value) },
+            // SAFETY: as above.
+            None => unsafe { std::env::remove_var(self.name) },
+        }
+    }
 }
 
 fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error> {

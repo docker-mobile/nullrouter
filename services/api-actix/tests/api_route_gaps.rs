@@ -96,6 +96,19 @@ async fn provider_proxy_model_and_usage_gap_routes_return_json_contracts() -> Te
     .await?;
     let (proxy_test_status, proxy_test) =
         request_json(Method::POST, "/api/proxy-pools/pool/test", "{}").await?;
+    // Pointed at a closed port so this slice makes no outbound request to a third-party platform.
+    // SAFETY: only this case touches these variables in this binary.
+    unsafe {
+        std::env::set_var("NULLROUTER_CLOUDFLARE_API", "http://127.0.0.1:1");
+    }
+    // SAFETY: as above.
+    unsafe {
+        std::env::set_var("NULLROUTER_DENO_API", "http://127.0.0.1:1");
+    }
+    // SAFETY: as above.
+    unsafe {
+        std::env::set_var("NULLROUTER_VERCEL_API", "http://127.0.0.1:1");
+    }
     let (vercel_status, vercel) = request_json(
         Method::POST,
         "/api/proxy-pools/vercel-deploy",
@@ -146,12 +159,25 @@ async fn provider_proxy_model_and_usage_gap_routes_return_json_contracts() -> Te
     assert_eq!(field(&batch, "results")?, &serde_json::json!([]));
     assert_eq!(proxy_test_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&proxy_test, "ok")?, false);
-    assert_eq!(vercel_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&vercel, "success")?, false);
-    assert_eq!(deno_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&deno, "success")?, false);
-    assert_eq!(cloudflare_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&cloudflare, "success")?, false);
+    // The three relay deploys no longer answer 501: they really deploy, using a token from the
+    // request. This slice points their platform APIs at a closed port — set below so the suite
+    // makes no outbound call to Cloudflare, Deno or Vercel — so the honest answer is a 502 naming
+    // the platform that could not be reached. Their success paths are covered in
+    // tests/relay_deploy.rs against a local stub.
+    for (status, body, platform) in [
+        (vercel_status, &vercel, "Vercel"),
+        (deno_status, &deno, "Deno Deploy"),
+        (cloudflare_status, &cloudflare, "Cloudflare"),
+    ] {
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{platform}");
+        assert_eq!(field(body, "success")?, false, "{platform}");
+        assert!(
+            field(body, "error")?
+                .as_str()
+                .is_some_and(|error| error.contains(platform)),
+            "{platform}: {body}"
+        );
+    }
     // `/api/models/test` no longer answers 501: it dispatches a real completion through the
     // runtime. This slice points at a closed port, so the honest answer is 503 — the router
     // is down, which is a different thing for a user to fix than a provider refusing.

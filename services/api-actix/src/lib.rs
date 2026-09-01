@@ -18,6 +18,7 @@ mod provider_probe;
 mod provider_tools;
 mod providers;
 mod proxy_pool_tools;
+mod relay_deploy;
 mod proxy_pools;
 mod proxy_test;
 mod pxpipe;

@@ -681,9 +681,8 @@ repository implements these; each names the thing it does not own.
 - **MITM control** (`/api/cli-tools/antigravity-mitm`) — *the intercepting proxy and its certificate
   authority*. URL validation is real. Issuing a CA and rewriting a machine's trust store is not
   something a router should do on a user's behalf.
-- **Relay deployment to Cloudflare / Deno / Vercel** — *third-party deploy targets*. Proxy pool CRUD
-  and per-connection outbound proxies are real; deploying a relay needs credentials for, and API
-  compatibility with, platforms this port has no account on.
+(Relay deployment was listed here, on the grounds that it needed an account on those platforms. That
+was wrong — the token comes from the caller's own request — and it is now implemented; see below.)
 - **Provider OAuth *authorisation* flows** (`/api/oauth/*`) — *the provider's own consent screen*.
   Device-code, PKCE browser flows, and vendor token imports for codex/cursor/kiro/gitlab/iflow.
   Getting a provider token for the first time requires a browser session with that provider.
@@ -777,6 +776,42 @@ loopback, private, link-local and unspecified addresses. Upstream accepts any UR
 route a server-side request forgery pivot: this process can reach the internal services on
 20129-20135 and every address on the host's networks, none of which the caller can. The restriction
 costs nothing, because every entry the registry offers is `https://` by upstream's own filter.
+
+**Relay deployment is real, on all three platforms.** `POST /api/proxy-pools/{cloudflare,deno,vercel}-deploy`
+uploads a small relay worker to the caller's own account, waits until it is actually reachable, and
+records a proxy pool pointing at it. A relay reads `x-relay-target` and `x-relay-path` and forwards
+the request, which is what makes a proxy pool useful.
+
+These three were previously refused on the grounds that they needed an account on those platforms.
+That was wrong: the token arrives in the request and belongs to whoever made it. Nothing here needs an
+account of its own.
+
+What follows from that is where the care goes. The token is a third-party credential with permission
+to deploy code, so it is used for the calls of one request and never stored, never logged, and never
+echoed back — the pool record that outlives the request holds only the resulting URL, and a test
+asserts the token reaches neither the response nor the stored record. The project name and Cloudflare
+account id are validated before any call, because both land in a platform API path and a separator in
+either would act on a different resource in the user's account than the dashboard named. A malformed
+request reaches the platform not at all: deploying creates something billable and publicly reachable
+under someone's name.
+
+Three platform behaviours are handled that would otherwise fail quietly:
+
+- A failed Deno deploy deletes the app it created. Without that, the failed attempt keeps the name,
+  so the obvious next step — try again — fails with "already exists".
+- A Cloudflare account with no `workers.dev` subdomain gets a worker with no hostname. That is
+  reported with the fix rather than recorded as a pool that cannot work.
+- Vercel puts SSO in front of new deployments, so protection is turned off before the URL is
+  reported. A protected relay answers every request with a login page while the pool looks fine.
+
+Platform errors are passed through with their own status and message: "Authentication error" tells a
+user their token is wrong, where a generic failure sends them looking in this router. A platform 5xx
+becomes a 502, since the failure is upstream of here.
+
+Unlike `pxpipe/install`, these are not host-only. The deploy acts on a remote account using a
+credential the caller already holds, so restricting it to loopback would stop a remote operator
+deploying to their own account while protecting nothing on this host. A dashboard session is still
+required.
 
 **Console-log capture is live, across every service.** `/api/translator/console-logs` lists the
 buffered lines, its `/stream` companion pushes new ones as they arrive, and `DELETE` empties the

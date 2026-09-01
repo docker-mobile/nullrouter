@@ -497,6 +497,35 @@ impl StateClient {
     }
 
     /// GET a loopback path as JSON, logging `label` when state cannot be read.
+    /// Record a proxy pool, returning the created entry.
+    ///
+    /// Written through state rather than held locally so a deployed relay appears in the same list
+    /// the dashboard's pane reads and the runtime selects from — a pool the runtime cannot see is a
+    /// relay nothing routes through.
+    pub(crate) async fn create_proxy_pool(&self, pool: &Value) -> Option<Value> {
+        let url = format!("{}/api/proxy-pools", self.base);
+        match self.client.post(&url).json(pool).send().await {
+            Ok(response) if response.status().is_success() => {
+                let body = response.json::<Value>().await.ok()?;
+                // State wraps it as `{proxyPool: {...}}`; the inner object is what a caller wants,
+                // and the wrapper is unwrapped here rather than at each call site.
+                Some(
+                    body.get("proxyPool")
+                        .cloned()
+                        .unwrap_or(body),
+                )
+            }
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), "creating a proxy pool failed");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, "creating a proxy pool failed");
+                None
+            }
+        }
+    }
+
     /// The console-log buffer, from the state service that holds it.
     ///
     /// Read from there rather than kept here so the list this service serves and the stream the
