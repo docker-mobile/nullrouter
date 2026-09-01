@@ -25,6 +25,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::spec::{ConfigFile, Format, Root};
+use super::toml_text;
 use super::write;
 
 /// The default key upstream writes when a request omits one.
@@ -1091,6 +1092,222 @@ fn openclaw_agent_models(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------------------------
+// Grok Build — ~/.grok/config.toml, edited as text
+// ---------------------------------------------------------------------------------------------
+
+/// The slot this router's main model occupies. `[model.9router]`, selected by `[models] default`.
+const GROK_MAIN_SLOT: &str = PROVIDER;
+
+/// The subagent kinds upstream offers, each with its own `9router-{type}` slot.
+const GROK_SUBAGENT_TYPES: &[&str] = &["general-purpose", "explore", "plan"];
+
+/// Written into a subagent marker when there was no previous value to remember.
+///
+/// A marker has to distinguish "was set to X" from "was not set", because restoring the latter
+/// means deleting the key rather than writing an empty string — and an empty string is a value Grok
+/// Build would try to resolve as a model name.
+const GROK_UNSET_SENTINEL: &str = "__9router_unset__";
+
+/// Grok Build's own built-in default, restored when there is no remembered one.
+const GROK_BUILTIN_DEFAULT: &str = "grok-build";
+
+const GROK_MODELS_SECTION: &str = "models";
+const GROK_SUBAGENT_SECTION: &str = "subagents.models";
+
+fn grok_slot(kind: &str) -> String {
+    format!("{GROK_MAIN_SLOT}-{kind}")
+}
+
+fn grok_section(slot: &str) -> String {
+    format!("model.{slot}")
+}
+
+/// Upserts the model section, selects it, and remembers what was selected before.
+///
+/// The remembering is the reason this file is edited as text: the previous default is stored in a
+/// `# 9router-prev-default` comment, which a parse and re-serialise would drop — turning every
+/// later revoke into "reset to the built-in default" and losing the user's own choice.
+fn grok_apply(document: &mut Value, payload: &Payload) {
+    let mut text = document.as_str().unwrap_or_default().to_owned();
+    let base = payload.base_v1();
+    let key = payload.key_or_placeholder().to_owned();
+
+    text = grok_remember_default(&text);
+    text = toml_text::upsert_section(
+        &text,
+        &grok_section(GROK_MAIN_SLOT),
+        &grok_section_fields(payload.model(), &base, &key, DISPLAY, payload.context_window.as_ref()),
+    );
+    text = toml_text::set_field(&text, GROK_MODELS_SECTION, "default", GROK_MAIN_SLOT);
+
+    // `subagentModels` absent leaves existing subagent config untouched, which upstream does
+    // explicitly for API compatibility — a dashboard pane that does not know about subagents must
+    // not clear them.
+    if let Some(Value::Object(selections)) = payload.subagent_models.as_ref() {
+        for kind in GROK_SUBAGENT_TYPES {
+            let selected = selections
+                .get(*kind)
+                .and_then(|entry| entry.get("model"))
+                .and_then(Value::as_str)
+                .filter(|model| !model.is_empty());
+            let slot = grok_slot(kind);
+            match selected {
+                Some(model) => {
+                    text = grok_remember_subagent(&text, kind);
+                    let window = selections
+                        .get(*kind)
+                        .and_then(|entry| entry.get("contextWindow"))
+                        .cloned();
+                    text = toml_text::upsert_section(
+                        &text,
+                        &grok_section(&slot),
+                        &grok_section_fields(
+                            model,
+                            &base,
+                            &key,
+                            &format!("{DISPLAY} {kind}"),
+                            window.as_ref(),
+                        ),
+                    );
+                    text = toml_text::set_field(&text, GROK_SUBAGENT_SECTION, kind, &slot);
+                }
+                None => {
+                    text = grok_restore_subagent(&text, kind);
+                    text = toml_text::remove_section(&text, &grok_section(&slot));
+                }
+            }
+        }
+    }
+
+    *document = Value::String(text);
+}
+
+/// Removes every slot and puts the remembered selections back.
+fn grok_revoke(document: &mut Value) {
+    let mut text = document.as_str().unwrap_or_default().to_owned();
+    for kind in GROK_SUBAGENT_TYPES {
+        text = grok_restore_subagent(&text, kind);
+        text = toml_text::remove_section(&text, &grok_section(&grok_slot(kind)));
+    }
+    text = toml_text::remove_section(&text, &grok_section(GROK_MAIN_SLOT));
+    text = grok_restore_default(&text);
+    *document = Value::String(toml_text::collapse_blank_runs(&text));
+}
+
+/// The lines of a `[model.<slot>]` section, in upstream's order.
+///
+/// `api_backend = "chat_completions"` is fixed and load-bearing: it is what tells Grok Build to
+/// speak the chat-completions dialect to this endpoint rather than its own.
+fn grok_section_fields(
+    model: &str,
+    base_url: &str,
+    api_key: &str,
+    name: &str,
+    context_window: Option<&Value>,
+) -> Vec<String> {
+    let quote = |value: &str| Value::String(value.to_owned()).to_string();
+    let mut fields = vec![
+        format!("model = {}", quote(model)),
+        format!("base_url = {}", quote(base_url)),
+        format!("name = {}", quote(name)),
+        format!("description = {}", quote("Routed via 9Router gateway")),
+        "api_backend = \"chat_completions\"".to_owned(),
+    ];
+    if !api_key.is_empty() {
+        fields.push(format!("api_key = {}", quote(api_key)));
+    }
+    // Written only for a finite positive number, and floored — upstream's
+    // `Number.isFinite(w) && w > 0` then `Math.floor`. A zero or negative window would make Grok
+    // Build reject every request as over budget.
+    if let Some(window) = context_window.and_then(positive_whole_number) {
+        fields.push(format!("context_window = {window}"));
+    }
+    fields
+}
+
+/// A finite positive value as a whole number, from either a JSON number or a numeric string.
+fn positive_whole_number(value: &Value) -> Option<u64> {
+    let number = match value {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(text) => text.trim().parse::<f64>().ok()?,
+        _ => return None,
+    };
+    if !number.is_finite() || number <= 0.0 {
+        return None;
+    }
+    // `as` on a float is a saturating cast in Rust, so an absurd value clamps rather than wrapping.
+    Some(number.floor() as u64)
+}
+
+const GROK_PREV_DEFAULT: &str = "9router-prev-default";
+
+fn grok_prev_subagent(kind: &str) -> String {
+    format!("9router-prev-subagent-{kind}")
+}
+
+/// Records the current default, unless one is already recorded or it is already ours.
+///
+/// "Already recorded" matters: a second apply must not overwrite the user's original choice with
+/// `9router`, which is exactly what the first apply just set.
+fn grok_remember_default(text: &str) -> String {
+    if toml_text::read_marker(text, GROK_PREV_DEFAULT).is_some() {
+        return text.to_owned();
+    }
+    let current = toml_text::get_field(text, GROK_MODELS_SECTION, "default");
+    match current {
+        Some(current) if current != GROK_MAIN_SLOT => toml_text::insert_marker(
+            text,
+            &grok_section(GROK_MAIN_SLOT),
+            &format!("# {GROK_PREV_DEFAULT} = {}\n", Value::String(current)),
+        ),
+        Some(_) | None => text.to_owned(),
+    }
+}
+
+/// Puts the remembered default back, or Grok Build's built-in one, and drops the marker.
+fn grok_restore_default(text: &str) -> String {
+    let previous = toml_text::read_marker(text, GROK_PREV_DEFAULT)
+        .unwrap_or_else(|| GROK_BUILTIN_DEFAULT.to_owned());
+    let mut next = toml_text::remove_marker(text, GROK_PREV_DEFAULT);
+    // Only when the selection is still ours: a user who has since chosen another model keeps it.
+    if toml_text::get_field(&next, GROK_MODELS_SECTION, "default").as_deref()
+        == Some(GROK_MAIN_SLOT)
+    {
+        next = toml_text::set_field(&next, GROK_MODELS_SECTION, "default", &previous);
+    }
+    next
+}
+
+fn grok_remember_subagent(text: &str, kind: &str) -> String {
+    let name = grok_prev_subagent(kind);
+    if toml_text::read_marker(text, &name).is_some() {
+        return text.to_owned();
+    }
+    // An absent value is recorded as the sentinel, so a restore knows to delete the key rather
+    // than write an empty string Grok Build would try to resolve as a model name.
+    let current = toml_text::get_field(text, GROK_SUBAGENT_SECTION, kind)
+        .unwrap_or_else(|| GROK_UNSET_SENTINEL.to_owned());
+    toml_text::insert_marker(
+        text,
+        &grok_section(GROK_MAIN_SLOT),
+        &format!("# {name} = {}\n", Value::String(current)),
+    )
+}
+
+fn grok_restore_subagent(text: &str, kind: &str) -> String {
+    let name = grok_prev_subagent(kind);
+    let Some(previous) = toml_text::read_marker(text, &name) else {
+        return text.to_owned();
+    };
+    let next = toml_text::remove_marker(text, &name);
+    if previous == GROK_UNSET_SENTINEL {
+        toml_text::delete_field(&next, GROK_SUBAGENT_SECTION, kind)
+    } else {
+        toml_text::set_field(&next, GROK_SUBAGENT_SECTION, kind, &previous)
+    }
+}
+
 /// How one tool is written.
 #[derive(Debug)]
 pub(crate) struct Writer {
@@ -1260,9 +1477,37 @@ pub(crate) fn writer_for(tool_id: &str) -> Option<&'static Writer> {
         "deepseek-tui-settings" => Some(&DEEPSEEK),
         "jcode-settings" => Some(&JCODE),
         "openclaw-settings" => Some(&OPENCLAW),
+        "grok-build-settings" => Some(&GROK),
         _ => None,
     }
 }
+
+const GROK_ROOT: &[Root] = &[Root::Home(&[".grok"])];
+
+static GROK: Writer = Writer {
+    validate: |payload| {
+        // Upstream trims the model before testing it, so whitespace is not a model name.
+        let model = payload.model.as_deref().unwrap_or_default().trim();
+        if payload.base_url.as_deref().is_none_or(str::is_empty) || model.is_empty() {
+            return Err("baseUrl and model are required");
+        }
+        Ok(())
+    },
+    targets: &[Target {
+        config: ConfigFile {
+            roots: GROK_ROOT,
+            segments: &["config.toml"],
+            // Text, not parsed: the previous-default marker is a comment. See `Format::TomlText`.
+            format: Format::TomlText,
+            indirect: None,
+        },
+        required: Required::Yes,
+        on_empty: OnEmpty::Keep,
+        apply: grok_apply,
+        revoke: grok_revoke,
+    }],
+    derived: None,
+};
 
 const OPENCLAW_ROOT: &[Root] = &[Root::Home(&[".openclaw"])];
 

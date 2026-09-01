@@ -33,6 +33,13 @@ pub(crate) enum Format {
     Json,
     /// Via `toml`, with `preserve_order` so a rewrite leaves the user's own keys where they were.
     Toml,
+    /// TOML edited as text, by section, rather than parsed.
+    ///
+    /// Only Grok Build's config, and only because upstream records the user's previous default
+    /// model in a comment that a parse and re-serialise would drop. Detection still reads that file
+    /// as [`Self::Toml`]: the marker inspects a parsed value, and only the *write* has to preserve
+    /// comments. See [`super::toml_text`].
+    TomlText,
     /// Line-oriented `KEY=value`, merged by upserting keys so comments and unrelated lines
     /// survive.
     DotEnv,

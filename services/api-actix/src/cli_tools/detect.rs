@@ -90,8 +90,9 @@ pub(crate) fn parse_config(text: &str, format: Format) -> Result<Value, String> 
             .map_err(|error| error.to_string())
             .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
         // Not parsed into a document: reported as text, which is what the dashboard shows for
-        // these and what the marker checks.
-        Format::DotEnv | Format::YamlBlock => Ok(Value::String(text.to_owned())),
+        // these and what the marker checks. `TomlText` is here rather than with `Toml` because the
+        // point of that variant is to reach the writer as text with its comments intact.
+        Format::DotEnv | Format::YamlBlock | Format::TomlText => Ok(Value::String(text.to_owned())),
     }
 }
 

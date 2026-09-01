@@ -83,7 +83,7 @@ fn default_for(format: Format) -> Value {
         // handed an object it then replaces — so the object default is right for the rest and the
         // copilot writer starts from an array explicitly.
         Format::Json | Format::Toml => Value::Object(serde_json::Map::new()),
-        Format::DotEnv | Format::YamlBlock => Value::String(String::new()),
+        Format::DotEnv | Format::YamlBlock | Format::TomlText => Value::String(String::new()),
     }
 }
 
@@ -104,7 +104,9 @@ pub(crate) fn serialise(value: &Value, format: Format) -> Result<String, WriteEr
                 .map_err(|error| WriteError::Serialise(error.to_string()))
         }
         // Carried as text throughout, so there is nothing to serialise.
-        Format::DotEnv | Format::YamlBlock => Ok(value.as_str().unwrap_or_default().to_owned()),
+        Format::DotEnv | Format::YamlBlock | Format::TomlText => {
+            Ok(value.as_str().unwrap_or_default().to_owned())
+        }
     }
 }
 

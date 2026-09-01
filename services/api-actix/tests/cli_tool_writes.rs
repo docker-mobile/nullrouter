@@ -180,6 +180,7 @@ const DEEPSEEK_CONFIG: &str = ".deepseek/config.toml";
 const JCODE_CONFIG: &str = ".jcode/config.toml";
 const JCODE_ENV: &str = ".config/jcode/provider-9router.env";
 const OPENCLAW_SETTINGS: &str = ".openclaw/openclaw.json";
+const GROK_CONFIG: &str = ".grok/config.toml";
 
 #[actix_web::test]
 async fn a_claude_apply_reaches_the_file_claude_code_reads() -> TestResult {
@@ -1052,6 +1053,193 @@ async fn a_per_agent_models_file_is_written_only_into_a_directory_that_exists() 
             .any(|warning| warning.as_str().is_some_and(|text| text.contains("does not exist"))),
         "{body}"
     );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn grok_remembers_the_users_previous_default_across_a_revoke() -> TestResult {
+    // Given: a config where the user has chosen their own default model.
+    let home = HomeGuard::new();
+    home.seed(
+        GROK_CONFIG,
+        "# my notes\ntheme = \"dark\"\n\n[models]\ndefault = \"grok-4\"\n",
+    );
+
+    // When: an apply runs, and then a revoke.
+    let (status, body) = apply(
+        "grok-build-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "apiKey": "sk-grok",
+            "model": "cc/opus",
+            "contextWindow": 200_000,
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let applied = home.read(GROK_CONFIG);
+    assert!(applied.contains("[model.9router]"), "{applied}");
+    assert!(applied.contains(r#"base_url = "http://127.0.0.1:20128/v1""#), "{applied}");
+    assert!(applied.contains(r#"api_backend = "chat_completions""#), "{applied}");
+    assert!(applied.contains("context_window = 200000"), "{applied}");
+    assert!(applied.contains(r#"default = "9router""#), "{applied}");
+    // The previous choice is recorded in a comment, which is why this file is edited as text.
+    assert!(applied.contains(r#"# 9router-prev-default = "grok-4""#), "{applied}");
+    // The user's own content is still there.
+    assert!(applied.contains("# my notes\ntheme = \"dark\""), "{applied}");
+
+    // Then: the revoke puts their choice back rather than the built-in default.
+    revoke("grok-build-settings").await?;
+    let reverted = home.read(GROK_CONFIG);
+    assert!(
+        reverted.contains(r#"default = "grok-4""#),
+        "the user's own default must come back, not grok-build's: {reverted}"
+    );
+    assert!(!reverted.contains("[model.9router]"), "{reverted}");
+    assert!(!reverted.contains("9router-prev-default"), "the marker is consumed: {reverted}");
+    assert!(reverted.contains("theme = \"dark\""), "{reverted}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_second_grok_apply_does_not_overwrite_the_remembered_default() -> TestResult {
+    // Given: a config with the user's default, already applied once.
+    let home = HomeGuard::new();
+    home.seed(GROK_CONFIG, "[models]\ndefault = \"grok-4\"\n");
+    let payload = json!({"baseUrl": "http://x", "apiKey": "k", "model": "m"});
+    apply("grok-build-settings", &payload).await?;
+
+    // When: a second apply runs. At this point the current default is `9router`, so a naive
+    // remember would record that and lose the original.
+    apply("grok-build-settings", &payload).await?;
+
+    // Then: the marker still holds their model, and a revoke restores it.
+    assert!(
+        home.read(GROK_CONFIG).contains(r#"# 9router-prev-default = "grok-4""#),
+        "{}",
+        home.read(GROK_CONFIG)
+    );
+    revoke("grok-build-settings").await?;
+    assert!(home.read(GROK_CONFIG).contains(r#"default = "grok-4""#));
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_grok_revoke_with_nothing_remembered_uses_the_builtin_default() -> TestResult {
+    // Given: a config that was applied when the user had made no choice of their own.
+    let home = HomeGuard::new();
+    apply(
+        "grok-build-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "model": "m"}),
+    )
+    .await?;
+    // No marker, because there was no previous value to remember.
+    assert!(!home.read(GROK_CONFIG).contains("9router-prev-default"));
+
+    // When: the revoke runs.
+    revoke("grok-build-settings").await?;
+
+    // Then: Grok Build's own built-in default is written, since leaving `9router` selected would
+    // point it at a slot that no longer exists.
+    assert!(
+        home.read(GROK_CONFIG).contains(r#"default = "grok-build""#),
+        "{}",
+        home.read(GROK_CONFIG)
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn grok_subagent_slots_restore_an_unset_key_by_deleting_it() -> TestResult {
+    // Given: a fresh config, so the subagent keys start unset. The distinction being tested is
+    // "was unset" against "was set to X": restoring the first means deleting the key, and writing
+    // an empty string instead would leave Grok Build resolving "" as a model name.
+    let home = HomeGuard::new();
+
+    // When: an apply sets a subagent model, and then a revoke runs.
+    apply(
+        "grok-build-settings",
+        &json!({
+            "baseUrl": "http://x",
+            "apiKey": "k",
+            "model": "m",
+            "subagentModels": {"explore": {"model": "cc/haiku"}},
+        }),
+    )
+    .await?;
+    let applied = home.read(GROK_CONFIG);
+    assert!(applied.contains("[model.9router-explore]"), "{applied}");
+    assert!(applied.contains(r#"explore = "9router-explore""#), "{applied}");
+    // The sentinel records that there was nothing there before.
+    assert!(applied.contains("__9router_unset__"), "{applied}");
+
+    revoke("grok-build-settings").await?;
+
+    // Then: the key is gone, not blank, and its section with it.
+    let reverted = home.read(GROK_CONFIG);
+    assert!(!reverted.contains("explore ="), "the key must be deleted: {reverted}");
+    assert!(!reverted.contains("[model.9router-explore]"), "{reverted}");
+    assert!(!reverted.contains("__9router_unset__"), "{reverted}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_absent_subagent_block_leaves_existing_subagent_config_alone() -> TestResult {
+    // Given: a config with a subagent the user set up themselves.
+    let home = HomeGuard::new();
+    home.seed(
+        GROK_CONFIG,
+        "[subagents.models]\nplan = \"grok-4-fast\"\n",
+    );
+
+    // When: an apply arrives with no `subagentModels` at all — which is what a dashboard pane that
+    // does not know about subagents sends.
+    apply(
+        "grok-build-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "model": "m"}),
+    )
+    .await?;
+
+    // Then: their subagent is untouched. Clearing it here would mean an unrelated pane silently
+    // resets a setting it never showed.
+    assert!(
+        home.read(GROK_CONFIG).contains(r#"plan = "grok-4-fast""#),
+        "{}",
+        home.read(GROK_CONFIG)
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_zero_context_window_is_omitted_rather_than_written() -> TestResult {
+    // A zero or negative window would make Grok Build reject every request as over budget, so
+    // upstream writes the key only for a finite positive number.
+    let home = HomeGuard::new();
+    for window in [json!(0), json!(-1), json!("nonsense"), Value::Null] {
+        apply(
+            "grok-build-settings",
+            &json!({
+                "baseUrl": "http://x",
+                "apiKey": "k",
+                "model": "m",
+                "contextWindow": window,
+            }),
+        )
+        .await?;
+        assert!(
+            !home.read(GROK_CONFIG).contains("context_window"),
+            "{window} produced a context_window: {}",
+            home.read(GROK_CONFIG)
+        );
+    }
+    // And a fractional value is floored rather than refused.
+    apply(
+        "grok-build-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "model": "m", "contextWindow": 1024.7}),
+    )
+    .await?;
+    assert!(home.read(GROK_CONFIG).contains("context_window = 1024"));
     Ok(())
 }
 

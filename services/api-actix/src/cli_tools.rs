@@ -7,6 +7,7 @@ mod detect;
 mod mitm;
 mod mutations;
 mod spec;
+mod toml_text;
 mod write;
 mod yaml_block;
 
