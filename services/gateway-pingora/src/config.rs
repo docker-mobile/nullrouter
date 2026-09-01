@@ -186,9 +186,20 @@ impl GatewayConfig {
         route_for_path(path)
     }
 
-    pub fn access_requirement(&self, path: &str, peer_ip: Option<IpAddr>) -> AccessRequirement {
+    /// The access rule for a request.
+    ///
+    /// The method is part of the input, not decoration: some paths are readable with a session
+    /// from anywhere but writable only from this host, so a rule derived from the path alone
+    /// would have to pick one answer for both and get one of them wrong.
+    pub fn access_requirement(
+        &self,
+        path: &str,
+        method: &http::Method,
+        peer_ip: Option<IpAddr>,
+    ) -> AccessRequirement {
         AccessRequirement::for_request(
             path,
+            method,
             self.route_for_path(path),
             peer_ip,
             self.enforce_managed_api_keys,

@@ -5,7 +5,10 @@ use crate::{json_body, responses};
 
 mod detect;
 mod mitm;
+mod mutations;
 mod spec;
+mod write;
+mod yaml_block;
 
 const TOOL_UNSUPPORTED: &str = "CLI tool configuration is not supported by nullrouter-api";
 const MCP_UNSUPPORTED: &str = "Cowork MCP discovery is not supported by nullrouter-api";
@@ -14,9 +17,6 @@ const MCP_UNSUPPORTED: &str = "Cowork MCP discovery is not supported by nullrout
 // a hardcoded answer looks like in the type system: there was nowhere to put a real path or a real
 // parsed config. Statuses are now built as `serde_json::Value` by `tool_status_body`, keyed by the
 // same short ids `AllStatuses` had as fields.
-
-#[derive(Debug, Deserialize)]
-struct ToolMutationRequest {}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,22 +154,123 @@ async fn cowork_mcp_tools(body: web::Bytes) -> HttpResponse {
     )
 }
 
-async fn mutate_tool(body: web::Bytes) -> HttpResponse {
-    if !body.is_empty() {
-        let request = match json_body::parse::<ToolMutationRequest>(&body) {
-            Ok(request) => request,
+/// `POST`/`PATCH` applies a config; `DELETE` revokes it.
+///
+/// The work is a handful of synchronous file reads and writes, so it runs on the blocking pool. On
+/// an actix worker it would stall every other request that worker holds, and the dashboard polls
+/// `all-statuses` while this runs.
+async fn mutate_tool(
+    path: web::Path<String>,
+    method: actix_web::http::Method,
+    body: web::Bytes,
+) -> HttpResponse {
+    let segment = path.into_inner();
+    let Some(tool) = spec::Tool::parse(&segment) else {
+        return responses::json(
+            StatusCode::NOT_FOUND,
+            &responses::error("CLI tool route not found"),
+        );
+    };
+
+    let Some(writer) = mutations::writer_for(tool.id) else {
+        // Not a gap: upstream exports no mutation for this tool either. `spec`'s `writable` flag
+        // says the same thing, and a test holds the two together.
+        return responses::json(
+            StatusCode::NOT_IMPLEMENTED,
+            &UnsupportedMutation {
+                success: false,
+                unsupported: true,
+                message: TOOL_UNSUPPORTED,
+            },
+        );
+    };
+
+    let direction = if method == actix_web::http::Method::DELETE {
+        mutations::Direction::Revoke
+    } else {
+        mutations::Direction::Apply
+    };
+
+    // A revoke carries no body upstream, and an apply's body is required. Parsed before the
+    // blocking hop so a malformed body costs nothing.
+    let payload = if direction == mutations::Direction::Revoke && body.is_empty() {
+        mutations::Payload::default()
+    } else {
+        match json_body::parse::<mutations::Payload>(&body) {
+            Ok(payload) => payload,
             Err(response) => return response,
-        };
-        let _ = request;
+        }
+    };
+
+    if direction == mutations::Direction::Apply
+        && let Err(error) = (writer.validate)(&payload)
+    {
+        // Before any file is opened, so a rejected request leaves the disk untouched.
+        return responses::json(StatusCode::BAD_REQUEST, &responses::error(error));
     }
-    responses::json(
-        StatusCode::NOT_IMPLEMENTED,
-        &UnsupportedMutation {
-            success: false,
-            unsupported: true,
-            message: TOOL_UNSUPPORTED,
-        },
-    )
+
+    match actix_web::rt::task::spawn_blocking(move || writer.run(direction, &payload)).await {
+        Ok(Ok(outcome)) => responses::json(StatusCode::OK, &mutation_body(tool, direction, &outcome)),
+        Ok(Err(error)) => responses::json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &serde_json::json!({ "error": error.message() }),
+        ),
+        Err(error) => responses::json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &serde_json::json!({
+                "error": format!("Could not write {} settings: {error}", tool.id),
+            }),
+        ),
+    }
+}
+
+/// The response body for a completed mutation.
+///
+/// `success` and `message` are upstream's, so the dashboard needs no changes. The rest are
+/// additions this port makes because it has the information: which files were touched, where the
+/// backups went, and which best-effort targets failed. Upstream discards that last one silently,
+/// which leaves a user whose VS Code settings are read-only with nothing to go on.
+fn mutation_body(
+    tool: &spec::Tool,
+    direction: mutations::Direction,
+    outcome: &mutations::Outcome,
+) -> serde_json::Value {
+    let message = match (direction, outcome.nothing_to_do) {
+        (mutations::Direction::Apply, _) => {
+            format!("{} settings applied successfully!", tool.display_name)
+        }
+        (mutations::Direction::Revoke, false) => {
+            format!("9Router settings removed from {}", tool.display_name)
+        }
+        (mutations::Direction::Revoke, true) => "No settings file to reset".to_owned(),
+    };
+    let paths = |items: &[std::path::PathBuf]| -> serde_json::Value {
+        items
+            .iter()
+            .map(|path| serde_json::Value::String(path.display().to_string()))
+            .collect()
+    };
+    let mut body = serde_json::json!({
+        "success": true,
+        "message": message,
+        "written": paths(&outcome.written),
+        "backedUp": paths(&outcome.backed_up),
+    });
+    if !outcome.warnings.is_empty() {
+        body["warnings"] = outcome
+            .warnings
+            .iter()
+            .map(|warning| serde_json::Value::String(warning.clone()))
+            .collect();
+    }
+    // Upstream names the written path per tool, so the dashboard's success pane finds whichever it
+    // reads.
+    if let Some(first) = outcome.written.first().map(|path| path.display().to_string()) {
+        for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
+            body[key] = serde_json::Value::String(first.clone());
+        }
+    }
+    body
 }
 
 /// One tool's status as the dashboard reads it.

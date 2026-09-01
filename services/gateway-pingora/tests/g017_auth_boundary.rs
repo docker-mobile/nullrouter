@@ -72,7 +72,7 @@ fn public_paths_bypass_authorize() {
         "/api/auth/login",
     ] {
         // When: access policy is evaluated for a loopback client.
-        let requirement = config.access_requirement(path, Some(LOOPBACK));
+        let requirement = config.access_requirement(path, &Method::GET, Some(LOOPBACK));
 
         // Then: no authorization transport is required.
         assert_eq!(requirement, AccessRequirement::Public, "{path}");
@@ -82,7 +82,7 @@ fn public_paths_bypass_authorize() {
 #[test]
 fn dashboard_denial_redirects_to_login() {
     // Given: a protected dashboard route without a valid session.
-    let requirement = GatewayConfig::default().access_requirement("/dashboard", Some(LOOPBACK));
+    let requirement = GatewayConfig::default().access_requirement("/dashboard", &Method::GET, Some(LOOPBACK));
 
     // When: Auth denies the session.
     let decision = requirement.decision(AuthorizationState::Denied);
@@ -98,7 +98,7 @@ fn dashboard_denial_redirects_to_login() {
 fn protected_api_denial_returns_json_401() {
     // Given: a protected API route without a valid session.
     let requirement =
-        GatewayConfig::default().access_requirement("/api/providers/client", Some(LOOPBACK));
+        GatewayConfig::default().access_requirement("/api/providers/client", &Method::GET, Some(LOOPBACK));
 
     // When: Auth denies the session.
     let decision = requirement.decision(AuthorizationState::Denied);
@@ -114,8 +114,8 @@ fn protected_api_denial_returns_json_401() {
 fn authorization_unavailable_fails_closed() {
     // Given: protected dashboard and API requirements.
     let config = GatewayConfig::default();
-    let dashboard = config.access_requirement("/dashboard", Some(LOOPBACK));
-    let api = config.access_requirement("/api/settings", Some(LOOPBACK));
+    let dashboard = config.access_requirement("/dashboard", &Method::GET, Some(LOOPBACK));
+    let api = config.access_requirement("/api/settings", &Method::GET, Some(LOOPBACK));
 
     // When: the Auth transport is unavailable.
     let dashboard_decision = dashboard.decision(AuthorizationState::Unavailable);
@@ -133,7 +133,7 @@ fn public_internal_paths_are_denied() {
 
     for path in ["/internal", "/internal/v1/authorize", "/internal/health"] {
         // When: policy is evaluated even for a loopback socket.
-        let requirement = config.access_requirement(path, Some(LOOPBACK));
+        let requirement = config.access_requirement(path, &Method::GET, Some(LOOPBACK));
 
         // Then: the public port rejects the request before routing.
         assert_eq!(requirement, AccessRequirement::Forbidden, "{path}");
@@ -151,12 +151,81 @@ fn host_only_route_rejects_non_loopback_peer() {
     let config = GatewayConfig::default();
 
     // When: the actual socket peer is remote rather than loopback.
-    let remote = config.access_requirement("/api/cli-tools/cowork-settings", Some(REMOTE));
-    let local = config.access_requirement("/api/cli-tools/cowork-settings", Some(LOOPBACK));
+    let remote =
+        config.access_requirement("/api/cli-tools/cowork-settings", &Method::GET, Some(REMOTE));
+    let local =
+        config.access_requirement("/api/cli-tools/cowork-settings", &Method::GET, Some(LOOPBACK));
 
     // Then: the remote peer is forbidden while the local peer still needs a session.
     assert_eq!(remote, AccessRequirement::Forbidden);
     assert_eq!(local, AccessRequirement::ApiSession);
+}
+
+#[test]
+fn cli_tool_config_writes_are_host_only_while_reads_are_not() {
+    // Given: the per-tool settings route, which writes files under the operator's home
+    // directory — `~/.claude/settings.json`, `~/.codex/config.toml`, VS Code user settings.
+    let config = GatewayConfig::default();
+
+    for path in [
+        "/api/cli-tools/claude-settings",
+        "/api/cli-tools/codex-settings",
+        "/api/cli-tools/copilot-settings",
+        "/api/cli-tools/all-statuses",
+    ] {
+        for method in [Method::POST, Method::PATCH, Method::DELETE, Method::PUT] {
+            // When: a mutating request arrives from another machine, session and all.
+            let remote = config.access_requirement(path, &method, Some(REMOTE));
+
+            // Then: it is refused before routing. A session cookie taken from a browser
+            // elsewhere must not rewrite this host's dotfiles.
+            assert_eq!(remote, AccessRequirement::Forbidden, "{method} {path}");
+            assert_eq!(
+                remote.decision(AuthorizationState::Authorized),
+                AccessDecision::Forbidden,
+                "{method} {path} allowed a remote peer holding a valid session"
+            );
+            // And the same write from this host still needs a session — host-only is not
+            // a bypass.
+            assert_eq!(
+                config.access_requirement(path, &method, Some(LOOPBACK)),
+                AccessRequirement::ApiSession,
+                "{method} {path}"
+            );
+        }
+
+        // And the read stays reachable: it reports which tools are installed, which is what
+        // the dashboard's status pane is. Holding it to loopback would blank that pane for
+        // every remote user while protecting nothing.
+        for method in [Method::GET, Method::HEAD, Method::OPTIONS] {
+            assert_eq!(
+                config.access_requirement(path, &method, Some(REMOTE)),
+                AccessRequirement::ApiSession,
+                "{method} {path} should stay readable with a session"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_all_method_host_only_routes_are_not_relaxed_by_the_write_rule() {
+    // The write rule is additive. `cowork-settings` and `antigravity-mitm` are host-only for
+    // every method — cowork injects MCP bridge entries and the MITM route spawns a proxy — and
+    // adding `/api/cli-tools` as a write-only prefix must not have made their reads remote.
+    let config = GatewayConfig::default();
+    for path in [
+        "/api/cli-tools/cowork-settings",
+        "/api/cli-tools/antigravity-mitm",
+        "/api/cli-tools/antigravity-mitm/alias",
+    ] {
+        for method in [Method::GET, Method::OPTIONS, Method::POST] {
+            assert_eq!(
+                config.access_requirement(path, &method, Some(REMOTE)),
+                AccessRequirement::Forbidden,
+                "{method} {path}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -167,8 +236,8 @@ fn pxpipe_install_and_start_are_host_only() {
 
     for path in ["/api/pxpipe/install", "/api/pxpipe/start"] {
         // When: the socket peer is remote, even with a valid dashboard session.
-        let remote = config.access_requirement(path, Some(REMOTE));
-        let local = config.access_requirement(path, Some(LOOPBACK));
+        let remote = config.access_requirement(path, &Method::GET, Some(REMOTE));
+        let local = config.access_requirement(path, &Method::GET, Some(LOOPBACK));
 
         // Then: it is refused before routing. Stricter than upstream, which allows
         // these from any authenticated session: a session cookie taken from a browser
@@ -199,7 +268,7 @@ fn the_read_only_pxpipe_routes_stay_reachable_with_a_session() {
         "/api/pxpipe/restart",
     ] {
         assert_eq!(
-            config.access_requirement(path, Some(REMOTE)),
+            config.access_requirement(path, &Method::GET, Some(REMOTE)),
             AccessRequirement::ApiSession,
             "{path}"
         );
@@ -210,7 +279,7 @@ fn the_read_only_pxpipe_routes_stay_reachable_with_a_session() {
 fn runtime_key_enforcement_allows_valid_key() {
     // Given: managed API-key enforcement is active for runtime routes.
     let config = GatewayConfig::default().with_managed_api_key_enforcement(true);
-    let requirement = config.access_requirement("/v1/models", Some(REMOTE));
+    let requirement = config.access_requirement("/v1/models", &Method::GET, Some(REMOTE));
 
     // When: Auth validates the managed key.
     let decision = requirement.decision(AuthorizationState::Authorized);
@@ -227,7 +296,7 @@ fn runtime_key_enforcement_denies_invalid_key() {
 
     for path in ["/v1/chat/completions", "/v1beta/models"] {
         // When: Auth denies or cannot validate the managed key.
-        let requirement = config.access_requirement(path, Some(REMOTE));
+        let requirement = config.access_requirement(path, &Method::GET, Some(REMOTE));
 
         // Then: the request fails closed as JSON 401.
         assert_eq!(requirement, AccessRequirement::RuntimeApiKey, "{path}");
@@ -251,7 +320,7 @@ fn runtime_key_enforcement_can_be_disabled() {
 
     for path in ["/v1/models", "/v1beta/models"] {
         // When: runtime policy is evaluated.
-        let requirement = config.access_requirement(path, Some(REMOTE));
+        let requirement = config.access_requirement(path, &Method::GET, Some(REMOTE));
 
         // Then: the gateway does not call Auth for a managed key.
         assert_eq!(requirement, AccessRequirement::Public, "{path}");

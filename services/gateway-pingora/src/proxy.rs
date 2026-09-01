@@ -60,8 +60,9 @@ impl ProxyHttp for GatewayProxy {
             .client_addr()
             .and_then(|address| address.as_inet())
             .map(std::net::SocketAddr::ip);
+        let method = session.req_header().method.clone();
         let route = self.config.route_for_path(&path);
-        let requirement = self.config.access_requirement(&path, peer_ip);
+        let requirement = self.config.access_requirement(&path, &method, peer_ip);
         ctx.route = Some(route);
         ctx.client_ip = peer_ip;
 

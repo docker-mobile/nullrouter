@@ -239,14 +239,15 @@ pub(crate) fn set_path(document: &mut Value, path: &[&str], value: Value) {
         if !current.is_object() {
             *current = Value::Object(serde_json::Map::new());
         }
-        current = current
-            .as_object_mut()
-            .and_then(|map| {
-                map.entry((*key).to_owned())
-                    .or_insert_with(|| Value::Object(serde_json::Map::new()));
-                map.get_mut(*key)
-            })
-            .unwrap_or(current);
+        // Get-or-insert and descend in one step. Two steps would hold a borrow of `current` while
+        // reassigning it, and the `unwrap_or(current)` that shape invites is worse than it looks:
+        // it silently stops descending and writes the key at the wrong level.
+        let Some(map) = current.as_object_mut() else {
+            return;
+        };
+        current = map
+            .entry((*key).to_owned())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
     }
     if !current.is_object() {
         *current = Value::Object(serde_json::Map::new());

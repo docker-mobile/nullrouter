@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use http::{StatusCode, header};
+use http::{Method, StatusCode, header};
 use nullrouter_contracts::{AuthorizeRequest, SecretString};
 use pingora_core::Result as PingoraResult;
 use pingora_http::RequestHeader;
@@ -38,6 +38,23 @@ const HOST_ONLY_PREFIXES: &[&str] = &[
     "/api/pxpipe/start",
 ];
 
+/// Paths whose *mutating* methods are host-only while reads stay open to a session.
+///
+/// `/api/cli-tools/{tool}` writes files under the operator's home directory —
+/// `~/.claude/settings.json`, `~/.codex/config.toml`, VS Code's user settings. A session
+/// cookie lifted from a browser on another machine must not be able to rewrite dotfiles on
+/// this host, for the same reason `tailscale-install` is above.
+///
+/// Reads are deliberately left reachable. `GET` reports which tools are installed and
+/// whether each points here, which is what the dashboard's status pane is; holding that to
+/// loopback would blank the pane for every remote user while protecting nothing, since a
+/// read spawns nothing and writes nothing.
+///
+/// This is additive: a path already in [`HOST_ONLY_PREFIXES`] stays host-only for every
+/// method. `cowork-settings` and `antigravity-mitm` are there and are not relaxed by being
+/// covered here too.
+const HOST_ONLY_WRITE_PREFIXES: &[&str] = &["/api/cli-tools"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessRequirement {
     Public,
@@ -65,6 +82,7 @@ pub enum AccessDecision {
 impl AccessRequirement {
     pub fn for_request(
         path: &str,
+        method: &Method,
         route: RouteKind,
         peer_ip: Option<IpAddr>,
         managed_api_keys_required: bool,
@@ -72,7 +90,8 @@ impl AccessRequirement {
         if is_internal_path(path) {
             return Self::Forbidden;
         }
-        if is_host_only_path(path) && !is_loopback_peer(peer_ip) {
+        let host_only = is_host_only_path(path) || is_host_only_write(path, method);
+        if host_only && !is_loopback_peer(peer_ip) {
             return Self::Forbidden;
         }
         if is_public_path(path) {
@@ -196,7 +215,21 @@ fn is_internal_path(path: &str) -> bool {
 }
 
 fn is_host_only_path(path: &str) -> bool {
-    HOST_ONLY_PREFIXES
+    matches_prefix(HOST_ONLY_PREFIXES, path)
+}
+
+/// A write to a path whose reads are open but whose writes touch the host.
+///
+/// `OPTIONS` is treated as a read: a CORS preflight carries no body and changes nothing, and
+/// failing it would make the browser report a network error instead of the 403 the real
+/// request would return.
+fn is_host_only_write(path: &str, method: &Method) -> bool {
+    let mutating = !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS);
+    mutating && matches_prefix(HOST_ONLY_WRITE_PREFIXES, path)
+}
+
+fn matches_prefix(prefixes: &[&str], path: &str) -> bool {
+    prefixes
         .iter()
         .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
 }
