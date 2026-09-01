@@ -224,11 +224,14 @@ mod threads_tests {
         fn set(value: Option<&str>) -> Self {
             let lock = env_lock();
             // SAFETY: the lock serialises every test in this module that touches the variable.
-            unsafe {
-                match value {
-                    Some(value) => std::env::set_var("NULLROUTER_GATEWAY_THREADS", value),
-                    None => std::env::remove_var("NULLROUTER_GATEWAY_THREADS"),
-                }
+            match value {
+                // SAFETY: the lock above is held, so no other test in this process reads or
+                // writes this variable here.
+                Some(value) => unsafe {
+                    std::env::set_var("NULLROUTER_GATEWAY_THREADS", value)
+                },
+                // SAFETY: as above.
+                None => unsafe { std::env::remove_var("NULLROUTER_GATEWAY_THREADS") },
             }
             Self { _lock: lock }
         }

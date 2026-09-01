@@ -184,6 +184,15 @@ impl ConfigFile {
         plain.then(|| format!("{name}.json"))
     }
 
+    /// The directory the config lives in, for naming it in an error a user reads.
+    ///
+    /// Exposed separately because when [`Self::resolve`] returns `None` for an indirect config there
+    /// is still a directory worth naming — telling someone "no config was found" without saying
+    /// where it was looked for leaves them nothing to check.
+    pub(crate) fn directory_for_report(self) -> Option<PathBuf> {
+        self.directory()
+    }
+
     /// The directory the config lives in: the chosen root plus, when indirect, `segments`.
     fn directory(self) -> Option<PathBuf> {
         let mut path = self
@@ -570,6 +579,11 @@ impl Tool {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "indexing a serde_json::Value is the assertion here: a shape that does not \
+              match is a test failure, which is what the panic reports"
+)]
 mod tests {
     use super::{Format, Marker, Root, TOOLS, Tool, Writable, looks_like_router_url, string_at};
     use serde_json::json;
@@ -685,6 +699,25 @@ mod tests {
     }
 
     #[test]
+    fn the_writable_flag_and_the_write_descriptors_agree() {
+        // Two tables have to say the same thing: this one drives the dashboard's `writable` field,
+        // and `mutations::writer_for` decides whether a mutation runs. A tool marked writable with
+        // no descriptor offers the user a toggle that 501s; one with a descriptor but marked
+        // read-only hides a writer that works.
+        for tool in TOOLS {
+            let has_writer = crate::cli_tools::mutations::writer_for(tool.id).is_some();
+            assert_eq!(
+                has_writer,
+                tool.writable == Writable::Yes,
+                "{} is marked {:?} but {} a write descriptor",
+                tool.id,
+                tool.writable,
+                if has_writer { "has" } else { "has no" }
+            );
+        }
+    }
+
+    #[test]
     fn the_only_read_only_tool_is_the_one_upstream_has_no_writer_for() {
         let read_only: Vec<&str> = TOOLS
             .iter()
@@ -716,7 +749,7 @@ mod tests {
             let name = config.segments.last().copied().unwrap_or_default();
             let expected = match config.format {
                 Format::Json => ".json",
-                Format::Toml => ".toml",
+                Format::Toml | Format::TomlText => ".toml",
                 Format::YamlBlock => ".yaml",
                 Format::DotEnv => ".env",
             };

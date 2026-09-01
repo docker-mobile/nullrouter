@@ -16,6 +16,7 @@ name = "nullrouter-events"
 path = "src/main.rs"
 
 [dependencies]
+nullrouter-contracts.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "sync", "time"] }
 reqwest.workspace = true

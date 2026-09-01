@@ -192,14 +192,37 @@ pub(crate) fn status(tool: &Tool) -> Status {
         .map(|found| found.display().to_string())
         .or_else(|| config_exists.then(|| path.display().to_string()));
 
+    // The marker runs against the raw text for the text formats, so it is consulted before the
+    // reported shape is narrowed below.
+    //
+    // An absent or unparseable config cannot point anywhere, so the marker is not consulted then.
+    let has_router = !settings.is_null() && marker_matches(tool, &settings);
+
     Status {
         installed: binary.is_some() || config_exists,
         source,
-        // An absent or unparseable config cannot point anywhere, so the marker is not consulted.
-        has_router: !settings.is_null() && marker_matches(tool, &settings),
-        settings,
+        has_router,
+        settings: reported_settings(config.format, settings),
         config_path: Some(path),
         parse_error,
+    }
+}
+
+/// What `settings` shows the dashboard.
+///
+/// For the parsed formats it is the document. For hermes' YAML it is the parsed `model:` block, the
+/// way upstream's own route reports it — the raw file would show the user their whole config in a
+/// field meant to hold four values, and the dashboard reads those four positionally.
+///
+/// A file with no block reports `null`, which is the same thing an absent config reports and is what
+/// upstream's `parseModelBlock` returns for it.
+fn reported_settings(format: Format, settings: Value) -> Value {
+    match format {
+        Format::YamlBlock => settings
+            .as_str()
+            .and_then(super::yaml_block::parse_model_block)
+            .unwrap_or(Value::Null),
+        Format::Json | Format::Toml | Format::TomlText | Format::DotEnv => settings,
     }
 }
 
@@ -215,6 +238,7 @@ fn marker_matches(tool: &Tool, settings: &Value) -> bool {
 
 #[cfg(test)]
 #[allow(
+    clippy::indexing_slicing,
     clippy::expect_used,
     reason = "test assertions read clearer with expect than with error plumbing"
 )]

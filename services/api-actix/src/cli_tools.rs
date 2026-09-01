@@ -1,8 +1,9 @@
 use actix_web::{HttpResponse, http::StatusCode, web};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::{json_body, responses};
 
+mod cowork_mcp;
 mod detect;
 mod mitm;
 mod mutations;
@@ -12,18 +13,11 @@ mod write;
 mod yaml_block;
 
 const TOOL_UNSUPPORTED: &str = "CLI tool configuration is not supported by nullrouter-api";
-const MCP_UNSUPPORTED: &str = "Cowork MCP discovery is not supported by nullrouter-api";
 
 // `ToolStatus` and `AllStatuses` lived here as fixed structs full of `&'static str`, which is what
 // a hardcoded answer looks like in the type system: there was nowhere to put a real path or a real
 // parsed config. Statuses are now built as `serde_json::Value` by `tool_status_body`, keyed by the
 // same short ids `AllStatuses` had as fields.
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct McpToolsRequest {
-    url: String,
-}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,38 +27,9 @@ struct UnsupportedMutation {
     message: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
-struct McpRegistry {
-    cached: bool,
-    servers: [(); 0],
-    total: u32,
-    unsupported: bool,
-    message: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct McpTools {
-    success: bool,
-    tools: [(); 0],
-    requires_auth: bool,
-    unsupported: bool,
-    message: &'static str,
-}
-
 pub(super) fn configure(config: &mut web::ServiceConfig) {
-    config
-        .service(web::resource("/api/cli-tools/all-statuses").route(web::get().to(all_statuses)))
-        .service(
-            web::resource("/api/cli-tools/cowork-mcp-registry")
-                .route(web::get().to(cowork_mcp_registry))
-                .route(web::method(actix_web::http::Method::OPTIONS).to(no_content)),
-        )
-        .service(
-            web::resource("/api/cli-tools/cowork-mcp-tools")
-                .route(web::post().to(cowork_mcp_tools))
-                .route(web::method(actix_web::http::Method::OPTIONS).to(no_content)),
-        );
+    config.service(web::resource("/api/cli-tools/all-statuses").route(web::get().to(all_statuses)));
+    cowork_mcp::configure(config);
     mitm::configure(config);
     config.service(
         web::resource("/api/cli-tools/{tool}")
@@ -73,10 +38,6 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
             .route(web::patch().to(mutate_tool))
             .route(web::delete().to(mutate_tool)),
     );
-}
-
-async fn no_content() -> HttpResponse {
-    responses::empty(StatusCode::NO_CONTENT)
 }
 
 /// Every tool at once, keyed by short id, as upstream's `all-statuses` does.
@@ -120,39 +81,6 @@ async fn tool_status(path: web::Path<String>) -> HttpResponse {
             }),
         ),
     }
-}
-
-async fn cowork_mcp_registry() -> HttpResponse {
-    responses::json(
-        StatusCode::OK,
-        &McpRegistry {
-            cached: true,
-            servers: [],
-            total: 0,
-            unsupported: true,
-            message: MCP_UNSUPPORTED,
-        },
-    )
-}
-
-async fn cowork_mcp_tools(body: web::Bytes) -> HttpResponse {
-    let request = match json_body::parse::<McpToolsRequest>(&body) {
-        Ok(request) => request,
-        Err(response) => return response,
-    };
-    if request.url.trim().is_empty() {
-        return responses::json(StatusCode::BAD_REQUEST, &responses::error("url required"));
-    }
-    responses::json(
-        StatusCode::NOT_IMPLEMENTED,
-        &McpTools {
-            success: false,
-            tools: [],
-            requires_auth: false,
-            unsupported: true,
-            message: MCP_UNSUPPORTED,
-        },
-    )
 }
 
 /// `POST`/`PATCH` applies a config; `DELETE` revokes it.
@@ -258,17 +186,18 @@ fn mutation_body(
         "backedUp": paths(&outcome.backed_up),
     });
     if !outcome.warnings.is_empty() {
-        body["warnings"] = outcome
+        let warnings = outcome
             .warnings
             .iter()
             .map(|warning| serde_json::Value::String(warning.clone()))
             .collect();
+        mutations::insert_key(&mut body, "warnings", warnings);
     }
     // Upstream names the written path per tool, so the dashboard's success pane finds whichever it
     // reads.
     if let Some(first) = outcome.written.first().map(|path| path.display().to_string()) {
         for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
-            body[key] = serde_json::Value::String(first.clone());
+            mutations::insert_key(&mut body, key, serde_json::Value::String(first.clone()));
         }
     }
     body
@@ -299,23 +228,27 @@ fn tool_status_body(tool: &spec::Tool) -> serde_json::Value {
         .map(|path| path.display().to_string())
     {
         for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
-            body[key] = serde_json::Value::String(path.clone());
+            mutations::insert_key(&mut body, key, serde_json::Value::String(path.clone()));
         }
     }
     if let Some(source) = status.source {
-        body["source"] = serde_json::Value::String(source);
+        mutations::insert_key(&mut body, "source", serde_json::Value::String(source));
     }
     if let Some(error) = status.parse_error {
         // Reported alongside `settings: null` rather than as a 500: upstream swallows the error so
         // the UI does not read it as "not installed", but swallowing it silently means a user with
         // a stray comma sees "not configured" and no reason.
-        body["configError"] = serde_json::Value::String(error);
+        mutations::insert_key(&mut body, "configError", serde_json::Value::String(error));
     }
     if !status.installed {
-        body["message"] = serde_json::Value::String(format!(
-            "{} is not installed: no binary on PATH and no config file.",
-            tool.display_name
-        ));
+        mutations::insert_key(
+            &mut body,
+            "message",
+            serde_json::Value::String(format!(
+                "{} is not installed: no binary on PATH and no config file.",
+                tool.display_name
+            )),
+        );
     }
     body
 }

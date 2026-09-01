@@ -159,11 +159,6 @@ pub(crate) fn remove_section(text: &str, section: &str) -> String {
     }
 }
 
-/// Whether a section is present at all.
-pub(crate) fn has_section(text: &str, section: &str) -> bool {
-    section_range(text, section).is_some()
-}
-
 /// Insert a comment line, before `anchor`'s section when there is one.
 ///
 /// The position matters only for legibility — the marker is read by prefix wherever it sits — but
@@ -252,12 +247,13 @@ pub(crate) fn collapse_blank_runs(text: &str) -> String {
 
 #[cfg(test)]
 #[allow(
+    clippy::indexing_slicing,
     clippy::expect_used,
     reason = "test assertions read clearer with expect than with error plumbing"
 )]
 mod tests {
     use super::{
-        delete_field, get_field, has_section, insert_marker, read_marker, remove_marker,
+        delete_field, get_field, insert_marker, read_marker, remove_marker,
         remove_section, set_field, upsert_section,
     };
 
@@ -274,7 +270,6 @@ mod tests {
         assert_eq!(get_field(text, "model.9router", "b").as_deref(), Some("2"));
         assert!(get_field(text, "model", "b").is_none());
         assert!(get_field(text, "model.9router", "a").is_none());
-        assert!(!has_section(text, "model.9router.extra"));
     }
 
     #[test]

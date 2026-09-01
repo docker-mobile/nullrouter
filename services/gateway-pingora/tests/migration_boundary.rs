@@ -28,6 +28,7 @@ fn migration_requires_a_session_not_public_access() {
     for peer in [Some(REMOTE), Some(LOOPBACK), None] {
         let requirement = AccessRequirement::for_request(
             MIGRATE_PATH,
+            &http::Method::POST,
             nullrouter_gateway::RouteKind::Api,
             peer,
             false,
@@ -60,6 +61,7 @@ fn the_internal_import_endpoint_stays_unreachable_publicly() {
     // The API service forwards to this; it must never be callable directly.
     let requirement = AccessRequirement::for_request(
         "/internal/v1/migrate/9router",
+        &http::Method::POST,
         nullrouter_gateway::RouteKind::State,
         Some(REMOTE),
         false,

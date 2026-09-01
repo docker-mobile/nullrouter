@@ -2497,6 +2497,7 @@ dependencies = [
  "actix-rt",
  "actix-web",
  "futures-util",
+ "nullrouter-contracts",
  "reqwest",
  "serde",
  "serde_json",

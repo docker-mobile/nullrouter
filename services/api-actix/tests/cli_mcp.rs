@@ -1,4 +1,15 @@
 #![allow(clippy::future_not_send)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "free helpers here are not #[test] fns, so clippy.toml's allow-expect-in-tests does \
+              not cover them"
+)]
+
+use std::sync::{Arc, Mutex};
+
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::TcpListener;
 
 use actix_web::{
     App,
@@ -60,27 +71,143 @@ fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
         .ok_or_else(|| test_error(format!("missing field {name}")))
 }
 
+/// A stub registry serving two pages, exercised through the real route.
+///
+/// Pointed at with `NULLROUTER_MCP_REGISTRY_URL` rather than calling the real registry: a test that
+/// reached out to Anthropic would depend on the network and on whatever the registry happens to be
+/// listing that day.
+async fn stub_registry(pages: Vec<String>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let addr = listener.local_addr().expect("addr").to_string();
+    let served = Arc::new(Mutex::new(0_usize));
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let pages = pages.clone();
+            let served = Arc::clone(&served);
+            tokio::spawn(async move {
+                let mut discard = [0_u8; 4096];
+                let _ = stream.read(&mut discard).await;
+                let index = {
+                    let mut count = served.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let index = *count;
+                    *count += 1;
+                    index
+                };
+                let body = pages.get(index).cloned().unwrap_or_else(|| "{}".to_owned());
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                     Connection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+
+    format!("http://{addr}/servers")
+}
+
 #[actix_rt::test]
-async fn cowork_mcp_routes_return_deterministic_json_defaults() -> TestResult {
-    // Given: nullrouter-api does not perform live external MCP discovery in tests.
+async fn the_registry_lists_what_a_client_here_can_connect_to_directly() -> TestResult {
+    // Given: a registry serving two pages, holding one usable entry, one duplicate of it, and
+    // three that must each be filtered out for a different reason.
+    let first = serde_json::json!({
+        "servers": [
+            {
+                "server": {
+                    "name": "com.example/mcp",
+                    "title": "Example",
+                    "description": "An example server",
+                    "remotes": [{"url": "https://mcp.example.com/mcp", "type": "sse"}],
+                },
+                "_meta": {"com.anthropic.api/mcp-registry": {
+                    "slug": "example", "isAuthless": true,
+                    "toolNames": ["one", "two"], "iconUrl": "https://example.com/icon.png",
+                }},
+            },
+            {
+                // claude.ai-mediated, which does not work in this mode.
+                "server": {"name": "a", "remotes": [{"url": "https://mcp.claude.com/x"}]},
+                "_meta": {},
+            },
+            {
+                // An unfilled template.
+                "server": {"name": "b", "remotes": [{"url": "https://{tenant}.example.com/mcp"}]},
+                "_meta": {},
+            },
+            {
+                // Needs tenant-specific fields, which there is nowhere to supply from this pane.
+                "server": {"name": "c", "remotes": [{"url": "https://ok.example.com/mcp"}]},
+                "_meta": {"com.anthropic.api/mcp-registry": {"requiredFields": ["workspace"]}},
+            },
+        ],
+        "metadata": {"nextCursor": "page-2"},
+    })
+    .to_string();
+    let second = serde_json::json!({
+        "servers": [{
+            // The same URL again, under a different name.
+            "server": {"name": "com.example/mirror", "remotes": [{"url": "https://mcp.example.com/mcp"}]},
+            "_meta": {},
+        }],
+    })
+    .to_string();
 
-    // When: the upstream Cowork MCP helper routes are requested.
-    let (registry_status, registry) = get_json("/api/cli-tools/cowork-mcp-registry").await?;
-    let (tools_status, tools) = request_json(
-        Method::POST,
-        "/api/cli-tools/cowork-mcp-tools",
-        r#"{"url":"https://example.invalid/mcp"}"#,
-    )
-    .await?;
+    let url = stub_registry(vec![first, second]).await;
+    // SAFETY: no other thread in this binary reads this variable, and it is removed again
+    // below before any other case runs.
+    unsafe { std::env::set_var("NULLROUTER_MCP_REGISTRY_URL", &url) };
 
-    // Then: both routes return deterministic JSON defaults rather than generic CLI 404s.
-    assert_eq!(registry_status, StatusCode::OK);
-    assert_eq!(field(&registry, "servers")?, &serde_json::json!([]));
-    assert_eq!(field(&registry, "total")?, 0);
-    assert_eq!(tools_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&tools, "tools")?, &serde_json::json!([]));
-    assert_eq!(field(&tools, "requiresAuth")?, false);
-    assert_eq!(field(&tools, "unsupported")?, true);
+    // When: the pane loads, bypassing the cache so the fetch actually happens.
+    let (status, registry) = get_json("/api/cli-tools/cowork-mcp-registry?refresh=1").await?;
+
+    // SAFETY: still the only thread touching this variable, and it is cleared before any
+    // other case in this binary reads it.
+    unsafe { std::env::remove_var("NULLROUTER_MCP_REGISTRY_URL") };
+
+    // Then: one entry survives, with its fields flattened the way the pane reads them.
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(field(&registry, "total")?, 1, "{registry}");
+    let servers = field(&registry, "servers")?
+        .as_array()
+        .ok_or_else(|| test_error("servers is not an array"))?;
+    let entry = servers
+        .first()
+        .ok_or_else(|| test_error("no entry survived the filter"))?;
+    assert_eq!(entry["name"], "com.example/mcp");
+    assert_eq!(entry["slug"], "example");
+    assert_eq!(entry["title"], "Example");
+    assert_eq!(entry["url"], "https://mcp.example.com/mcp");
+    assert_eq!(entry["transport"], "sse");
+    // `isAuthless: true` inverts to no OAuth step.
+    assert_eq!(entry["oauth"], false);
+    assert_eq!(entry["toolCount"], 2);
+    assert_eq!(entry["iconUrl"], "https://example.com/icon.png");
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn the_tool_probe_refuses_a_target_only_this_service_can_reach() -> TestResult {
+    // The probe has this service fetch a URL the caller supplies, so it must not be usable to
+    // reach the loopback services on 20129-20135 or anything else on the host's networks.
+    for url in [
+        "http://127.0.0.1:20134/internal/v1/keys",
+        "https://169.254.169.254/latest/meta-data/",
+        "http://mcp.example.com/mcp",
+    ] {
+        let (status, body) = request_json(
+            Method::POST,
+            "/api/cli-tools/cowork-mcp-tools",
+            &serde_json::json!({"url": url}).to_string(),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{url} was not refused: {body}");
+        assert_eq!(field(&body, "tools")?, &serde_json::json!([]), "{url}");
+    }
     Ok(())
 }
 

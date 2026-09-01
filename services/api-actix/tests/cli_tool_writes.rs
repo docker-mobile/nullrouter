@@ -16,6 +16,12 @@
               not cover them, and assertions read clearer with expect than error plumbing"
 )]
 
+#![allow(
+    clippy::indexing_slicing,
+    reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
+              is a test failure, which is what the panic reports"
+)]
+
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -55,10 +61,9 @@ impl HomeGuard {
         let previous_home = std::env::var_os("HOME");
         let previous_xdg = std::env::var_os("XDG_CONFIG_HOME");
         // SAFETY: the lock is held, so no other test in this process reads or writes these here.
-        unsafe {
-            std::env::set_var("HOME", directory.path());
-            std::env::set_var("XDG_CONFIG_HOME", directory.path().join(".config"));
-        }
+        unsafe { std::env::set_var("HOME", directory.path()) };
+        // SAFETY: as above.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", directory.path().join(".config")) };
         Self {
             _lock: lock,
             directory,
@@ -98,17 +103,21 @@ impl Drop for HomeGuard {
     fn drop(&mut self) {
         // Restored rather than cleared: a panicking test must not leave the rest of the binary
         // resolving config paths inside a directory that is about to be deleted.
-        // SAFETY: the lock is still held until this guard finishes dropping.
-        unsafe {
-            match self.previous_home.take() {
-                Some(value) => std::env::set_var("HOME", value),
-                None => std::env::remove_var("HOME"),
-            }
-            match self.previous_xdg.take() {
-                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
-            }
-        }
+        restore("HOME", self.previous_home.take());
+        restore("XDG_CONFIG_HOME", self.previous_xdg.take());
+    }
+}
+
+/// Put one variable back to what it was, or unset it.
+///
+/// A free function so each write is its own `unsafe` block: the lock the guard holds is what makes
+/// them sound, and one block per operation keeps that claim attached to a single call.
+fn restore(name: &str, previous: Option<std::ffi::OsString>) {
+    match previous {
+        // SAFETY: the caller is `HomeGuard::drop`, which still holds the env lock.
+        Some(value) => unsafe { std::env::set_var(name, value) },
+        // SAFETY: as above.
+        None => unsafe { std::env::remove_var(name) },
     }
 }
 
@@ -181,6 +190,8 @@ const JCODE_CONFIG: &str = ".jcode/config.toml";
 const JCODE_ENV: &str = ".config/jcode/provider-9router.env";
 const OPENCLAW_SETTINGS: &str = ".openclaw/openclaw.json";
 const GROK_CONFIG: &str = ".grok/config.toml";
+const COWORK_META: &str = ".config/Claude/configLibrary/_meta.json";
+const COWORK_CONFIG: &str = ".config/Claude/configLibrary/abc-123.json";
 
 #[actix_web::test]
 async fn a_claude_apply_reaches_the_file_claude_code_reads() -> TestResult {
@@ -1240,6 +1251,216 @@ async fn a_zero_context_window_is_omitted_rather_than_written() -> TestResult {
     )
     .await?;
     assert!(home.read(GROK_CONFIG).contains("context_window = 1024"));
+    Ok(())
+}
+
+#[actix_web::test]
+async fn cowork_bridges_a_local_plugin_through_this_routers_sse_endpoint() -> TestResult {
+    // Given: a Cowork install with an applied config, and the user's own setting in it.
+    let home = HomeGuard::new();
+    home.seed(COWORK_META, r#"{"appliedId": "abc-123"}"#);
+    home.seed(COWORK_CONFIG, r#"{"windowState": "keep me"}"#);
+
+    // When: an apply names a remote plugin, a local one, and a custom URL.
+    let (status, body) = apply(
+        "cowork-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "apiKey": "sk-cowork",
+            "models": ["cc/opus"],
+            "plugins": ["exa"],
+            "localPlugins": ["browsermcp"],
+            "customPlugins": [{"name": "mine", "url": "https://mcp.example.com/mcp"}],
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let config = home.read_json(COWORK_CONFIG);
+    // Upstream's provider value is `gateway`, not `9router`.
+    assert_eq!(config["inferenceProvider"], "gateway");
+    assert_eq!(config["inferenceGatewayBaseUrl"], "http://127.0.0.1:20128");
+    assert_eq!(config["inferenceModels"][0]["name"], "cc/opus");
+
+    let servers = config["managedMcpServers"].as_array().expect("servers");
+    assert_eq!(servers.len(), 3, "{config}");
+    // The remote plugin keeps its own URL and gets an allow-policy under both the bare and the
+    // prefixed tool name, since either is what arrives at call time.
+    assert_eq!(servers[0]["url"], "https://mcp.exa.ai/mcp");
+    assert_eq!(servers[0]["toolPolicy"]["web_search_exa"], "allow");
+    assert_eq!(servers[0]["toolPolicy"]["exa-web_search_exa"], "allow");
+    // The local stdio plugin is not spawned by Cowork: it is bridged through this router.
+    assert_eq!(
+        servers[1]["url"],
+        "http://localhost:20128/api/mcp/browsermcp/sse"
+    );
+    assert_eq!(servers[1]["transport"], "sse");
+    // And that bridge entry is what `isLocalDevMcpEnabled` exists for.
+    assert_eq!(config["isLocalDevMcpEnabled"], true);
+    assert_eq!(servers[2]["custom"], true);
+
+    // The user's unrelated setting survived, where upstream replaces the whole config object.
+    assert_eq!(config["windowState"], "keep me");
+    // And none of upstream's other relax-security keys were written.
+    for key in [
+        "coworkEgressAllowedHosts",
+        "isDesktopExtensionSignatureRequired",
+        "disableNonessentialTelemetry",
+    ] {
+        assert!(config[key].is_null(), "{key} should not be written: {config}");
+    }
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_unlisted_local_plugin_name_is_skipped_rather_than_spawned() -> TestResult {
+    // The whitelist is the point: a name that is not on it must not become a bridge entry, because
+    // the events service would refuse to spawn it and the config would name a dead endpoint.
+    let home = HomeGuard::new();
+    home.seed(COWORK_META, r#"{"appliedId": "abc-123"}"#);
+
+    apply(
+        "cowork-settings",
+        &json!({
+            "baseUrl": "http://x",
+            "apiKey": "k",
+            "models": ["m"],
+            "plugins": [],
+            "localPlugins": ["sh", "browsermcp; id", "../../bin/sh", "BrowserMCP"],
+        }),
+    )
+    .await?;
+
+    let config = home.read_json(COWORK_CONFIG);
+    assert!(
+        config["managedMcpServers"].is_null(),
+        "no server should have been written: {config}"
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_empty_plugins_array_is_not_replaced_by_the_defaults() -> TestResult {
+    // An absent `plugins` means "the defaults"; an empty array means the user turned them all off.
+    // Treating the two the same would re-enable servers the user just switched off.
+    let home = HomeGuard::new();
+    home.seed(COWORK_META, r#"{"appliedId": "abc-123"}"#);
+
+    apply(
+        "cowork-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "models": ["m"], "plugins": []}),
+    )
+    .await?;
+    assert!(home.read_json(COWORK_CONFIG)["managedMcpServers"].is_null());
+
+    // Absent, by contrast, writes both defaults.
+    apply(
+        "cowork-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "models": ["m"]}),
+    )
+    .await?;
+    let servers = home.read_json(COWORK_CONFIG);
+    assert_eq!(servers["managedMcpServers"].as_array().map(Vec::len), Some(2), "{servers}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_cowork_apply_without_an_applied_config_reports_it() -> TestResult {
+    // Given: a Cowork whose config library has no `_meta.json`, which is the state of an install
+    // that has never had a configuration applied.
+    let home = HomeGuard::new();
+    std::fs::create_dir_all(home.path(".config/Claude/configLibrary"))?;
+
+    // When: an apply runs.
+    let (status, body) = apply(
+        "cowork-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "models": ["m"]}),
+    )
+    .await?;
+
+    // Then: it says what was missing and where it looked, and invents nothing. Upstream generates a
+    // UUID and writes `configLibrary/<uuid>.json`, putting a file into an app's own data directory
+    // that the app has no reason to ever read.
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(message.contains("_meta.json"), "{message}");
+    assert!(message.contains("configLibrary"), "{message}");
+    let written: Vec<_> = std::fs::read_dir(home.path(".config/Claude/configLibrary"))?
+        .filter_map(Result::ok)
+        .collect();
+    assert!(written.is_empty(), "nothing should have been created");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_cowork_revoke_keeps_the_rest_of_the_config() -> TestResult {
+    // Given: an applied config alongside settings that are nothing to do with routing.
+    let home = HomeGuard::new();
+    home.seed(COWORK_META, r#"{"appliedId": "abc-123"}"#);
+    home.seed(
+        COWORK_CONFIG,
+        r#"{"inferenceProvider": "gateway", "inferenceGatewayApiKey": "sk",
+            "managedMcpServers": [{"name": "exa"}], "windowState": "keep me",
+            "workspacePrefs": {"theme": "dark"}}"#,
+    );
+
+    // When: the revoke runs.
+    revoke("cowork-settings").await?;
+
+    // Then: ours are gone and theirs are not. Upstream writes `{}` here, discarding every Cowork
+    // setting the user has rather than the ones an apply wrote.
+    let config = home.read_json(COWORK_CONFIG);
+    assert!(config["inferenceProvider"].is_null(), "{config}");
+    assert!(config["inferenceGatewayApiKey"].is_null(), "{config}");
+    assert!(config["managedMcpServers"].is_null(), "{config}");
+    assert_eq!(config["windowState"], "keep me");
+    assert_eq!(config["workspacePrefs"]["theme"], "dark");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn the_mcp_tool_probe_refuses_a_target_only_this_service_can_reach() -> TestResult {
+    // Given: the probe route, which has this service fetch a URL the caller supplies.
+    let _home = HomeGuard::new();
+
+    // When: the URL names a loopback or private address — including this router's own services,
+    // which a caller cannot reach directly.
+    for url in [
+        "http://127.0.0.1:20134/internal/v1/keys",
+        "https://localhost/mcp",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://10.0.0.5/mcp",
+        "https://[::1]/mcp",
+        "http://mcp.example.com/mcp",
+        "file:///etc/passwd",
+    ] {
+        let (status, body) = call(
+            Method::POST,
+            "/api/cli-tools/cowork-mcp-tools",
+            &json!({"url": url}),
+        )
+        .await?;
+
+        // Then: it is refused with a reason, and no request is made. Upstream fetches whatever it
+        // is handed, which makes the route a server-side request forgery pivot.
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{url} was not refused: {body}");
+        assert!(
+            body["error"].as_str().is_some_and(|error| !error.is_empty()),
+            "{url}: {body}"
+        );
+        assert_eq!(body["tools"].as_array().map(Vec::len), Some(0), "{url}");
+    }
+    Ok(())
+}
+
+#[actix_web::test]
+async fn the_mcp_tool_probe_still_requires_a_url() -> TestResult {
+    let _home = HomeGuard::new();
+    for body in [json!({}), json!({"url": ""}), json!({"url": "   "})] {
+        let (status, response) =
+            call(Method::POST, "/api/cli-tools/cowork-mcp-tools", &body).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body} -> {response}");
+    }
     Ok(())
 }
 

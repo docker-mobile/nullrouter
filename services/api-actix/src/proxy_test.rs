@@ -54,20 +54,20 @@ pub(crate) struct ProxyTestOutcome {
 /// Why a request was refused before any dial.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Refusal {
-    MissingProxyUrl,
-    InvalidProxyUrl(String),
-    InvalidTestUrl(String),
+    MissingProxy,
+    InvalidProxy(String),
+    InvalidTarget(String),
     /// A test URL that would make this route a local-network scanner.
-    LocalTestUrl(String),
+    LocalTarget(String),
 }
 
 impl Refusal {
     pub(crate) fn message(&self) -> String {
         match self {
-            Self::MissingProxyUrl => "proxyUrl is required".to_owned(),
-            Self::InvalidProxyUrl(detail) => format!("Invalid proxy URL: {detail}"),
-            Self::InvalidTestUrl(detail) => format!("Invalid test URL: {detail}"),
-            Self::LocalTestUrl(host) => format!(
+            Self::MissingProxy => "proxyUrl is required".to_owned(),
+            Self::InvalidProxy(detail) => format!("Invalid proxy URL: {detail}"),
+            Self::InvalidTarget(detail) => format!("Invalid test URL: {detail}"),
+            Self::LocalTarget(host) => format!(
                 "Refusing to dial {host}: a proxy test must target a host reachable through the \
                  proxy, and a loopback or private address only reveals what this machine can \
                  reach. Use a public URL, or the default {DEFAULT_TEST_URL}."
@@ -96,7 +96,7 @@ pub(crate) fn normalise_timeout(timeout_ms: Option<u64>) -> Duration {
 /// A hostname that is not an IP literal is allowed through: resolving it here to check would
 /// be a DNS round trip that the proxy is about to do anyway, and a rebinding race besides.
 /// `localhost` is caught by name because it is the one that matters in practice.
-fn is_local_target(host: &str) -> bool {
+pub(crate) fn is_local_target(host: &str) -> bool {
     let bare = host.trim().trim_start_matches('[').trim_end_matches(']');
     if bare.eq_ignore_ascii_case("localhost") || bare.to_ascii_lowercase().ends_with(".localhost") {
         return true;
@@ -128,17 +128,17 @@ pub(crate) fn validate(
 ) -> Result<(String, String), Refusal> {
     let proxy = proxy_url.map(str::trim).unwrap_or_default();
     if proxy.is_empty() {
-        return Err(Refusal::MissingProxyUrl);
+        return Err(Refusal::MissingProxy);
     }
     // Parsed here rather than left to the HTTP client, so a typo is a 400 naming the problem
     // instead of a generic dial failure.
     let parsed_proxy =
-        reqwest::Url::parse(proxy).map_err(|error| Refusal::InvalidProxyUrl(error.to_string()))?;
+        reqwest::Url::parse(proxy).map_err(|error| Refusal::InvalidProxy(error.to_string()))?;
     if !matches!(
         parsed_proxy.scheme(),
         "http" | "https" | "socks5" | "socks5h"
     ) {
-        return Err(Refusal::InvalidProxyUrl(format!(
+        return Err(Refusal::InvalidProxy(format!(
             "unsupported scheme {:?}; expected http, https, socks5 or socks5h",
             parsed_proxy.scheme()
         )));
@@ -149,18 +149,18 @@ pub(crate) fn validate(
         .filter(|value| !value.is_empty())
         .unwrap_or(DEFAULT_TEST_URL);
     let parsed_target =
-        reqwest::Url::parse(target).map_err(|error| Refusal::InvalidTestUrl(error.to_string()))?;
+        reqwest::Url::parse(target).map_err(|error| Refusal::InvalidTarget(error.to_string()))?;
     if !matches!(parsed_target.scheme(), "http" | "https") {
-        return Err(Refusal::InvalidTestUrl(format!(
+        return Err(Refusal::InvalidTarget(format!(
             "unsupported scheme {:?}; expected http or https",
             parsed_target.scheme()
         )));
     }
     let host = parsed_target
         .host_str()
-        .ok_or_else(|| Refusal::InvalidTestUrl("no host".to_owned()))?;
+        .ok_or_else(|| Refusal::InvalidTarget("no host".to_owned()))?;
     if is_local_target(host) {
-        return Err(Refusal::LocalTestUrl(host.to_owned()));
+        return Err(Refusal::LocalTarget(host.to_owned()));
     }
 
     Ok((proxy.to_owned(), target.to_owned()))
@@ -291,8 +291,8 @@ mod tests {
 
     #[test]
     fn a_missing_proxy_url_is_refused() {
-        assert_eq!(validate(None, None), Err(Refusal::MissingProxyUrl));
-        assert_eq!(validate(Some("  "), None), Err(Refusal::MissingProxyUrl));
+        assert_eq!(validate(None, None), Err(Refusal::MissingProxy));
+        assert_eq!(validate(Some("  "), None), Err(Refusal::MissingProxy));
     }
 
     #[test]
@@ -340,7 +340,7 @@ mod tests {
             let error = validate(Some("http://proxy.example:8080"), Some(target))
                 .expect_err(&format!("{target} should be refused"));
             assert!(
-                matches!(error, Refusal::LocalTestUrl(_)),
+                matches!(error, Refusal::LocalTarget(_)),
                 "{target} gave {error:?}"
             );
         }
@@ -364,7 +364,7 @@ mod tests {
     fn a_non_http_test_url_is_refused() {
         let error = validate(Some("http://proxy.example"), Some("file:///etc/passwd"))
             .expect_err("refused");
-        assert!(matches!(error, Refusal::InvalidTestUrl(_)), "{error:?}");
+        assert!(matches!(error, Refusal::InvalidTarget(_)), "{error:?}");
     }
 
     #[test]

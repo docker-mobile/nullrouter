@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 
 mod auth;
 mod errors;
+mod mcp;
 
 pub use auth::{
     ApiKeyGateRequest, ApiKeyGateResponse, AuthorizeRequest, AuthorizeResponse,
     INTERNAL_API_KEY_GATE_PATH, INTERNAL_API_KEY_VALIDATE_PATH, INTERNAL_AUTHORIZE_PATH,
     SecretString, ValidateApiKeyRequest, ValidateApiKeyResponse,
 };
+pub use mcp::{BRIDGEABLE_PLUGINS, BridgeablePlugin, bridgeable_plugin};
 pub use errors::{
     ErrorBody, ErrorEnvelope, ResponsesFailedEvent, ResponsesFailedResponse, invalid_request_error,
     provider_execution_error, responses_failed_event,

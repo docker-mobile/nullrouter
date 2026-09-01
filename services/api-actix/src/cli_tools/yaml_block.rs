@@ -135,6 +135,7 @@ fn field(body: &str, key: &str) -> Option<String> {
 
 #[cfg(test)]
 #[allow(
+    clippy::indexing_slicing,
     clippy::expect_used,
     reason = "test assertions read clearer with expect than with error plumbing"
 )]

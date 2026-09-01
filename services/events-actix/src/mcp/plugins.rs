@@ -28,6 +28,12 @@ pub(crate) struct Plugin {
 }
 
 /// Upstream's `LOCAL_STDIO_PLUGINS`, ported entry for entry.
+///
+/// The names and tool lists here are also in `nullrouter_contracts::BRIDGEABLE_PLUGINS`, which the
+/// API service reads when it writes a client config pointing at `/api/mcp/{name}/sse`. The commands
+/// are deliberately *not* shared: only this service should be able to turn a name into a process.
+/// A test below holds the two tables to the same names, because a disagreement produces a config
+/// naming a bridge that never comes up.
 pub(crate) const PLUGINS: &[Plugin] = &[Plugin {
     name: "browsermcp",
     title: "Browser MCP",
@@ -124,6 +130,35 @@ mod tests {
             assert!(
                 !plugin.name.is_empty() && plugin.name.chars().all(|c| c.is_ascii_alphanumeric()),
                 "{} has a name that is not a plain path segment",
+                plugin.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_spawn_table_matches_the_shared_bridgeable_list() {
+        // The API service writes client configs naming `/api/mcp/{name}/sse` from
+        // `BRIDGEABLE_PLUGINS`. If a name is there and not here, that config points at a bridge
+        // this service will refuse to spawn: the client shows a server that fails to connect and
+        // nothing says why. If a name is here and not there, the plugin is unreachable through the
+        // dashboard. Either way the failure is silent, so it is pinned here.
+        let mut spawnable: Vec<&str> = super::PLUGINS.iter().map(|plugin| plugin.name).collect();
+        let mut bridgeable: Vec<&str> = nullrouter_contracts::BRIDGEABLE_PLUGINS
+            .iter()
+            .map(|plugin| plugin.name)
+            .collect();
+        spawnable.sort_unstable();
+        bridgeable.sort_unstable();
+        assert_eq!(spawnable, bridgeable);
+
+        // And the tool lists agree, because the allow-policy a client writes is built from the
+        // shared copy while the server that answers is spawned from this one.
+        for plugin in super::PLUGINS {
+            let shared = nullrouter_contracts::bridgeable_plugin(plugin.name)
+                .expect("just asserted the names match");
+            assert_eq!(
+                plugin.tool_names, shared.tool_names,
+                "{} exposes a different tool list than the one a client is told to allow",
                 plugin.name
             );
         }

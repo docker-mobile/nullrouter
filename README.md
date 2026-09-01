@@ -716,8 +716,6 @@ repository implements these; each names the thing it does not own.
 
 **Unported but portable.** Nothing external blocks these; they are simply not done yet.
 
-- **CLI tool config mutation** and Cowork MCP registry/tool discovery. Detection is real and reads
-  each tool's actual config; writing router settings back into those files is not wired up.
 - **Console-log live capture.** Streams connect and emit an empty init frame; there is no capture
   backend behind them.
 - **Translator `send`.** The inspector's steps run the real engine (see below); dispatching the
@@ -726,6 +724,61 @@ repository implements these; each names the thing it does not own.
 
 Everything above validates its input first, so a malformed body is a `400` rather than a misleading
 `501`, and every refusal carries `"unsupported": true` with a stated reason.
+
+**CLI tool config writes reach the real files.** `POST`/`PATCH /api/cli-tools/{tool}` merges router
+settings into the file the tool actually reads and `DELETE` takes them back out, for all thirteen
+tools upstream can write. `devin` stays read-only because upstream exposes only a `GET` for it.
+
+Every write is a read-merge-write, never a replace, and the previous contents are copied to
+`<name>.9router-backup` before the first modification — once, so a second apply cannot replace your
+original with a copy of our own earlier output. A file that does not parse is refused rather than
+overwritten: a stray comma should not cost you the rest of your config. Six tools write two files,
+and the credential half is written second, so a partial failure leaves a tool that fails loudly
+rather than a key on disk for a provider it will not call.
+
+A `DELETE` for a tool that was never configured reports that and creates nothing. Neither does a
+`POST` invent a path it cannot resolve: Cowork's filename comes out of a `_meta.json` that only
+exists once the app has applied a configuration, and without it the response says so instead of
+writing a file into an application's data directory that the application has no reason to read.
+
+Writes are held to this host at the gateway while reads stay open to a session. A session cookie
+lifted from a browser on another machine must not rewrite this host's dotfiles; the status pane it
+would otherwise blank spawns nothing and writes nothing.
+
+Five places where this port deliberately does not do what upstream does, each because the faithful
+behaviour loses data or gets a user-visible answer wrong:
+
+- **Droid's default model.** Upstream resolves the chosen model to a position in the requested list
+  and then splices that position out of the merged array, whose leading entries are your own custom
+  models — so one custom model of your own makes your chosen default off by one. This port offsets
+  by the number of entries it kept.
+- **DeepSeek TUI and Cowork are merged, not replaced.** Upstream writes a fresh object over each,
+  discarding every other provider section and setting in the file. Merging reaches the same end
+  state.
+- **A DeepSeek revoke keeps a real OpenAI section.** The `openai` provider is dropped only while its
+  `base_url` is still local. Upstream cannot make that distinction, because it replaces the file.
+- **Cowork's relax-security profile is not written.** Upstream's apply also sets
+  `coworkEgressAllowedHosts: ["*"]`, turns off desktop-extension signature checking, and disables
+  telemetry and "nonessential services". Only `isLocalDevMcpEnabled` is written here, and only when
+  there is a local bridge entry for it to enable. The rest is not needed to route inference, and
+  weakening your Claude Desktop as a side effect of "use this gateway" is not something to do
+  silently.
+- **OpenClaw's per-agent files go only into directories that already exist.** `agentDir` is a path
+  out of a config file being used as a destination, so creating it means a settings file naming
+  `../../.ssh` gets a directory tree. Skipped directories are reported as warnings rather than
+  swallowed.
+
+**Cowork MCP discovery enumerates what is really there.** The registry route pages Anthropic's public
+MCP registry, filters to servers a client here can connect to directly, dedupes by URL and caches for
+an hour, serving a stale listing rather than an error if a refetch fails. The tool-discovery route
+probes one server with a real `initialize` / `notifications/initialized` / `tools/list` exchange over
+either JSON or SSE.
+
+That probe fetches a URL the caller supplies, so unlike upstream's it requires `https://` and refuses
+loopback, private, link-local and unspecified addresses. Upstream accepts any URL, which makes the
+route a server-side request forgery pivot: this process can reach the internal services on
+20129-20135 and every address on the host's networks, none of which the caller can. The restriction
+costs nothing, because every entry the registry offers is `https://` by upstream's own filter.
 
 **Provider token refresh is real.** A token within its provider's refresh lead time is exchanged
 before the call rather than after a 401, the rotation is persisted, and concurrent requests on one

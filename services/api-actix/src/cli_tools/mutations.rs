@@ -65,7 +65,9 @@ pub(crate) struct Payload {
     /// Claude Code takes its whole environment block rather than named fields.
     pub(crate) env: Option<Map<String, Value>>,
     pub(crate) max_context_tokens: Option<Value>,
-    /// Cowork's MCP half.
+    /// Cowork's MCP half. `plugins` absent means "the defaults"; an empty array means the user
+    /// turned them all off, which is a different thing and must not be replaced by the defaults.
+    pub(crate) plugins: Option<Vec<Value>>,
     pub(crate) local_plugins: Option<Vec<Value>>,
     pub(crate) custom_plugins: Option<Vec<Value>>,
 }
@@ -175,11 +177,6 @@ impl std::fmt::Debug for Target {
     }
 }
 
-/// A validator that accepts anything, for the tools upstream guards nothing on.
-fn no_requirements(_payload: &Payload) -> Result<(), &'static str> {
-    Ok(())
-}
-
 /// Upstream's most common guard: `if (!baseUrl || !apiKey || !model)`.
 fn base_key_and_model(payload: &Payload) -> Result<(), &'static str> {
     let missing = payload.base_url.as_deref().is_none_or(str::is_empty)
@@ -187,14 +184,6 @@ fn base_key_and_model(payload: &Payload) -> Result<(), &'static str> {
         || payload.model.as_deref().is_none_or(str::is_empty);
     if missing {
         return Err("baseUrl, apiKey and model are required");
-    }
-    Ok(())
-}
-
-/// `if (!baseUrl)` alone, for the tools that default the key and take models as a list.
-fn base_url_only(payload: &Payload) -> Result<(), &'static str> {
-    if payload.base_url.as_deref().is_none_or(str::is_empty) {
-        return Err("baseUrl is required");
     }
     Ok(())
 }
@@ -250,6 +239,18 @@ const MAX_CONTEXT_TOKENS: &str = "CLAUDE_CODE_MAX_CONTEXT_TOKENS";
 fn claude_revoke(document: &mut Value) {
     for key in CLAUDE_RESET_ENV_KEYS {
         write::remove_path(document, &["env", key]);
+    }
+}
+
+/// Set one key on a value that is expected to be an object.
+///
+/// `value["key"] = x` would be shorter, but `serde_json`'s `IndexMut` panics when the value is not
+/// an object, and `indexing_slicing` is denied workspace-wide for exactly that reason. A non-object
+/// here means a caller built the wrong shape, which is worth doing nothing about rather than
+/// killing the worker over.
+pub(crate) fn insert_key(value: &mut Value, key: &str, item: Value) {
+    if let Some(map) = value.as_object_mut() {
+        map.insert(key.to_owned(), item);
     }
 }
 
@@ -1308,6 +1309,242 @@ fn grok_restore_subagent(text: &str, kind: &str) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Cowork — Claude Desktop's applied config, plus its MCP server list
+// ---------------------------------------------------------------------------------------------
+
+/// Upstream's provider value, which is `"gateway"` and not `"9router"`.
+///
+/// Getting this wrong reports every Cowork user as unconfigured; [`super::spec`]'s cowork marker
+/// tests the same string for the same reason.
+const COWORK_PROVIDER: &str = "gateway";
+
+/// The remote plugins upstream offers by default, with the tools each one exposes.
+///
+/// Transcribed from `shared/constants/coworkPlugins.js`. HTTPS only: these are remote servers
+/// Cowork connects to directly, and nothing here spawns a process.
+const COWORK_DEFAULT_PLUGINS: &[CoworkPlugin] = &[
+    CoworkPlugin {
+        name: "exa",
+        url: "https://mcp.exa.ai/mcp",
+        transport: "http",
+        oauth: false,
+        tools: &["web_search_exa", "web_fetch_exa"],
+    },
+    CoworkPlugin {
+        name: "tavily",
+        url: "https://mcp.tavily.com/mcp",
+        transport: "http",
+        oauth: true,
+        tools: &["tavily_search", "tavily_extract", "tavily_crawl", "tavily_map"],
+    },
+];
+
+/// One remote MCP server Cowork can be pointed at.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CoworkPlugin {
+    pub(crate) name: &'static str,
+    pub(crate) url: &'static str,
+    pub(crate) transport: &'static str,
+    pub(crate) oauth: bool,
+    pub(crate) tools: &'static [&'static str],
+}
+
+/// A managed MCP server entry, in the shape Cowork's config takes.
+fn cowork_server_entry(name: &str, url: &str, transport: &str, oauth: bool, tools: &[&str]) -> Value {
+    let mut entry = serde_json::json!({
+        "name": name,
+        "url": url,
+        "transport": transport,
+    });
+    if oauth {
+        insert_key(&mut entry, "oauth", Value::Bool(true));
+    }
+    if !tools.is_empty() {
+        // Both the bare and the singly-prefixed name are allowed, because the tool arrives named
+        // one way or the other depending on how Cowork resolved the server. Pre-existing prefixes
+        // are stripped first so a re-apply does not accumulate `name-name-tool`.
+        let prefix = format!("{name}-");
+        let mut policy = Map::new();
+        for tool in tools {
+            let mut bare = *tool;
+            while let Some(stripped) = bare.strip_prefix(&prefix) {
+                bare = stripped;
+            }
+            if bare.is_empty() {
+                continue;
+            }
+            policy.insert(bare.to_owned(), Value::String("allow".to_owned()));
+            policy.insert(format!("{prefix}{bare}"), Value::String("allow".to_owned()));
+        }
+        insert_key(&mut entry, "toolPolicy", Value::Object(policy));
+    }
+    entry
+}
+
+/// The SSE bridge URL this router serves a local stdio plugin on.
+fn cowork_bridge_url(name: &str) -> String {
+    format!("http://localhost:{COWORK_BRIDGE_PORT}/api/mcp/{name}/sse")
+}
+
+/// The port the bridge is reachable on. The gateway's, since that is what a desktop app talks to.
+const COWORK_BRIDGE_PORT: u16 = 20128;
+
+/// Points Cowork at this router and lists the MCP servers it may use.
+///
+/// DIVERGENCE, and the significant one in this file: upstream writes a **fresh** config object,
+/// which replaces whatever the user had, and its apply also spreads a hardcoded relax-security
+/// profile — `coworkEgressAllowedHosts: ["*"]`, `isDesktopExtensionSignatureRequired: false`,
+/// extension directories enabled, telemetry and "nonessential services" disabled.
+///
+/// This port merges, and writes only `isLocalDevMcpEnabled` out of that profile, because that one
+/// is what makes Cowork accept the localhost bridge entries written below. The rest is not needed
+/// to route inference: turning off desktop-extension signature checking and opening egress to
+/// every host weakens the user's Claude Desktop in ways nobody asked a router to, and doing it
+/// silently as a side effect of "use this gateway" is worse than a port that does less.
+fn cowork_apply(document: &mut Value, payload: &Payload) {
+    write::set_path(
+        document,
+        &["inferenceProvider"],
+        Value::String(COWORK_PROVIDER.to_owned()),
+    );
+    write::set_path(
+        document,
+        &["inferenceGatewayBaseUrl"],
+        Value::String(payload.base_url.clone().unwrap_or_default()),
+    );
+    write::set_path(
+        document,
+        &["inferenceGatewayApiKey"],
+        Value::String(payload.key().to_owned()),
+    );
+    write::set_path(
+        document,
+        &["inferenceModels"],
+        payload
+            .model_names()
+            .into_iter()
+            .map(|name| serde_json::json!({ "name": name }))
+            .collect(),
+    );
+
+    let servers = cowork_servers(payload);
+    if servers.is_empty() {
+        write::remove_path(document, &["managedMcpServers"]);
+    } else {
+        // Only set alongside a server list: this is the one relax-security key this port writes,
+        // and it exists to make the localhost bridge entries acceptable. With no bridge entries
+        // there is nothing for it to enable.
+        let bridged = servers
+            .iter()
+            .any(|server| server.get("url").and_then(Value::as_str).is_some_and(is_bridge_url));
+        if bridged {
+            write::set_path(document, &["isLocalDevMcpEnabled"], Value::Bool(true));
+        }
+        write::set_path(document, &["managedMcpServers"], Value::Array(servers));
+    }
+}
+
+/// The full server list: the chosen remote plugins, the bridged local ones, then custom URLs.
+fn cowork_servers(payload: &Payload) -> Vec<Value> {
+    let mut servers = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+
+    // An absent `plugins` means "the defaults"; an empty array means the user turned them all off,
+    // and must not be replaced by the defaults.
+    let chosen: Vec<&CoworkPlugin> = match payload.plugins.as_ref() {
+        Some(names) => COWORK_DEFAULT_PLUGINS
+            .iter()
+            .filter(|plugin| {
+                names
+                    .iter()
+                    .any(|name| name.as_str() == Some(plugin.name))
+            })
+            .collect(),
+        None => COWORK_DEFAULT_PLUGINS.iter().collect(),
+    };
+    for plugin in chosen {
+        if seen.iter().any(|name| name == plugin.name) {
+            continue;
+        }
+        seen.push(plugin.name.to_owned());
+        servers.push(cowork_server_entry(
+            plugin.name,
+            plugin.url,
+            plugin.transport,
+            plugin.oauth,
+            plugin.tools,
+        ));
+    }
+
+    // Local stdio plugins are not spawned by Cowork: they are bridged through this router's SSE
+    // endpoint, and only names on the compile-time whitelist resolve. A name that is not on it is
+    // skipped rather than turned into a command, which is the whole reason the whitelist exists.
+    for name in payload.local_plugins.iter().flatten() {
+        let Some(name) = name.as_str().filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        let Some(plugin) = nullrouter_contracts::bridgeable_plugin(name) else {
+            continue;
+        };
+        if seen.iter().any(|seen| seen == plugin.name) {
+            continue;
+        }
+        seen.push(plugin.name.to_owned());
+        servers.push(cowork_server_entry(
+            plugin.name,
+            &cowork_bridge_url(plugin.name),
+            "sse",
+            false,
+            plugin.tool_names,
+        ));
+    }
+
+    // Custom entries are URL-only. Upstream filters on `p.url` for the same reason: a custom entry
+    // carrying a command would be a request to spawn an arbitrary process.
+    for plugin in payload.custom_plugins.iter().flatten() {
+        let name = plugin.get("name").and_then(Value::as_str).unwrap_or_default();
+        let url = plugin.get("url").and_then(Value::as_str).unwrap_or_default();
+        if name.is_empty() || url.is_empty() || seen.iter().any(|seen| seen == name) {
+            continue;
+        }
+        seen.push(name.to_owned());
+        let transport = plugin
+            .get("transport")
+            .and_then(Value::as_str)
+            .filter(|transport| !transport.is_empty())
+            .unwrap_or("sse");
+        let mut entry = cowork_server_entry(name, url, transport, false, &[]);
+        insert_key(&mut entry, "custom", Value::Bool(true));
+        servers.push(entry);
+    }
+
+    servers
+}
+
+fn is_bridge_url(url: &str) -> bool {
+    url.starts_with(&format!("http://localhost:{COWORK_BRIDGE_PORT}/api/mcp/"))
+}
+
+/// Removes the inference keys and the servers this port manages.
+///
+/// DIVERGENCE: upstream writes `{}` over the whole config. That discards every Cowork setting the
+/// user has, not just the ones an apply wrote — window state, workspace preferences, anything else
+/// in the file. Removing only our own keys leaves the rest, and matches what every other revoke
+/// here does.
+fn cowork_revoke(document: &mut Value) {
+    for key in [
+        "inferenceProvider",
+        "inferenceGatewayBaseUrl",
+        "inferenceGatewayApiKey",
+        "inferenceModels",
+        "managedMcpServers",
+        "isLocalDevMcpEnabled",
+    ] {
+        write::remove_path(document, &[key]);
+    }
+}
+
 /// How one tool is written.
 #[derive(Debug)]
 pub(crate) struct Writer {
@@ -1392,7 +1629,32 @@ impl Target {
         payload: &Payload,
         outcome: &mut Outcome,
     ) -> Result<Value, write::WriteError> {
-        let path = self.config.resolve().ok_or(write::WriteError::NoHome)?;
+        let path = match self.config.resolve() {
+            Some(path) => path,
+            // An indirect config's filename comes out of a meta file, so an unresolvable path means
+            // that file is missing or does not name one — which is the state of a tool that has
+            // never been set up. Reported, rather than a name being invented: writing
+            // `configLibrary/<a uuid we chose>.json` puts a config into an app's own data
+            // directory that the app has no reason to ever read.
+            None if self.config.indirect.is_some() => {
+                return Err(write::WriteError::NoConfigPath {
+                    detail: format!(
+                        "No applied configuration was found to write to. Expected a `{}` naming \
+                         one under {}. Open the tool and apply a configuration once, then try \
+                         again.",
+                        self.config
+                            .indirect
+                            .map(|indirection| indirection.meta_file)
+                            .unwrap_or_default(),
+                        self.config
+                            .directory_for_report()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "its config directory".to_owned()),
+                    ),
+                });
+            }
+            None => return Err(write::WriteError::NoHome),
+        };
 
         // A revoke of a file that is not there has nothing to remove, and creating one to hold the
         // absence of our keys would leave a config file behind for a tool the user never set up.
@@ -1478,9 +1740,47 @@ pub(crate) fn writer_for(tool_id: &str) -> Option<&'static Writer> {
         "jcode-settings" => Some(&JCODE),
         "openclaw-settings" => Some(&OPENCLAW),
         "grok-build-settings" => Some(&GROK),
+        "cowork-settings" => Some(&COWORK),
         _ => None,
     }
 }
+
+const COWORK_ROOTS: &[Root] = &[
+    Root::XdgConfig(&["Claude-3p"]),
+    Root::XdgConfig(&["Claude"]),
+];
+
+static COWORK: Writer = Writer {
+    validate: |payload| {
+        if payload.base_url.as_deref().is_none_or(str::is_empty)
+            || payload.api_key.as_deref().is_none_or(str::is_empty)
+        {
+            return Err("baseUrl and apiKey are required");
+        }
+        // Upstream checks this separately, and reports it separately.
+        if payload.model_names().is_empty() {
+            return Err("At least one model is required");
+        }
+        Ok(())
+    },
+    targets: &[Target {
+        config: ConfigFile {
+            roots: COWORK_ROOTS,
+            // Names the directory; the filename comes from `_meta.json`.
+            segments: &["configLibrary"],
+            format: Format::Json,
+            indirect: Some(super::spec::Indirection {
+                meta_file: "_meta.json",
+                key: "appliedId",
+            }),
+        },
+        required: Required::Yes,
+        on_empty: OnEmpty::Keep,
+        apply: cowork_apply,
+        revoke: cowork_revoke,
+    }],
+    derived: None,
+};
 
 const GROK_ROOT: &[Root] = &[Root::Home(&[".grok"])];
 

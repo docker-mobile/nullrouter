@@ -29,6 +29,10 @@ use super::spec::Format;
 pub(crate) enum WriteError {
     /// `$HOME` is unset, so there is no path to write to.
     NoHome,
+    /// The config path could not be worked out, and guessing one would mean writing a file into a
+    /// directory some other program owns. Cowork is the case: its filename comes out of a
+    /// `_meta.json` that only exists once the app has been set up.
+    NoConfigPath { detail: String },
     /// The file exists but does not parse, so merging into it would mean discarding it.
     Unparseable { path: PathBuf, detail: String },
     Io { path: PathBuf, detail: String },
@@ -39,6 +43,7 @@ impl WriteError {
     pub(crate) fn message(&self) -> String {
         match self {
             Self::NoHome => "Cannot locate the home directory: $HOME is unset or empty.".to_owned(),
+            Self::NoConfigPath { detail } => detail.clone(),
             Self::Unparseable { path, detail } => format!(
                 "{} exists but could not be parsed ({detail}), so it was left untouched. Fix or \
                  move that file and try again — overwriting it would discard whatever is in it.",
@@ -320,6 +325,7 @@ pub(crate) fn without_v1(base_url: &str) -> String {
 
 #[cfg(test)]
 #[allow(
+    clippy::indexing_slicing,
     clippy::expect_used,
     clippy::panic,
     reason = "test assertions read clearer with expect than with error plumbing"

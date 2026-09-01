@@ -20,6 +20,12 @@
     reason = "test assertions read clearer with direct expect than with error plumbing"
 )]
 
+#![allow(
+    clippy::indexing_slicing,
+    reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
+              is a test failure, which is what the panic reports"
+)]
+
 use actix_web::{
     App,
     body::to_bytes,
@@ -89,11 +95,11 @@ impl SecretGuard {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // SAFETY: ENV_LOCK is held, so no other test in this process reads or writes it here.
-        unsafe {
-            match secret {
-                Some(value) => std::env::set_var(SECRET_VAR, value),
-                None => std::env::remove_var(SECRET_VAR),
-            }
+        match secret {
+            // SAFETY: ENV_LOCK is held, so no other test in this process reads or writes it here.
+            Some(value) => unsafe { std::env::set_var(SECRET_VAR, value) },
+            // SAFETY: as above.
+            None => unsafe { std::env::remove_var(SECRET_VAR) },
         }
         Self { _lock: lock }
     }
