@@ -2562,6 +2562,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullrouter-procctl"
+version = "0.5.20"
+dependencies = [
+ "hex",
+ "libc",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nullrouter-providers"
 version = "0.5.20"
 dependencies = [

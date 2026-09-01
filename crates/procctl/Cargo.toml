@@ -1,0 +1,24 @@
+[package]
+name = "nullrouter-procctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Tightly-scoped supervision of external binaries: allowlisted argv, no downloads, secrets never in argv"
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "rt", "sync", "time", "io-util", "macros"] }
+tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

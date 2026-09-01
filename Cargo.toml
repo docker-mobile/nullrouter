@@ -7,6 +7,7 @@ members = [
     "crates/contracts",
     "crates/execute",
     "crates/logship",
+    "crates/procctl",
     "crates/providers",
     "crates/pxpipe",
     "crates/translate",
@@ -24,6 +25,7 @@ default-members = [
     "benches/mock-provider",
     "crates/contracts",
     "crates/execute",
+    "crates/procctl",
     "crates/providers",
     "crates/pxpipe",
     "crates/translate",
@@ -67,6 +69,13 @@ mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
 nullrouter-logship = { path = "crates/logship" }
 nullrouter-execute = { path = "crates/execute" }
+nullrouter-procctl = { path = "crates/procctl" }
+# Graceful shutdown of a supervised child needs SIGTERM. `tokio::process::Child::kill` is
+# SIGKILL, which makes cloudflared abandon its edge connections instead of unregistering them.
+libc = "0.2"
+# Optional pinning of a supervised binary to a known-good digest.
+sha2 = "0.10"
+hex = "0.4"
 nullrouter-providers = { path = "crates/providers" }
 nullrouter-pxpipe = { path = "crates/pxpipe" }
 nullrouter-translate = { path = "crates/translate" }
