@@ -14,7 +14,7 @@ use actix_web::{
 };
 use serde_json::Value;
 
-use nullrouter_api::{AppConfig, RuntimeClient, StateClient, configure};
+use nullrouter_api::{AppConfig, RuntimeClient, StateClient, TunnelManager, configure};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -32,6 +32,7 @@ async fn request_json(method: Method, uri: &str, body: &str) -> TestResult<(Stat
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -63,6 +64,7 @@ async fn status_of(uri: &str) -> TestResult<StatusCode> {
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -128,7 +130,9 @@ async fn cli_tool_routes_report_what_is_actually_on_the_machine() -> TestResult 
 
 #[actix_rt::test]
 async fn headroom_and_tunnel_routes_return_safe_defaults() -> TestResult {
-    // Given: this service cannot start local Headroom, Cloudflare, or Tailscale processes.
+    // Given: this service cannot start local Headroom, and neither cloudflared nor tailscale
+    // is installed on this machine. The tunnel routes are real now, so what they must do here
+    // is name the missing dependency rather than claim the feature does not exist.
 
     // When: status and mutation endpoints are requested.
     let (headroom_status, headroom) = get_json("/api/headroom/status").await?;
@@ -155,12 +159,36 @@ async fn headroom_and_tunnel_routes_return_safe_defaults() -> TestResult {
     assert_eq!(field(&proxy, "unsupported")?, true);
     assert_eq!(tunnel_status, StatusCode::OK);
     assert_eq!(field(field(&tunnel, "tunnel")?, "enabled")?, false);
-    assert_eq!(tunnel_enable_status, StatusCode::NOT_IMPLEMENTED);
+    // 503, not 501: the capability exists and the binary does not. A panel has to tell those
+    // apart, because one is fixed by installing something and the other never will be.
+    assert_eq!(tunnel_enable_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&tunnel_enable, "success")?, false);
+    assert!(
+        field(&tunnel_enable, "message")?
+            .as_str()
+            .is_some_and(|message| message.contains("cloudflared")
+                && message.contains("not installed")),
+        "the failure must name the missing binary: {tunnel_enable}"
+    );
+    // And it must say this service will not fetch it, so nobody waits for a download.
+    assert!(
+        field(&tunnel_enable, "message")?
+            .as_str()
+            .is_some_and(|message| message.contains("never downloads")),
+        "{tunnel_enable}"
+    );
     assert_eq!(tailscale_check_status, StatusCode::OK);
     assert_eq!(field(&tailscale_check, "installed")?, false);
+    // Installing system software stays refused: upstream does it by piping a downloaded
+    // script into `sudo sh`, and 501 is the honest answer rather than a missing dependency.
     assert_eq!(tailscale_install_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&tailscale_install, "success")?, false);
+    assert!(
+        field(&tailscale_install, "hint")?
+            .as_str()
+            .is_some_and(|hint| hint.contains("tailscale.com/download")),
+        "the refusal must tell the operator what to do instead: {tailscale_install}"
+    );
     Ok(())
 }
 

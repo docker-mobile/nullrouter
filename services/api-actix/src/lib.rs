@@ -33,6 +33,7 @@ mod usage;
 pub use lifecycle::ShutdownHandle;
 pub use routes::configure;
 pub use state_client::{RuntimeClient, StateClient};
+pub use tunnel::Manager as TunnelManager;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {

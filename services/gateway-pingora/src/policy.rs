@@ -20,6 +20,16 @@ const HOST_ONLY_PREFIXES: &[&str] = &[
     "/api/tunnel/tailscale-check",
     "/api/tunnel/enable",
     "/api/tunnel/disable",
+    // Everything under `/api/tunnel` is host-only, including the read-only status and the
+    // operation catalog. These operations decide what this machine publishes to the internet,
+    // and both binaries have subcommands beyond tunnels; a session cookie stolen from a
+    // browser elsewhere must not be able to open a public route into this host, or to
+    // enumerate what could be opened. The narrower entries above stay for the record of which
+    // routes upstream exposes to any authenticated session.
+    //
+    // No trailing slash: `matches_prefix` appends its own separator, so `/api/tunnel/` here
+    // would look for `/api/tunnel//` and match nothing at all.
+    "/api/tunnel",
     "/api/oauth/cursor/auto-import",
     "/api/oauth/kiro/auto-import",
     "/api/auth/reset-password",

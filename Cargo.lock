@@ -2413,6 +2413,7 @@ dependencies = [
  "futures-util",
  "nullrouter-contracts",
  "nullrouter-logship",
+ "nullrouter-procctl",
  "nullrouter-providers",
  "nullrouter-pxpipe",
  "reqwest",

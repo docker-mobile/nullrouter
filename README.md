@@ -473,9 +473,11 @@ and are safe only because that refusal holds.
 **Stored secrets are stripped from every public API response.** `apiKey`, `accessToken`, and
 `refreshToken` never leave through `/api/*`.
 
-**Host-only routes require a loopback peer.** MITM control, MCP, tunnel control, headroom process
-control, password reset, the OAuth auto-import helpers, and PXPIPE install/start return 403 to any
-non-loopback caller even with a valid session. The PXPIPE pair is stricter than upstream, which allows
+**Host-only routes require a loopback peer.** MITM control, MCP, every route under `/api/tunnel/`,
+headroom process control, password reset, the OAuth auto-import helpers, and PXPIPE install/start
+return 403 to any non-loopback caller even with a valid session. The tunnel prefix includes its
+read-only status and its operation listing, which is stricter than upstream: those operations decide
+what this machine publishes to the internet, and enumerating them is itself worth withholding. The PXPIPE pair is stricter than upstream, which allows
 them from any authenticated dashboard session: they run `npm install pxpipe-proxy@latest`, whose
 lifecycle scripts execute as the API service, and a session cookie taken from a browser on another
 machine should not be able to install software on this one. The package name is fixed and never read
@@ -676,11 +678,12 @@ repository implements these; each names the thing it does not own.
   restarting the daemon are refused, because this service does not own that interpreter and has no
   supervisor for a detached daemon. A fake `{"success":true}` here would be the worst available lie —
   you would believe your prompts were being compressed while being billed for full-size requests.
-- **Tunnel / Tailscale control** — *the tunnel daemons*. Status reports honestly; every mutation is
-  refused. Starting a tunnel means driving a daemon with its own lifecycle and credentials.
 - **MITM control** (`/api/cli-tools/antigravity-mitm`) — *the intercepting proxy and its certificate
   authority*. URL validation is real. Issuing a CA and rewriting a machine's trust store is not
   something a router should do on a user's behalf.
+(Tunnel and Tailscale control was listed here, on the grounds that driving a daemon with its own
+lifecycle and credentials was out of scope. That was a reason to build a supervisor, not a reason to
+refuse; it is now implemented — see below.)
 (Relay deployment was listed here, on the grounds that it needed an account on those platforms. That
 was wrong — the token comes from the caller's own request — and it is now implemented; see below.)
 - **Provider OAuth *authorisation* flows, the two families that need a browser** — *the provider's
@@ -839,6 +842,75 @@ Unlike `pxpipe/install`, these are not host-only. The deploy acts on a remote ac
 credential the caller already holds, so restricting it to loopback would stop a remote operator
 deploying to their own account while protecting nothing on this host. A dashboard session is still
 required.
+
+**Cloudflare and Tailscale are driven for real, under supervision.** Quick tunnels, named tunnels,
+Tailscale Funnel, login, certificates and status all work, using the official `cloudflared` and
+`tailscaled` binaries. This was previously refused on the grounds that driving a daemon with its own
+lifecycle and credentials was out of scope — which was a reason to build a supervisor, not a reason to
+refuse.
+
+The supervisor is `crates/procctl`, and it is built by declining, one at a time, the things upstream's
+`src/lib/tunnel/` does:
+
+- **It downloads `cloudflared` from `releases/latest`, `chmod 755`s it, and runs it** — no digest, no
+  signature, not even a pinned version. That is unattended remote code execution, and it is the single
+  largest hole in the feature. Nothing here downloads anything. A binary must already be installed,
+  and before it runs, this checks that it is a regular executable file, that neither it nor its
+  directory is writable by other users — so a local account cannot swap it between the check and the
+  spawn — and, if a digest is pinned, that it matches. `tailscale-install` answers 501 and names the
+  download page, because upstream installs Tailscale by piping a fetched script into `sudo sh` with
+  the user's password on the child's stdin.
+- **It passes the tunnel token as `--token <value>`.** On Linux `/proc/<pid>/cmdline` is
+  world-readable, so every local user can read a credential that controls the tunnel. Here the token
+  reaches the child only through `TUNNEL_TOKEN` in its environment, which Cloudflare documents as
+  equivalent. The `Secret` type has no `Display` or `Debug` that renders it and exactly one reader,
+  named `expose_for_child_env`; child output is scrubbed before it is stored or returned.
+- **It builds commands as interpolated shell strings**, so every value is one quoting mistake from
+  being a command. Argv is assembled from a character allowlist with no shell, and a value beginning
+  with `-` is refused so a caller cannot smuggle in a flag.
+- **It runs `pkill -f "cloudflared.*:20128"` and `pkill -9 -f tailscaled`** — a pattern match against
+  every process on the machine, which kills daemons it never started, including another copy of the
+  router. Only the pid this process spawned is ever signalled. `SIGTERM` comes first, then `SIGKILL`
+  after a bounded wait, so `cloudflared` can unregister its edge connections instead of leaving
+  Cloudflare routing to a connection that is gone.
+- **Several of its probes have no timeout at all**, run through `execSync` on its only thread. Every
+  one-shot here has a hard deadline and a capture cap, and reads output while the child runs rather
+  than deadlocking when the child fills a pipe buffer.
+- **It reconnects with no ceiling.** Restarts are counted with exponential backoff and end in a
+  terminal failed state, and a child that has been up long enough to count as healthy gets its
+  allowance back.
+- **A start either reaches a declared readiness condition or is torn down.** A named tunnel is up when
+  four edge connections have registered; a quick tunnel is up when it prints its hostname, which is
+  the only place that hostname exists. A child that came up but stayed silent is stopped, because a
+  tunnel that never logged its connections may equally be one that never established them.
+
+The supervised child runs on a thread the supervisor owns, with its own runtime. That is not a
+preference: a `tokio` child is bound to the runtime that created it, so a tunnel started by a request
+on one actix worker could not be waited on or reaped from another.
+
+Two design points beyond parity. `tailscaled` runs with `--tun=userspace-networking` against a socket
+in this service's own state directory, so it needs no root and cannot disturb a system Tailscale the
+operator runs for their own reasons — upstream has this too, and it is the reason nothing here ever
+needs a sudo password. And readiness of that daemon is decided by polling its socket rather than by
+upstream's fixed three-second sleep, which is both slower than necessary when the daemon is quick and
+wrong when it is slow.
+
+`GET /api/tunnel/operations` lists what these binaries may be asked to do, and
+`POST /api/tunnel/operations/{id}` runs one. That table is the security boundary: no request body can
+reach a subcommand that is not a row in it, there is no runtime registration, and an unknown id is a
+400 rather than an attempt. It is also the extension point — both binaries do much more than tunnels,
+and `tailscale ip`, `serve status`, `cert` and `logout` are already rows, so another operation is a
+row plus its argv builder rather than new plumbing. Parameters carrying a credential are marked
+`secret` so a panel renders a password field, and a row that declares one must have somewhere to put
+it that is not argv; a test enforces that, which is what stops `--token` coming back.
+
+The whole `/api/tunnel/` prefix is host-only, including read-only status. These operations decide what
+this machine publishes to the internet, so a session cookie taken from a browser elsewhere must not be
+able to open a public route into this host, or to enumerate what could be opened.
+
+A missing binary answers 503 naming the program and saying this service will never fetch it, not 501:
+the capability exists and the dependency does not, and a panel has to tell those apart because one is
+fixed by installing something and the other never will be.
 
 **Console-log capture is live, across every service.** `/api/translator/console-logs` lists the
 buffered lines, its `/stream` companion pushes new ones as they arrive, and `DELETE` empties the

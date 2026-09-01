@@ -219,6 +219,24 @@ impl Snapshot {
     pub const fn is_running(&self) -> bool {
         matches!(self.state, State::Running)
     }
+
+    /// The view of a program that has never been started.
+    ///
+    /// Lets a caller hold its supervisors lazily and still answer a status poll, without
+    /// spawning a thread for a facility that may never be used.
+    #[must_use]
+    pub const fn idle() -> Self {
+        Self {
+            state: State::Stopped,
+            pid: None,
+            ready_value: None,
+            uptime: None,
+            restarts: 0,
+            last_error: None,
+            logs: Vec::new(),
+            dropped_logs: 0,
+        }
+    }
 }
 
 /// Why a start did not succeed.

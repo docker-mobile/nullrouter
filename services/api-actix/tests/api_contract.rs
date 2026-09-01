@@ -8,7 +8,7 @@ use actix_web::{
 };
 use serde_json::Value;
 
-use nullrouter_api::{AppConfig, RuntimeClient, StateClient, configure};
+use nullrouter_api::{AppConfig, RuntimeClient, StateClient, TunnelManager, configure};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -39,6 +39,7 @@ async fn get_json(uri: &str) -> TestResult<(StatusCode, Value)> {
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -108,6 +109,7 @@ async fn chat_rejects_missing_model_when_body_is_empty_object() -> TestResult {
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -139,6 +141,7 @@ async fn chat_rejects_invalid_json_with_structured_error() -> TestResult {
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -170,6 +173,7 @@ async fn valid_chat_request_returns_explicit_provider_execution_stub() -> TestRe
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -200,6 +204,7 @@ async fn streaming_chat_request_returns_sse_error_frame() -> TestResult {
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;
@@ -290,6 +295,7 @@ async fn health_options_returns_no_content_with_cors_headers() -> TestResult {
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;

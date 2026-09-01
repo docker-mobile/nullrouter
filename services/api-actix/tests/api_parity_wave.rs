@@ -8,7 +8,7 @@ use actix_web::{
 };
 use serde_json::Value;
 
-use nullrouter_api::{AppConfig, RuntimeClient, StateClient, configure};
+use nullrouter_api::{AppConfig, RuntimeClient, StateClient, TunnelManager, configure};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -30,6 +30,7 @@ async fn request_json(
             .app_data(web::Data::new(app_config()))
             .app_data(web::Data::new(StateClient::new(UNREACHABLE_STATE_ADDR)))
             .app_data(web::Data::new(RuntimeClient::new(UNREACHABLE_STATE_ADDR)))
+            .app_data(web::Data::new(TunnelManager::new()))
             .configure(configure),
     )
     .await;

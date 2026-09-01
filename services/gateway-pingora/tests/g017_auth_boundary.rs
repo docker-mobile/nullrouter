@@ -208,6 +208,58 @@ fn cli_tool_config_writes_are_host_only_while_reads_are_not() {
 }
 
 #[test]
+fn every_tunnel_route_is_host_only_including_its_reads() {
+    // Given: the tunnel routes drive `cloudflared` and `tailscaled`. Unlike the CLI-tool reads
+    // above, the reads here are held to loopback too: the operation catalog is a list of ways
+    // to publish this host to the internet, and enumerating it is worth withholding even when
+    // running one is what actually opens the route.
+    let config = GatewayConfig::default();
+
+    for path in [
+        "/api/tunnel/status",
+        "/api/tunnel/enable",
+        "/api/tunnel/disable",
+        "/api/tunnel/named/enable",
+        "/api/tunnel/tailscale-check",
+        "/api/tunnel/tailscale-enable",
+        "/api/tunnel/tailscale-disable",
+        "/api/tunnel/tailscale-install",
+        "/api/tunnel/operations",
+        "/api/tunnel/operations/cloudflared.tunnel.quick",
+        "/api/tunnel/operations/tailscale.funnel.start",
+        // A route added later under this prefix is covered by the same rule, which is the
+        // point of matching the prefix rather than each path.
+        "/api/tunnel/something-added-later",
+    ] {
+        for method in [
+            Method::GET,
+            Method::HEAD,
+            Method::OPTIONS,
+            Method::POST,
+            Method::DELETE,
+        ] {
+            // When: the request comes from another machine, valid session and all.
+            let remote = config.access_requirement(path, &method, Some(REMOTE));
+
+            // Then: it is refused before routing.
+            assert_eq!(remote, AccessRequirement::Forbidden, "{method} {path}");
+            assert_eq!(
+                remote.decision(AuthorizationState::Authorized),
+                AccessDecision::Forbidden,
+                "{method} {path} allowed a remote peer holding a valid session"
+            );
+
+            // And from this host it still needs a session: host-only is not a bypass.
+            assert_eq!(
+                config.access_requirement(path, &method, Some(LOOPBACK)),
+                AccessRequirement::ApiSession,
+                "{method} {path}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_all_method_host_only_routes_are_not_relaxed_by_the_write_rule() {
     // The write rule is additive. `cowork-settings` and `antigravity-mitm` are host-only for
     // every method — cowork injects MCP bridge entries and the MITM route spawns a proxy — and

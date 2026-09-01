@@ -1,5 +1,5 @@
 use actix_web::{App, HttpServer, web};
-use nullrouter_api::{AppConfig, RuntimeClient, ShutdownHandle, StateClient, configure};
+use nullrouter_api::{AppConfig, RuntimeClient, ShutdownHandle, StateClient, TunnelManager, configure};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 20129;
@@ -19,6 +19,10 @@ async fn main() -> std::io::Result<()> {
     // the server is built. `/api/shutdown` reports that it cannot stop anything if this is
     // still empty, rather than claiming a shutdown that will not happen.
     let shutdown = web::Data::new(ShutdownHandle::new());
+    // Built once, outside the per-worker closure: it owns the supervisor threads, and one
+    // pair per worker would mean several cloudflared children with no single owner — the
+    // exact confusion upstream's pid file plus `pkill` fallback exists to paper over.
+    let tunnels = web::Data::new(TunnelManager::new());
 
     let server = {
         let shutdown = shutdown.clone();
@@ -31,6 +35,7 @@ async fn main() -> std::io::Result<()> {
                 .app_data(runtime.clone())
                 .app_data(token_saver.clone())
                 .app_data(shutdown.clone())
+                .app_data(tunnels.clone())
                 .configure(configure)
         })
     // TCP_NODELAY, for the same reason as `nullrouter-runtime` — see the long note in

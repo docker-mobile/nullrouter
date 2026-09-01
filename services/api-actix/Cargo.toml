@@ -17,6 +17,7 @@ actix-web.workspace = true
 futures-util.workspace = true
 nullrouter-contracts.workspace = true
 nullrouter-providers.workspace = true
+nullrouter-procctl.workspace = true
 nullrouter-pxpipe.workspace = true
 reqwest = { workspace = true, features = ["multipart"] }
 serde.workspace = true
@@ -25,6 +26,8 @@ thiserror.workspace = true
 # Codex, jcode, deepseek-tui and grok-build keep TOML configs.
 toml.workspace = true
 tracing.workspace = true
+# The tunnel manager polls tailscaled's socket rather than sleeping a fixed interval.
+tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
 tempfile.workspace = true
