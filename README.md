@@ -692,8 +692,9 @@ was wrong — the token comes from the caller's own request — and it is now im
   This entry used to cover all thirteen routes under `/api/oauth/`, which was wrong. Ten of them are
   **token import**: the user pastes a credential they already hold — a Personal Access Token, an API
   key, a session cookie — and the route verifies it and records a connection. No browser and no
-  client credentials of this router's own are involved. `gitlab/pat` is implemented (see below); the
-  other nine are portable and simply not done yet.
+  client credentials of this router's own are involved. `gitlab/pat`, `kiro/api-key` and
+  `codex/import-token` are implemented (see below); the other seven are portable and simply not done
+  yet.
   Device-code, PKCE browser flows, and vendor token imports for codex/cursor/kiro/gitlab/iflow.
   Getting a provider token for the first time requires a browser session with that provider.
   (Dashboard *sign-in* via OIDC is a separate subsystem and is fully implemented, and *refreshing* an
@@ -802,7 +803,30 @@ this service can reach the internal services on 20129-20135 and the host's netwo
 cannot. The connection records `authKind: personal_access_token`, which is what tells the refresh path
 to leave it alone — a PAT has no refresh token, so trying to refresh one would fail on every request.
 
-The other nine import routes under `/api/oauth/` are portable on the same reasoning and are not done
+`kiro/api-key` is implemented on the same shape. A Kiro API key is a long-lived bearer credential with
+no refresh token, so it is verified against the Amazon Q surface inference itself uses — and verified
+means *usable*, not merely reachable: a key that is accepted but lists no models is refused, because
+recording it would produce a connection that fails on its first real request.
+
+Two details there carry weight. The region becomes the first label of `q.<region>.amazonaws.com`, so it
+is pattern-checked against upstream's own `^[a-z]{2}-[a-z]+-\d{1,2}$` before it is interpolated —
+an unchecked region is a way for a caller to choose which host receives their bearer token. A
+consequence worth stating: that pattern rejects `us-gov-west-1` and `us-iso-east-1`, so GovCloud is out
+of reach here exactly as it is upstream, and widening the check unilaterally would loosen something
+whose whole job is narrowness. And AWS's rejection body can quote the credential back, so it is dropped
+and only the status is kept — 403 and 503 mean different things to whoever has to act on it.
+
+`codex/import-token` takes a ChatGPT access token the user created on chatgpt.com. Nothing verifies it,
+and that is not a shortcut: the credential is issued for the ChatGPT surface rather than for an API
+endpoint that would accept it in a probe, so there is no call that would tell the truth about it.
+What the route does instead is read the token's own claims for the labels the panel shows — the
+namespaced `https://api.openai.com/profile` email and the `auth` block's account id and plan, with
+top-level fallbacks for a token from a device flow rather than the web UI. None of it is verified, no
+signature is checked, and so none of it is treated as an identity — only as a label. A token that is
+not a JWT at all is imported anyway, because refusing a working credential over a missing label would
+be the wrong trade; its connection is named "ChatGPT Access Token" rather than named after the token.
+
+The other seven import routes under `/api/oauth/` are portable on the same reasoning and are not done
 yet; the two families that genuinely need a consent screen still answer 501 naming the provider and
 action.
 

@@ -62,6 +62,9 @@ async fn locale_and_oauth_gap_routes_return_json_contracts() -> TestResult {
     let (locale_post_status, locale_post) =
         request_json(Method::POST, "/api/locale", r#"{"locale":"en"}"#).await?;
     let (oauth_get_status, oauth_get) = get_json("/api/oauth/cursor/import").await?;
+    // `codex/import-token` is implemented now, so an empty body is a stated bad request rather than
+    // a 501. It is kept in this suite because what the suite checks is that every route answers with
+    // structured JSON rather than a framework 404 — which is true of a 400 as much as of a 501.
     let (oauth_post_status, oauth_post) =
         request_json(Method::POST, "/api/oauth/codex/import-token", "{}").await?;
 
@@ -72,8 +75,12 @@ async fn locale_and_oauth_gap_routes_return_json_contracts() -> TestResult {
     assert_eq!(field(&locale_post, "success")?, true);
     assert_eq!(oauth_get_status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&oauth_get, "unsupported")?, true);
-    assert_eq!(oauth_post_status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(field(&oauth_post, "unsupported")?, true);
+    assert_eq!(oauth_post_status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        field(&oauth_post, "error")?,
+        "Access token is required",
+        "the refusal has to name what was missing"
+    );
     Ok(())
 }
 

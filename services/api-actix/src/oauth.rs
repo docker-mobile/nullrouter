@@ -13,6 +13,16 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
                 .route(web::post().to(import::gitlab_pat))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         )
+        .service(
+            web::resource("/api/oauth/kiro/api-key")
+                .route(web::post().to(import::kiro_api_key))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/oauth/codex/import-token")
+                .route(web::post().to(import::codex_import_token))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
         // Everything else. Not all of it is out of reach — see the module docs on `import` — but
         // what is left either needs a provider's consent screen or is not ported yet, and both are
         // better as an explicit 501 naming the provider and action than as a wrong answer.
