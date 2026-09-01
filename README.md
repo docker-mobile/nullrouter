@@ -683,7 +683,15 @@ repository implements these; each names the thing it does not own.
   something a router should do on a user's behalf.
 (Relay deployment was listed here, on the grounds that it needed an account on those platforms. That
 was wrong — the token comes from the caller's own request — and it is now implemented; see below.)
-- **Provider OAuth *authorisation* flows** (`/api/oauth/*`) — *the provider's own consent screen*.
+- **Provider OAuth *authorisation* flows, the two families that need a browser** — *the provider's
+  own consent screen*. `kiro/social-authorize` + `social-exchange`, and the generic
+  `{provider}/{action}` PKCE and device flows.
+
+  This entry used to cover all thirteen routes under `/api/oauth/`, which was wrong. Ten of them are
+  **token import**: the user pastes a credential they already hold — a Personal Access Token, an API
+  key, a session cookie — and the route verifies it and records a connection. No browser and no
+  client credentials of this router's own are involved. `gitlab/pat` is implemented (see below); the
+  other nine are portable and simply not done yet.
   Device-code, PKCE browser flows, and vendor token imports for codex/cursor/kiro/gitlab/iflow.
   Getting a provider token for the first time requires a browser session with that provider.
   (Dashboard *sign-in* via OIDC is a separate subsystem and is fully implemented, and *refreshing* an
@@ -776,6 +784,25 @@ loopback, private, link-local and unspecified addresses. Upstream accepts any UR
 route a server-side request forgery pivot: this process can reach the internal services on
 20129-20135 and every address on the host's networks, none of which the caller can. The restriction
 costs nothing, because every entry the registry offers is `https://` by upstream's own filter.
+
+**GitLab PAT import is real.** `POST /api/oauth/gitlab/pat` verifies a Personal Access Token against
+`GET {base}/api/v4/user` and records a provider connection carrying the identity it read back, so the
+dashboard shows whose account it is. Nothing is stored if the verification fails: an unverified token
+becomes a connection that fails on first real use, by which point the cause is several steps away.
+
+The token goes in `Private-Token`, which is the header GitLab accepts a PAT in — a bearer header there
+is rejected, so the two are not interchangeable — and it is never returned in a response, because a
+dashboard displaying it would put a long-lived credential into a browser history.
+
+A self-managed GitLab can be named, and that host is checked rather than trusted: `https` only, since
+a PAT sent in clear is disclosed to anything on the path, and no loopback or private address, since
+this service can reach the internal services on 20129-20135 and the host's networks while the caller
+cannot. The connection records `authKind: personal_access_token`, which is what tells the refresh path
+to leave it alone — a PAT has no refresh token, so trying to refresh one would fail on every request.
+
+The other nine import routes under `/api/oauth/` are portable on the same reasoning and are not done
+yet; the two families that genuinely need a consent screen still answer 501 naming the provider and
+action.
 
 **Relay deployment is real, on all three platforms.** `POST /api/proxy-pools/{cloudflare,deno,vercel}-deploy`
 uploads a small relay worker to the caller's own account, waits until it is actually reachable, and

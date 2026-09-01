@@ -497,6 +497,30 @@ impl StateClient {
     }
 
     /// GET a loopback path as JSON, logging `label` when state cannot be read.
+    /// Record a provider connection, returning the created entry.
+    ///
+    /// Written through state for the same reason a pool is: the runtime selects credentials from
+    /// there, so a connection this service kept locally would be one nothing can route through.
+    pub(crate) async fn create_provider_connection(&self, connection: &Value) -> Option<Value> {
+        let url = format!("{}/api/providers", self.base);
+        match self.client.post(&url).json(connection).send().await {
+            Ok(response) if response.status().is_success() => {
+                let body = response.json::<Value>().await.ok()?;
+                Some(body.get("connection").cloned().unwrap_or(body))
+            }
+            Ok(response) => {
+                // The status is logged, never the body: a rejection can quote the payload back, and
+                // the payload holds the credential.
+                tracing::warn!(status = %response.status(), "creating a provider connection failed");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, "creating a provider connection failed");
+                None
+            }
+        }
+    }
+
     /// Record a proxy pool, returning the created entry.
     ///
     /// Written through state rather than held locally so a deployed relay appears in the same list

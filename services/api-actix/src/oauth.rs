@@ -2,13 +2,26 @@ use actix_web::{HttpResponse, http::StatusCode, web};
 
 use crate::{json_body, responses};
 
+mod import;
+
 pub(super) fn configure(config: &mut web::ServiceConfig) {
-    config.service(
-        web::resource("/api/oauth/{tail:.*}")
-            .route(web::get().to(helper_get))
-            .route(web::post().to(helper_post))
-            .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
-    );
+    // The implemented routes go first: actix matches in registration order, and the catch-all below
+    // would otherwise swallow them and answer 501.
+    config
+        .service(
+            web::resource("/api/oauth/gitlab/pat")
+                .route(web::post().to(import::gitlab_pat))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        // Everything else. Not all of it is out of reach — see the module docs on `import` — but
+        // what is left either needs a provider's consent screen or is not ported yet, and both are
+        // better as an explicit 501 naming the provider and action than as a wrong answer.
+        .service(
+            web::resource("/api/oauth/{tail:.*}")
+                .route(web::get().to(helper_get))
+                .route(web::post().to(helper_post))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        );
 }
 
 async fn helper_get(path: web::Path<String>) -> HttpResponse {
