@@ -61,7 +61,10 @@ async fn locale_and_oauth_gap_routes_return_json_contracts() -> TestResult {
     let (locale_status, locale) = get_json("/api/locale").await?;
     let (locale_post_status, locale_post) =
         request_json(Method::POST, "/api/locale", r#"{"locale":"en"}"#).await?;
-    let (oauth_get_status, oauth_get) = get_json("/api/oauth/cursor/import").await?;
+    // `kiro/social-authorize` rather than `cursor/import`: the latter answers its GET with the token
+    // instructions now. This one needs a provider consent screen and a redirect this service cannot
+    // receive, so it is expected to stay a 501 — which is what makes it a stable subject here.
+    let (oauth_get_status, oauth_get) = get_json("/api/oauth/kiro/social-authorize").await?;
     // `codex/import-token` is implemented now, so an empty body is a stated bad request rather than
     // a 501. It is kept in this suite because what the suite checks is that every route answers with
     // structured JSON rather than a framework 404 — which is true of a 400 as much as of a 501.

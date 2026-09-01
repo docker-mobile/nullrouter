@@ -227,9 +227,9 @@ fn base36(mut value: u128) -> String {
 fn valid_project_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 63
-        && name
-            .chars()
-            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
+        && name.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
         && !name.starts_with('-')
         && !name.ends_with('-')
 }
@@ -335,16 +335,21 @@ struct CloudflareRequest {
 /// Three calls, in this order because each depends on the last. The middle one is allowed to fail —
 /// upstream ignores it too — because the subdomain may already be enabled, and the third call is what
 /// actually establishes whether the relay is reachable.
-async fn cloudflare(
-    state: web::Data<crate::StateClient>,
-    body: web::Bytes,
-) -> HttpResponse {
+async fn cloudflare(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpResponse {
     let request = match json_body::parse::<CloudflareRequest>(&body) {
         Ok(request) => request,
         Err(response) => return response,
     };
-    let account = request.account_id.as_deref().map(str::trim).unwrap_or_default();
-    let token = request.api_token.as_deref().map(str::trim).unwrap_or_default();
+    let account = request
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    let token = request
+        .api_token
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
     if account.is_empty() || token.is_empty() {
         return refuse(
             StatusCode::BAD_REQUEST,
@@ -352,8 +357,14 @@ async fn cloudflare(
         );
     }
     // The account id lands in an API path, so it is checked for the same reason the project name is.
-    if !account.chars().all(|character| character.is_ascii_alphanumeric()) {
-        return refuse(StatusCode::BAD_REQUEST, "Cloudflare Account ID is not valid");
+    if !account
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric())
+    {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "Cloudflare Account ID is not valid",
+        );
     }
     let name = match project_name(request.project_name.as_deref()) {
         Ok(name) => name,
@@ -436,16 +447,14 @@ async fn cloudflare(
         .await
         .ok();
     let subdomain = match subdomain {
-        Some(response) if response.status().is_success() => response
-            .json::<Value>()
-            .await
-            .ok()
-            .and_then(|body| {
+        Some(response) if response.status().is_success() => {
+            response.json::<Value>().await.ok().and_then(|body| {
                 body.get("result")
                     .and_then(|result| result.get("subdomain"))
                     .and_then(Value::as_str)
                     .map(str::to_owned)
-            }),
+            })
+        }
         Some(_) | None => None,
     };
     let Some(subdomain) = subdomain.filter(|value| !value.is_empty()) else {
@@ -487,8 +496,16 @@ async fn deno(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpRes
         Ok(request) => request,
         Err(response) => return response,
     };
-    let org = request.org_domain.as_deref().map(str::trim).unwrap_or_default();
-    let token = request.deno_token.as_deref().map(str::trim).unwrap_or_default();
+    let org = request
+        .org_domain
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    let token = request
+        .deno_token
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
     // Checked in upstream's order, so the message a user sees for an empty form matches.
     if org.is_empty() {
         return refuse(StatusCode::BAD_REQUEST, "Organization domain is required");
@@ -575,7 +592,10 @@ async fn deno(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpRes
         }
     };
 
-    let revision = deployed_revision.json::<Value>().await.unwrap_or(Value::Null);
+    let revision = deployed_revision
+        .json::<Value>()
+        .await
+        .unwrap_or(Value::Null);
     let revision_id = revision
         .get("id")
         .and_then(Value::as_str)
@@ -608,7 +628,11 @@ async fn deno(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpRes
                     .json::<Value>()
                     .await
                     .ok()
-                    .and_then(|body| body.get("status").and_then(Value::as_str).map(str::to_owned))
+                    .and_then(|body| {
+                        body.get("status")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
                     .unwrap_or(status);
             }
             // A failed poll stops the wait rather than retrying forever; the status check below
@@ -666,7 +690,11 @@ async fn vercel(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpR
         Ok(request) => request,
         Err(response) => return response,
     };
-    let token = request.vercel_token.as_deref().map(str::trim).unwrap_or_default();
+    let token = request
+        .vercel_token
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
     if token.is_empty() {
         return refuse(StatusCode::BAD_REQUEST, "Vercel API token is required");
     }
@@ -752,9 +780,10 @@ async fn vercel(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpR
         .send()
         .await;
 
-    let mut ready_url = String::new();
     let mut attempts = 0_u32;
-    loop {
+    // The loop yields the URL rather than filling in a variable declared above it: every path out of
+    // here either returns or has a URL in hand, so there is no such thing as a not-yet-set value.
+    let ready_url = loop {
         let polled = client
             .get(format!("{base}/v13/deployments/{deployment_id}"))
             .bearer_auth(token)
@@ -771,12 +800,11 @@ async fn vercel(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpR
         };
         match state_body.get("readyState").and_then(Value::as_str) {
             Some("READY") => {
-                ready_url = state_body
+                break state_body
                     .get("url")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                break;
             }
             Some(failed @ ("ERROR" | "CANCELED")) => {
                 return refuse(
@@ -794,7 +822,7 @@ async fn vercel(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpR
             );
         }
         actix_web::rt::time::sleep(VERCEL_POLL).await;
-    }
+    };
 
     if ready_url.is_empty() {
         return refuse(
@@ -845,7 +873,13 @@ mod tests {
         // The name goes into a platform API path, so a separator in it would act on something other
         // than the project the dashboard named.
         for name in [
-            "../other", "a/b", "a b", "UPPER", "-leading", "trailing-", "with_underscore",
+            "../other",
+            "a/b",
+            "a b",
+            "UPPER",
+            "-leading",
+            "trailing-",
+            "with_underscore",
             &"x".repeat(64),
         ] {
             assert!(!valid_project_name(name), "{name:?} should be refused");
@@ -864,7 +898,10 @@ mod tests {
             valid_project_name(&generated),
             "a generated name must pass the same check: {generated}"
         );
-        assert_eq!(project_name(None).map(|name| name.starts_with("relay-")), Ok(true));
+        assert_eq!(
+            project_name(None).map(|name| name.starts_with("relay-")),
+            Ok(true)
+        );
         // Whitespace is not a name.
         assert!(project_name(Some("   ")).is_ok_and(|name| name.starts_with("relay-")));
     }
@@ -884,13 +921,22 @@ mod tests {
         // "Authentication error" tells a user their token is wrong; "deploy failed" sends them
         // looking for the problem in this router.
         let cloudflare = serde_json::json!({"errors": [{"message": "Authentication error"}]});
-        assert_eq!(platform_error(&cloudflare, "fallback"), "Authentication error");
+        assert_eq!(
+            platform_error(&cloudflare, "fallback"),
+            "Authentication error"
+        );
 
         let vercel = serde_json::json!({"error": {"message": "Not authorized"}});
         assert_eq!(platform_error(&vercel, "fallback"), "Not authorized");
 
         // And an unrecognised shape falls back rather than reporting an empty string.
-        assert_eq!(platform_error(&serde_json::json!({}), "fallback"), "fallback");
-        assert_eq!(platform_error(&serde_json::Value::Null, "fallback"), "fallback");
+        assert_eq!(
+            platform_error(&serde_json::json!({}), "fallback"),
+            "fallback"
+        );
+        assert_eq!(
+            platform_error(&serde_json::Value::Null, "fallback"),
+            "fallback"
+        );
     }
 }

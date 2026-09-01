@@ -691,12 +691,11 @@ was wrong — the token comes from the caller's own request — and it is now im
 
   This entry used to cover all thirteen routes under `/api/oauth/`, which was wrong. Ten of them are
   **token import**: the user pastes a credential they already hold — a Personal Access Token, an API
-  key, a session cookie — and the route verifies it and records a connection. No browser and no
-  client credentials of this router's own are involved. `gitlab/pat`, `kiro/api-key` and
-  `codex/import-token` are implemented (see below); the other seven are portable and simply not done
-  yet.
-  Device-code, PKCE browser flows, and vendor token imports for codex/cursor/kiro/gitlab/iflow.
-  Getting a provider token for the first time requires a browser session with that provider.
+  key, a session cookie — and the route checks its usable shape or verifies it with the provider, then
+  records a connection. No browser and no client credentials of this router's own are involved. **All ten are implemented:** `gitlab/pat`,
+  `kiro/api-key`, `codex/import-token`, `codex/bulk-import`, `kiro/import-cli-proxy`,
+  `cursor/import`, `cursor/auto-import`, `iflow/cookie`, `kiro/import`, and `kiro/auto-import`.
+  Device-code and PKCE browser flows still require a browser session with that provider.
   (Dashboard *sign-in* via OIDC is a separate subsystem and is fully implemented, and *refreshing* an
   existing provider token is implemented — see below.)
 - **Self-replacing update** (`POST /api/version/update`) — *this port's own binary*. Upstream
@@ -826,9 +825,78 @@ signature is checked, and so none of it is treated as an identity — only as a 
 not a JWT at all is imported anyway, because refusing a working credential over a missing label would
 be the wrong trade; its connection is named "ChatGPT Access Token" rather than named after the token.
 
-The other seven import routes under `/api/oauth/` are portable on the same reasoning and are not done
-yet; the two families that genuinely need a consent screen still answer 501 naming the provider and
-action.
+`kiro/import-cli-proxy` takes a CLIProxyAPI auth document for a Microsoft `external_idp` account. One
+check in it carries almost all the weight, and it is not about the import: the document's
+`token_endpoint` is *stored*, and every later refresh posts the refresh token to whatever was stored. An
+unvalidated value there would have this service hand a long-lived credential to an endpoint of the
+caller's choosing, on a schedule, indefinitely. So it must be `https` and its host must be one of
+Microsoft's three login hosts — upstream's allowlist, kept exactly, and a test walks the shapes that
+would defeat a weaker check, including `login.microsoftonline.com.evil.example.com`.
+
+`codex/bulk-import` records several accounts in one call, reporting each by index so one bad entry in a
+pasted export does not discard the rest. It writes serially, as upstream does, because the store assigns
+priority by reading the current maximum inside a transaction and concurrent writes would race on it.
+
+Two deliberate divergences there, both narrowing. Upstream spreads the caller's item into the record and
+strips five names, which is a blocklist — so every field it did not think of is writable, and a caller
+can set `priority` to reorder someone's provider list or `isActive` on a credential that should not be
+live. This uses an allowlist of eight fields instead: an import decides what a credential *is*, not
+where it sits in a routing order. And the list is capped at 200 accounts, where upstream has no cap;
+each item is a serial round trip, so an unbounded list is a request that holds a worker for as long as
+the list is long.
+
+The five former portable imports are now implemented. `cursor/import` records an access token and machine id pasted from Cursor's `state.vscdb`; the two
+fields upstream's own panel imports from the editor the team owns. The import does not verify: Cursor has no endpoint that would accept
+this token in a probe. What the route does instead is refuse half a pair, a token too short to be
+plausible, or a machine id that is not hexadecimal after its optional UUID hyphens are removed.
+
+`cursor/auto-import` goes from the desktop to the answer upstream gives when it detects an installed
+Cursor. Each platform has two candidate paths for the state database; it returns the first that exists
+and is readable. On every platform, the file is opened by the `sqlite3` command-line under a deadline,
+not linked in — a C library reading SQLite here would put one in the address space of the process that
+holds every provider credential, to read two rows out of one file, once, when a user clicks a button.
+And opened *read-only*, so a live Cursor's journal is never replayed or mutated by this service — one
+binary resolving ownership of a file another binary still believes is exclusively its own. Upstream's
+CLI fallback opens it read-write; that is the difference worth naming.
+
+`iflow/cookie` takes a whole cookie header as pasted from a browser, narrows it to the session field
+iFlow's platform uses, then reads the current key's name from `/api/openapi/apikey` and posts that name back to the same endpoint — rotating the
+user's iFlow API key so the old one held by their browser is superseded by the one that comes back. That is the
+surface the upstream panel uses after a headless browser signs in for the user; this port refuses the
+third-party embedded browser and leaves the actual sign-in to the user, but once the user pastes the
+consequence of it the rest is the same. Two safety checks land before any call: the cookie must carry
+the field to be sent, and iFlow's platform host is fixed rather than interpolated, because the submitted
+field is pasted unvalidated and a leeway host would have this service rotate a key against an endpoint
+of the caller's choosing. iFlow's 500 answer on an expired session has reflected the submitted cookie,
+so only its status reaches the caller rather than its body.
+
+`kiro/import` records a refresh token taken out of a Kiro IDE login. Kiro publishes no endpoint that
+would accept the token in a read-only probe, so the check is a refresh — which also means the connection
+is recorded with a live access token rather than one that has to be minted on first use. Two protocols,
+and which one runs is decided by the credentials present in the request, never by a caller-supplied
+label. A `clientId` and `clientSecret` pair means AWS SSO-OIDC (a Builder ID or an organisation's IDC),
+posted as camel-cased JSON to the regional endpoint. Without them it is a social login, posted to Kiro's
+own auth service. Sending one protocol's token to the other endpoint would spend it against a service
+that cannot honour it, so half a client credential pair is refused. This is also the protocol
+`crates/execute`'s generic refresh deliberately excludes for `kiro`, which is why the import is
+needed — it is a route-local validation/import operation. The generic executor remains deliberately
+excluded until its separate refresh contract learns both Kiro protocols; a connection is never made to
+look renewable when the code that serves it cannot yet renew it.
+
+`kiro/auto-import` finds the refresh token a Kiro IDE login left in `~/.aws/sso/cache`. The directory
+belongs to the AWS CLI, not Kiro — it also holds SSO sessions for everything else the user has signed
+into — so only a token starting with `aorAAAAAG` is Kiro's, and a file over the plausible size for a
+token document is skipped rather than read whole. Kiro's own named file is tried first; the rest are
+examined in a defined order rather than left to directory iteration, so whichever credential gets
+imported does not depend on filesystem behaviour. For an IDC login the token document names a sibling
+file holding the client credentials the refresh needs, so that is resolved too — but only as a *sibling
+basename*, so a `clientIdHash` carrying `../` is refused rather than used. `profileArn` is resolved from
+Kiro IDE's own config file, and its region is normalised to `us-east-1` whatever region the login used,
+because Kiro's runtime gateway requires that region in this one ARN — the surprising but necessary fix
+upstream itself does, comment and all.
+
+All ten portable import routes are accounted for; the two families that need a browser consent screen
+still answer 501 naming the provider and action.
 
 **Relay deployment is real, on all three platforms.** `POST /api/proxy-pools/{cloudflare,deno,vercel}-deploy`
 uploads a small relay worker to the caller's own account, waits until it is actually reachable, and

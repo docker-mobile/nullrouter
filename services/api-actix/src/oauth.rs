@@ -2,7 +2,9 @@ use actix_web::{HttpResponse, http::StatusCode, web};
 
 use crate::{json_body, responses};
 
+mod cursor_local;
 mod import;
+mod kiro_local;
 
 pub(super) fn configure(config: &mut web::ServiceConfig) {
     // The implemented routes go first: actix matches in registration order, and the catch-all below
@@ -21,6 +23,46 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
         .service(
             web::resource("/api/oauth/codex/import-token")
                 .route(web::post().to(import::codex_import_token))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/oauth/kiro/import-cli-proxy")
+                .route(web::post().to(import::kiro_import_cli_proxy))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/oauth/codex/bulk-import")
+                .route(web::post().to(import::codex_bulk_import))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        // The only import route with a GET as well: the instructions for finding the token are part of
+        // the feature, because this service deliberately does not read the user's Cursor database.
+        .service(
+            web::resource("/api/oauth/cursor/import")
+                .route(web::get().to(import::cursor_import_instructions))
+                .route(web::post().to(import::cursor_import))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/oauth/iflow/cookie")
+                .route(web::post().to(import::iflow_cookie))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        // Host-only at the gateway: it answers with a credential read off this machine's disk.
+        .service(
+            web::resource("/api/oauth/cursor/auto-import")
+                .route(web::get().to(cursor_local::cursor_auto_import))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        // Both routes read or exchange credentials from this host's own Kiro install.
+        .service(
+            web::resource("/api/oauth/kiro/import")
+                .route(web::post().to(import::kiro_import))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/oauth/kiro/auto-import")
+                .route(web::get().to(kiro_local::kiro_auto_import))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         )
         // Everything else. Not all of it is out of reach — see the module docs on `import` — but
