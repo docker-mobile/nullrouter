@@ -171,6 +171,15 @@ const CLINE_STATE: &str = ".cline/data/globalState.json";
 const CLINE_SECRETS: &str = ".cline/data/secrets.json";
 const KILO_AUTH: &str = ".local/share/kilo/auth.json";
 const VSCODE_SETTINGS: &str = ".config/Code/User/settings.json";
+const COPILOT_MODELS: &str = ".config/Code/User/chatLanguageModels.json";
+const OPENCODE_CONFIG: &str = ".config/opencode/opencode.json";
+const DROID_SETTINGS: &str = ".factory/settings.json";
+const HERMES_CONFIG: &str = ".hermes/config.yaml";
+const HERMES_ENV: &str = ".hermes/.env";
+const DEEPSEEK_CONFIG: &str = ".deepseek/config.toml";
+const JCODE_CONFIG: &str = ".jcode/config.toml";
+const JCODE_ENV: &str = ".config/jcode/provider-9router.env";
+const OPENCLAW_SETTINGS: &str = ".openclaw/openclaw.json";
 
 #[actix_web::test]
 async fn a_claude_apply_reaches_the_file_claude_code_reads() -> TestResult {
@@ -516,6 +525,533 @@ async fn kilo_writes_its_own_auth_and_vs_codes_settings() -> TestResult {
     );
     // And the user's own settings survived.
     assert_eq!(vscode["editor.fontSize"], 13);
+    Ok(())
+}
+
+#[actix_web::test]
+async fn copilot_is_written_as_a_top_level_array_with_the_azure_fragment() -> TestResult {
+    // Given: a Copilot config the user already has another provider in.
+    let home = HomeGuard::new();
+    home.seed(COPILOT_MODELS, r#"[{"name": "mine", "models": []}]"#);
+
+    // When: an apply runs with two models and no key.
+    let (status, body) = apply(
+        "copilot-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "models": ["cc/opus", "cc/sonnet"],
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Then: the document stays an array, and the user's entry is still in it.
+    let config = home.read_json(COPILOT_MODELS);
+    let entries = config.as_array().expect("a top-level array");
+    assert_eq!(entries.len(), 2, "{config}");
+    assert_eq!(entries[0]["name"], "mine");
+
+    let ours = &entries[1];
+    assert_eq!(ours["name"], "9Router", "the capitalisation copilot matches on");
+    assert_eq!(ours["vendor"], "azure");
+    // The key is defaulted, not required.
+    assert_eq!(ours["apiKey"], "sk_9router");
+    // The endpoint carries the Azure dialect fragment and takes **no** `/v1`. Normalising this
+    // URL would break the one copilot builds from it.
+    assert_eq!(
+        ours["models"][0]["url"],
+        "http://127.0.0.1:20128/chat/completions#models.ai.azure.com"
+    );
+    assert_eq!(ours["models"][0]["id"], "cc/opus");
+    assert_eq!(ours["models"][1]["id"], "cc/sonnet");
+    assert_eq!(ours["models"][0]["toolCalling"], true);
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_second_copilot_apply_replaces_its_entry_rather_than_appending() -> TestResult {
+    // Given: an applied config.
+    let home = HomeGuard::new();
+    apply(
+        "copilot-settings",
+        &json!({"baseUrl": "http://127.0.0.1:20128", "models": ["a"]}),
+    )
+    .await?;
+
+    // When: a second apply changes the model list.
+    apply(
+        "copilot-settings",
+        &json!({"baseUrl": "http://127.0.0.1:20128", "models": ["b"]}),
+    )
+    .await?;
+
+    // Then: there is still one entry. Appending would leave copilot with two providers of the
+    // same name and no way to tell which is current.
+    let config = home.read_json(COPILOT_MODELS);
+    let entries = config.as_array().expect("array");
+    assert_eq!(entries.len(), 1, "{config}");
+    assert_eq!(entries[0]["models"][0]["id"], "b");
+
+    // And a revoke takes only ours, leaving a non-empty file as an array.
+    home.seed(COPILOT_MODELS, r#"[{"name": "mine"}, {"name": "9Router"}]"#);
+    revoke("copilot-settings").await?;
+    let config = home.read_json(COPILOT_MODELS);
+    assert_eq!(config.as_array().map(Vec::len), Some(1), "{config}");
+    assert_eq!(config[0]["name"], "mine");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn opencode_keeps_the_npm_client_and_models_a_previous_apply_wrote() -> TestResult {
+    // Given: an existing provider entry with a model this apply does not mention.
+    let home = HomeGuard::new();
+    home.seed(
+        OPENCODE_CONFIG,
+        r#"{"provider": {"9router": {"npm": "@ai-sdk/openai-compatible",
+             "options": {"custom": "keep"}, "models": {"old/model": {"name": "old/model"}}}},
+             "theme": "mine"}"#,
+    );
+
+    // When: an apply runs with a different model.
+    let (status, body) = apply(
+        "opencode-settings",
+        &json!({"baseUrl": "http://127.0.0.1:20128", "models": ["new/model"]}),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Then: the npm client survives — opencode loads its client from that key, so losing it
+    // leaves a provider it cannot instantiate.
+    let config = home.read_json(OPENCODE_CONFIG);
+    let provider = &config["provider"]["9router"];
+    assert_eq!(provider["npm"], "@ai-sdk/openai-compatible");
+    // And so does the earlier model, alongside the new one.
+    assert_eq!(provider["models"]["old/model"]["name"], "old/model");
+    assert_eq!(provider["models"]["new/model"]["name"], "new/model");
+    // Unrelated options are merged, not replaced.
+    assert_eq!(provider["options"]["custom"], "keep");
+    assert_eq!(provider["options"]["baseURL"], "http://127.0.0.1:20128/v1");
+    assert_eq!(provider["options"]["apiKey"], "sk_9router");
+    // The selection is qualified with the provider name.
+    assert_eq!(config["model"], "9router/new/model");
+    assert_eq!(config["agent"]["explorer"]["mode"], "subagent");
+    assert_eq!(config["theme"], "mine");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_empty_active_model_clears_the_opencode_selection() -> TestResult {
+    // Given: a fresh home. An explicitly empty `activeModel` is how the dashboard sends
+    // "no default", against a missing one meaning "pick the first".
+    let home = HomeGuard::new();
+
+    // When: an apply names models but no active one.
+    apply(
+        "opencode-settings",
+        &json!({"baseUrl": "http://x", "models": ["a", "b"], "activeModel": ""}),
+    )
+    .await?;
+
+    // Then: the selection is empty while the models stay listed.
+    let config = home.read_json(OPENCODE_CONFIG);
+    assert_eq!(config["model"], "", "{config}");
+    assert!(config["provider"]["9router"]["models"]["a"].is_object(), "{config}");
+
+    // And a missing `activeModel` picks the first instead.
+    apply(
+        "opencode-settings",
+        &json!({"baseUrl": "http://x", "models": ["a", "b"]}),
+    )
+    .await?;
+    assert_eq!(home.read_json(OPENCODE_CONFIG)["model"], "9router/a");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_opencode_revoke_leaves_a_selection_pointing_elsewhere() -> TestResult {
+    // Given: a config where the user has since selected another provider's model.
+    let home = HomeGuard::new();
+    home.seed(
+        OPENCODE_CONFIG,
+        r#"{"provider": {"9router": {"models": {}}, "other": {}}, "model": "anthropic/opus"}"#,
+    );
+
+    // When: the revoke runs.
+    revoke("opencode-settings").await?;
+
+    // Then: our provider is gone and their selection is not. Clearing `model` here would leave
+    // opencode with no model chosen because of a revoke of a provider it was not using.
+    let config = home.read_json(OPENCODE_CONFIG);
+    assert!(config["provider"]["9router"].is_null(), "{config}");
+    assert_eq!(config["model"], "anthropic/opus");
+    assert!(config["provider"]["other"].is_object(), "{config}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn droid_ids_are_indexed_and_the_default_is_moved_to_the_front() -> TestResult {
+    // Given: a settings file holding the user's own custom model.
+    let home = HomeGuard::new();
+    home.seed(
+        DROID_SETTINGS,
+        r#"{"customModels": [{"id": "custom:mine", "model": "mine"}], "theme": "dark"}"#,
+    );
+
+    // When: an apply names three models and picks the third as default.
+    let (status, body) = apply(
+        "droid-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "models": ["a", "b", "c"],
+            "activeModel": "c",
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let settings = home.read_json(DROID_SETTINGS);
+    let models = settings["customModels"].as_array().expect("array");
+    // Droid takes the first entry as the default, so the reorder *is* the setting.
+    assert_eq!(models[0]["model"], "c", "the default must be first: {settings}");
+    // And `index` is renumbered to match the new order.
+    for (position, model) in models.iter().enumerate() {
+        assert_eq!(model["index"], position, "{settings}");
+    }
+    // Ids are prefixed and numbered. `spec`'s marker matches this by prefix; an equality test
+    // against `custom:9Router` would match none of them.
+    let ours: Vec<&str> = models
+        .iter()
+        .filter_map(|model| model["id"].as_str())
+        .filter(|id| id.starts_with("custom:9Router"))
+        .collect();
+    assert_eq!(ours.len(), 3, "{settings}");
+    // The user's own model and other settings survived.
+    assert!(
+        models.iter().any(|model| model["id"] == "custom:mine"),
+        "{settings}"
+    );
+    assert_eq!(settings["theme"], "dark");
+    // Droid's placeholder is its own, not the one the other tools use.
+    let placeholder = models
+        .iter()
+        .find(|model| model["id"].as_str().is_some_and(|id| id.starts_with("custom:9Router")))
+        .and_then(|model| model["apiKey"].as_str());
+    assert_eq!(placeholder, Some("your_api_key"), "{settings}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_droid_reapply_replaces_its_entries_rather_than_stacking_them() -> TestResult {
+    // Given: an applied config with three models.
+    let home = HomeGuard::new();
+    apply(
+        "droid-settings",
+        &json!({"baseUrl": "http://x", "models": ["a", "b", "c"]}),
+    )
+    .await?;
+
+    // When: a second apply names one.
+    apply("droid-settings", &json!({"baseUrl": "http://x", "models": ["a"]})).await?;
+
+    // Then: the two dropped models are gone. Matching by prefix is what makes this work; an
+    // equality match would leave `custom:9Router-1` and `-2` behind forever.
+    let settings = home.read_json(DROID_SETTINGS);
+    assert_eq!(settings["customModels"].as_array().map(Vec::len), Some(1), "{settings}");
+
+    // And a revoke removes the array entirely rather than leaving `[]`.
+    revoke("droid-settings").await?;
+    let settings = home.read_json(DROID_SETTINGS);
+    assert!(
+        settings["customModels"].is_null(),
+        "an emptied array must be dropped: {settings}"
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn hermes_gets_a_yaml_block_and_keeps_the_rest_byte_identical() -> TestResult {
+    // Given: a hand-written config with comments and the user's own sections.
+    let home = HomeGuard::new();
+    let original = "# my notes\nagent:\n  name: mine\n  tools:\n    - shell\n\nlogging:\n  level: debug\n";
+    home.seed(HERMES_CONFIG, original);
+
+    // When: an apply runs.
+    let (status, body) = apply(
+        "hermes-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "apiKey": "sk-hermes",
+            "model": "cc/opus",
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Then: the user's YAML is present verbatim — comments, key order and all. This is why the
+    // file is edited by block rather than parsed and re-serialised.
+    let config = home.read(HERMES_CONFIG);
+    assert!(config.contains(original), "the rest must survive: {config}");
+    assert!(config.contains("model:\n  default: \"cc/opus\""), "{config}");
+    assert!(config.contains("base_url: \"http://127.0.0.1:20128/v1\""), "{config}");
+    // The key is a literal `${OPENAI_API_KEY}` reference, and the secret is in `.env`.
+    assert!(config.contains("api_key: ${OPENAI_API_KEY}"), "{config}");
+    assert!(
+        !config.contains("sk-hermes"),
+        "the key must not reach the YAML, which users keep in dotfile repos: {config}"
+    );
+    assert!(home.read(HERMES_ENV).contains("OPENAI_API_KEY=sk-hermes"));
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_hermes_apply_without_a_key_does_not_create_an_env_file() -> TestResult {
+    // Given: a fresh home. Upstream writes `.env` only `if (apiKey)`.
+    let home = HomeGuard::new();
+
+    // When: an apply omits the key.
+    apply(
+        "hermes-settings",
+        &json!({"baseUrl": "http://x", "model": "m"}),
+    )
+    .await?;
+
+    // Then: the YAML is written and no empty `.env` is left behind.
+    assert!(home.path(HERMES_CONFIG).exists());
+    assert!(
+        !home.path(HERMES_ENV).exists(),
+        "an apply with no key must not create a blank .env"
+    );
+
+    // And a revoke removes the block, leaving `.env` alone — the variable name is generic enough
+    // that the user may own it for real OpenAI.
+    home.seed(HERMES_ENV, "OPENAI_API_KEY=theirs\n");
+    revoke("hermes-settings").await?;
+    assert!(!home.read(HERMES_CONFIG).contains("model:"), "block removed");
+    assert_eq!(home.read(HERMES_ENV), "OPENAI_API_KEY=theirs\n");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn deepseek_is_merged_rather_than_overwritten() -> TestResult {
+    // Given: a config holding another provider the user set up.
+    let home = HomeGuard::new();
+    home.seed(
+        DEEPSEEK_CONFIG,
+        "provider = \"deepseek\"\n\n[providers.anthropic]\napi_key = \"keep-me\"\n",
+    );
+
+    // When: an apply runs.
+    let (status, body) = apply(
+        "deepseek-tui-settings",
+        &json!({"baseUrl": "http://127.0.0.1:20128", "model": "cc/opus"}),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Then: the provider points here, and the user's other section survived. Upstream replaces the
+    // whole file here, which would have deleted it.
+    let config = home.read(DEEPSEEK_CONFIG);
+    assert!(config.contains(r#"provider = "openai""#), "{config}");
+    assert!(config.contains("[providers.openai]"), "{config}");
+    assert!(config.contains(r#"base_url = "http://127.0.0.1:20128/v1""#), "{config}");
+    assert!(config.contains("keep-me"), "the user's provider must survive: {config}");
+    // No `9router` string appears in a deepseek config, which is why `spec`'s marker tests the
+    // provider and URL rather than grepping for a name.
+    assert_eq!(config.matches("9router").count(), 1, "only the placeholder key: {config}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_deepseek_revoke_keeps_a_real_openai_section() -> TestResult {
+    // Given: a config where the user has since put their real OpenAI key in that section.
+    let home = HomeGuard::new();
+    home.seed(
+        DEEPSEEK_CONFIG,
+        "provider = \"openai\"\n\n[providers.openai]\n\
+         base_url = \"https://api.openai.com/v1\"\napi_key = \"sk-real\"\n",
+    );
+
+    // When: the revoke runs.
+    revoke("deepseek-tui-settings").await?;
+
+    // Then: the section is left alone, because its URL is not local and so is not ours. Upstream
+    // cannot make this distinction: it writes a two-line default over the whole file.
+    let config = home.read(DEEPSEEK_CONFIG);
+    assert!(config.contains("sk-real"), "the user's key must survive: {config}");
+    assert!(config.contains("api.openai.com"), "{config}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn jcode_points_at_an_env_file_it_also_writes() -> TestResult {
+    // Given: a fresh home.
+    let home = HomeGuard::new();
+
+    // When: an apply runs.
+    let (status, body) = apply(
+        "jcode-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "apiKey": "sk-jcode",
+            "models": ["cc/opus", "cc/sonnet"],
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Then: the config names where the key lives, and the key is there. The two are coupled by
+    // those strings: a config written without the env file leaves jcode looking up a variable
+    // nothing sets, and `requires_api_key` makes it fail rather than send an unauthenticated call.
+    let config = home.read(JCODE_CONFIG);
+    assert!(config.contains(r#"api_key_env = "JCODE_9ROUTER_API_KEY""#), "{config}");
+    assert!(config.contains(r#"env_file = "provider-9router.env""#), "{config}");
+    assert!(config.contains(r#"default_model = "cc/opus""#), "the first model: {config}");
+    assert!(config.contains("requires_api_key = true"), "{config}");
+    assert!(!config.contains("sk-jcode"), "the key stays out of the config: {config}");
+    assert!(home.read(JCODE_ENV).contains("JCODE_9ROUTER_API_KEY=sk-jcode"));
+
+    // And a revoke takes both, since this variable name is ours and nothing else reads it.
+    revoke("jcode-settings").await?;
+    assert!(!home.read(JCODE_CONFIG).contains("9router"), "{}", home.read(JCODE_CONFIG));
+    assert!(!home.read(JCODE_ENV).contains("JCODE_9ROUTER_API_KEY"));
+    Ok(())
+}
+
+#[actix_web::test]
+async fn openclaw_writes_the_provider_the_selection_and_the_allowlist() -> TestResult {
+    // Given: a fresh home. All three have to agree or the model is configured and unusable:
+    // the provider supplies the endpoint, `model.primary` selects it, and `defaults.models` is an
+    // allowlist OpenClaw checks the selection against.
+    let home = HomeGuard::new();
+
+    // When: an apply runs.
+    let (status, body) = apply(
+        "openclaw-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "apiKey": "sk-claw",
+            "model": "cc/opus",
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let settings = home.read_json(OPENCLAW_SETTINGS);
+    let provider = &settings["models"]["providers"]["9router"];
+    assert_eq!(provider["baseUrl"], "http://127.0.0.1:20128/v1");
+    assert_eq!(provider["api"], "openai-completions");
+    assert_eq!(provider["models"][0]["id"], "cc/opus");
+    // The display name is the last path segment, per upstream's `split("/").pop()`.
+    assert_eq!(provider["models"][0]["name"], "opus");
+    // The selection and the allowlist are both qualified with the provider name.
+    assert_eq!(settings["agents"]["defaults"]["model"]["primary"], "9router/cc/opus");
+    assert!(
+        settings["agents"]["defaults"]["models"]["9router/cc/opus"].is_object(),
+        "the allowlist gates the selection: {settings}"
+    );
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_reapply_clears_stale_openclaw_allowlist_entries() -> TestResult {
+    // Given: a config whose allowlist holds a model from an earlier apply, next to one the user
+    // added for another provider.
+    let home = HomeGuard::new();
+    home.seed(
+        OPENCLAW_SETTINGS,
+        r#"{"agents": {"defaults": {"models": {"9router/old": {}, "anthropic/opus": {}}}}}"#,
+    );
+
+    // When: a new apply names a different model.
+    apply(
+        "openclaw-settings",
+        &json!({"baseUrl": "http://x", "apiKey": "k", "model": "new"}),
+    )
+    .await?;
+
+    // Then: the stale entry is gone and the unrelated one is not. Leaving `9router/old` behind
+    // would keep allowing a model the provider no longer serves.
+    let models = &home.read_json(OPENCLAW_SETTINGS)["agents"]["defaults"]["models"];
+    assert!(models["9router/old"].is_null(), "{models}");
+    assert!(models["9router/new"].is_object(), "{models}");
+    assert!(models["anthropic/opus"].is_object(), "the user's entry: {models}");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn an_openclaw_revoke_leaves_an_agent_pointed_at_another_provider() -> TestResult {
+    // Given: two agents, one on us and one not — and the one on us in the object form of the
+    // field, which is the form a naive string test would miss.
+    let home = HomeGuard::new();
+    home.seed(
+        OPENCLAW_SETTINGS,
+        r#"{"models": {"providers": {"9router": {}}},
+            "agents": {"defaults": {"model": {"primary": "9router/a"}},
+            "list": [{"id": "one", "model": {"primary": "9router/a"}},
+                     {"id": "two", "model": "anthropic/opus"}]}}"#,
+    );
+
+    // When: the revoke runs.
+    revoke("openclaw-settings").await?;
+
+    // Then: ours is cleared in both forms of the field, and theirs is untouched.
+    let settings = home.read_json(OPENCLAW_SETTINGS);
+    assert!(settings["models"]["providers"]["9router"].is_null(), "{settings}");
+    assert!(settings["agents"]["defaults"]["model"]["primary"].is_null(), "{settings}");
+    let agents = settings["agents"]["list"].as_array().expect("list");
+    assert!(agents[0]["model"].is_null(), "the object form must be cleared: {settings}");
+    assert_eq!(agents[1]["model"], "anthropic/opus");
+    Ok(())
+}
+
+#[actix_web::test]
+async fn a_per_agent_models_file_is_written_only_into_a_directory_that_exists() -> TestResult {
+    // Given: two agents, one whose directory exists and one whose does not.
+    let home = HomeGuard::new();
+    let real = home.path("agents/real");
+    std::fs::create_dir_all(&real)?;
+    let missing = home.path("agents/missing");
+    home.seed(
+        OPENCLAW_SETTINGS,
+        &format!(
+            r#"{{"agents": {{"list": [
+                 {{"id": "one", "agentDir": {}}},
+                 {{"id": "two", "agentDir": {}}}]}}}}"#,
+            json!(real.display().to_string()),
+            json!(missing.display().to_string()),
+        ),
+    );
+
+    // When: an apply runs with a per-agent override.
+    let (status, body) = apply(
+        "openclaw-settings",
+        &json!({
+            "baseUrl": "http://127.0.0.1:20128",
+            "apiKey": "sk-claw",
+            "model": "cc/opus",
+            "agentModels": {"one": "cc/sonnet"},
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Then: the existing directory got its file, with the agent's own override rather than the
+    // default.
+    let models: Value = serde_json::from_str(&std::fs::read_to_string(real.join("models.json"))?)?;
+    assert_eq!(models["providers"]["9router"]["models"][0]["id"], "cc/sonnet");
+    assert_eq!(models["providers"]["9router"]["baseUrl"], "http://127.0.0.1:20128/v1");
+
+    // And the missing one was reported rather than created. `agentDir` is a path out of a config
+    // file being used as a destination, so creating it means a settings file naming `../../.ssh`
+    // gets a directory tree.
+    assert!(!missing.exists(), "the directory must not have been created");
+    let warnings = body["warnings"].as_array().expect("warnings reported");
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.as_str().is_some_and(|text| text.contains("does not exist"))),
+        "{body}"
+    );
     Ok(())
 }
 
