@@ -716,8 +716,6 @@ repository implements these; each names the thing it does not own.
 
 **Unported but portable.** Nothing external blocks these; they are simply not done yet.
 
-- **Console-log live capture.** Streams connect and emit an empty init frame; there is no capture
-  backend behind them.
 - **Translator `send`.** The inspector's steps run the real engine (see below); dispatching the
   assembled body to a live provider from the inspector is not wired up. The live `/v1` path
   dispatches normally.
@@ -779,6 +777,39 @@ loopback, private, link-local and unspecified addresses. Upstream accepts any UR
 route a server-side request forgery pivot: this process can reach the internal services on
 20129-20135 and every address on the host's networks, none of which the caller can. The restriction
 costs nothing, because every entry the registry offers is `https://` by upstream's own filter.
+
+**Console-log capture is live, across every service.** `/api/translator/console-logs` lists the
+buffered lines, its `/stream` companion pushes new ones as they arrive, and `DELETE` empties the
+buffer. 200 lines are kept, matching upstream's `CONSOLE_LOG_CONFIG.maxLines`.
+
+Upstream is one Node process, so it patches `console.log` and keeps an array in module scope. Here
+there are eight processes, and the gateway sends the list to the API service and the stream to the
+events service — so a buffer in either would make the two disagree, each showing one process's output
+while both looked like they worked. The buffer therefore lives in the state service, which is where
+everything more than one service needs already lives, and each service ships its lines to it. That is
+also what makes the pane show the *router's* logs rather than one service's, and why each line names
+the service that emitted it.
+
+Six of the eight services previously installed no `tracing` subscriber at all, so their log calls
+went nowhere. They all install one now, and stderr output is unchanged — whatever collects a
+service's logs today still gets them, and the pane is an addition rather than a redirect.
+
+Shipping is shaped around two failures that a naive version would hit. The tracing layer only pushes
+onto a bounded channel: it never awaits and never logs, because `reqwest` and `hyper` log, so posting
+inline from inside the tracing callback would log while logging and either recurse until the stack
+ran out or deadlock on the subscriber's own lock. And when the channel is full — the state service is
+down, or a burst outran the flush — lines are dropped and counted rather than blocking, then the
+count is reported as a line of its own so the gap is visible instead of silent. A router that stopped
+serving requests because its log viewer was unreachable would have the priorities backwards.
+
+The drain runs on its own thread with its own runtime rather than a spawned task, which is what lets
+the gateway use it: Pingora owns its runtime and none is running when logging is set up, so a
+`tokio::spawn` would panic on the one process that handles every request.
+
+The stream reports an unreachable buffer rather than going quiet, and replaces the client's contents
+rather than appending whenever lines may have been missed — a clear, a recovered outage, or an
+eviction that outran the reader. An empty pane reads as a quiet router, which is the opposite of what
+someone opening their logs needs to know.
 
 **Provider token refresh is real.** A token within its provider's refresh lead time is exchanged
 before the call rather than after a 401, the rotation is persisted, and concurrent requests on one

@@ -6,6 +6,7 @@ members = [
     "benches/mock-provider",
     "crates/contracts",
     "crates/execute",
+    "crates/logship",
     "crates/providers",
     "crates/pxpipe",
     "crates/translate",
@@ -64,6 +65,7 @@ http = "1"
 leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
 mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
+nullrouter-logship = { path = "crates/logship" }
 nullrouter-execute = { path = "crates/execute" }
 nullrouter-providers = { path = "crates/providers" }
 nullrouter-pxpipe = { path = "crates/pxpipe" }

@@ -107,3 +107,15 @@ fn apply_cors(builder: &mut HttpResponseBuilder) {
     builder.insert_header((ACCESS_CONTROL_ALLOW_HEADERS, "*"));
     builder.insert_header((ACCESS_CONTROL_EXPOSE_HEADERS, "*"));
 }
+
+/// Set one key on a JSON value that is expected to be an object.
+///
+/// `value["key"] = x` would be shorter, but `serde_json`'s `IndexMut` panics when the value is not
+/// an object, and `indexing_slicing` is denied workspace-wide for exactly that reason. A non-object
+/// here means a caller built the wrong shape, which is worth doing nothing about rather than killing
+/// the worker over.
+pub(crate) fn insert_key(value: &mut serde_json::Value, key: &str, item: serde_json::Value) {
+    if let Some(map) = value.as_object_mut() {
+        map.insert(key.to_owned(), item);
+    }
+}

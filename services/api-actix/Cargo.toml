@@ -12,6 +12,7 @@ name = "nullrouter-api"
 path = "src/main.rs"
 
 [dependencies]
+nullrouter-logship.workspace = true
 actix-web.workspace = true
 futures-util.workspace = true
 nullrouter-contracts.workspace = true

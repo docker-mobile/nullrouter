@@ -12,6 +12,7 @@ name = "nullrouter-gateway"
 path = "src/main.rs"
 
 [dependencies]
+nullrouter-logship.workspace = true
 async-trait.workspace = true
 bytes = "1"
 clap.workspace = true

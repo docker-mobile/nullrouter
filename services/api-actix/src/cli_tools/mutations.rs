@@ -242,18 +242,6 @@ fn claude_revoke(document: &mut Value) {
     }
 }
 
-/// Set one key on a value that is expected to be an object.
-///
-/// `value["key"] = x` would be shorter, but `serde_json`'s `IndexMut` panics when the value is not
-/// an object, and `indexing_slicing` is denied workspace-wide for exactly that reason. A non-object
-/// here means a caller built the wrong shape, which is worth doing nothing about rather than
-/// killing the worker over.
-pub(crate) fn insert_key(value: &mut Value, key: &str, item: Value) {
-    if let Some(map) = value.as_object_mut() {
-        map.insert(key.to_owned(), item);
-    }
-}
-
 /// A JSON value's string form when it is truthy in JS terms.
 ///
 /// `maxContextTokens` arrives as a number from one dashboard pane and a string from another, and
@@ -1358,7 +1346,7 @@ fn cowork_server_entry(name: &str, url: &str, transport: &str, oauth: bool, tool
         "transport": transport,
     });
     if oauth {
-        insert_key(&mut entry, "oauth", Value::Bool(true));
+        crate::responses::insert_key(&mut entry, "oauth", Value::Bool(true));
     }
     if !tools.is_empty() {
         // Both the bare and the singly-prefixed name are allowed, because the tool arrives named
@@ -1377,7 +1365,7 @@ fn cowork_server_entry(name: &str, url: &str, transport: &str, oauth: bool, tool
             policy.insert(bare.to_owned(), Value::String("allow".to_owned()));
             policy.insert(format!("{prefix}{bare}"), Value::String("allow".to_owned()));
         }
-        insert_key(&mut entry, "toolPolicy", Value::Object(policy));
+        crate::responses::insert_key(&mut entry, "toolPolicy", Value::Object(policy));
     }
     entry
 }
@@ -1515,7 +1503,7 @@ fn cowork_servers(payload: &Payload) -> Vec<Value> {
             .filter(|transport| !transport.is_empty())
             .unwrap_or("sse");
         let mut entry = cowork_server_entry(name, url, transport, false, &[]);
-        insert_key(&mut entry, "custom", Value::Bool(true));
+        crate::responses::insert_key(&mut entry, "custom", Value::Bool(true));
         servers.push(entry);
     }
 

@@ -3,13 +3,8 @@ use nullrouter_runtime::{DEFAULT_HOST, DEFAULT_PORT, Runtime, app_config, config
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    nullrouter_logship::install("nullrouter-runtime");
     let server = ServerConfig::from_env();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
 
     // The executor and state client hold connection pools, so they are built
     // once and shared across workers rather than per-worker.

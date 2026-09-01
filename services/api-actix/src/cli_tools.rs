@@ -191,13 +191,13 @@ fn mutation_body(
             .iter()
             .map(|warning| serde_json::Value::String(warning.clone()))
             .collect();
-        mutations::insert_key(&mut body, "warnings", warnings);
+        responses::insert_key(&mut body, "warnings", warnings);
     }
     // Upstream names the written path per tool, so the dashboard's success pane finds whichever it
     // reads.
     if let Some(first) = outcome.written.first().map(|path| path.display().to_string()) {
         for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
-            mutations::insert_key(&mut body, key, serde_json::Value::String(first.clone()));
+            responses::insert_key(&mut body, key, serde_json::Value::String(first.clone()));
         }
     }
     body
@@ -228,20 +228,20 @@ fn tool_status_body(tool: &spec::Tool) -> serde_json::Value {
         .map(|path| path.display().to_string())
     {
         for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
-            mutations::insert_key(&mut body, key, serde_json::Value::String(path.clone()));
+            responses::insert_key(&mut body, key, serde_json::Value::String(path.clone()));
         }
     }
     if let Some(source) = status.source {
-        mutations::insert_key(&mut body, "source", serde_json::Value::String(source));
+        responses::insert_key(&mut body, "source", serde_json::Value::String(source));
     }
     if let Some(error) = status.parse_error {
         // Reported alongside `settings: null` rather than as a 500: upstream swallows the error so
         // the UI does not read it as "not installed", but swallowing it silently means a user with
         // a stray comma sees "not configured" and no reason.
-        mutations::insert_key(&mut body, "configError", serde_json::Value::String(error));
+        responses::insert_key(&mut body, "configError", serde_json::Value::String(error));
     }
     if !status.installed {
-        mutations::insert_key(
+        responses::insert_key(
             &mut body,
             "message",
             serde_json::Value::String(format!(

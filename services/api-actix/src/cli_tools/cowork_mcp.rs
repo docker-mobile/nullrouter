@@ -110,7 +110,7 @@ async fn registry(query: web::Query<RefreshQuery>) -> HttpResponse {
         && let Some(cached) = cached_listing()
     {
         let mut body = cached;
-        super::mutations::insert_key(&mut body, "cached", Value::Bool(true));
+        crate::responses::insert_key(&mut body, "cached", Value::Bool(true));
         return responses::json(StatusCode::OK, &body);
     }
 
@@ -129,9 +129,9 @@ async fn registry(query: web::Query<RefreshQuery>) -> HttpResponse {
         // wrong for being out of date.
         Err(error) => match stale_listing() {
             Some(mut body) => {
-                super::mutations::insert_key(&mut body, "cached", Value::Bool(true));
-                super::mutations::insert_key(&mut body, "stale", Value::Bool(true));
-                super::mutations::insert_key(&mut body, "error", Value::String(error));
+                crate::responses::insert_key(&mut body, "cached", Value::Bool(true));
+                crate::responses::insert_key(&mut body, "stale", Value::Bool(true));
+                crate::responses::insert_key(&mut body, "error", Value::String(error));
                 responses::json(StatusCode::OK, &body)
             }
             None => responses::json(

@@ -252,18 +252,48 @@ async fn translate(body: web::Bytes, runtime: web::Data<crate::RuntimeClient>) -
     }
 }
 
-async fn console_logs() -> HttpResponse {
-    responses::json(
-        StatusCode::OK,
-        &ConsoleLogs {
-            success: true,
-            logs: &[],
-        },
-    )
+/// The buffered log lines, read from the state service that holds them.
+///
+/// Upstream's response is `{success, logs: string[]}` and that is preserved, so an unmodified
+/// dashboard renders unchanged. The structured `lines` alongside it are this port's: with eight
+/// processes writing to one buffer, a bare string is not traceable to the service that logged it.
+async fn console_logs(state: web::Data<crate::StateClient>) -> HttpResponse {
+    match state.console_logs(None).await {
+        Some(page) => {
+            let logs = page.get("logs").cloned().unwrap_or(serde_json::json!([]));
+            let mut body = serde_json::json!({ "success": true, "logs": logs });
+            for key in ["lines", "cursor", "generation"] {
+                if let Some(value) = page.get(key) {
+                    responses::insert_key(&mut body, key, value.clone());
+                }
+            }
+            responses::json(StatusCode::OK, &body)
+        }
+        // The buffer is in another process, so its being unreachable is a real condition rather than
+        // "no logs". Reported as such: an empty list here would read as a quiet router, which is the
+        // opposite of what a user checking their logs needs to know.
+        None => responses::json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &serde_json::json!({
+                "success": false,
+                "logs": [],
+                "error": "The console-log buffer is held by nullrouter-state, which did not answer.",
+            }),
+        ),
+    }
 }
 
-async fn delete_console_logs() -> HttpResponse {
-    responses::json(StatusCode::OK, &ConsoleLogDeleteResponse { success: true })
+async fn delete_console_logs(state: web::Data<crate::StateClient>) -> HttpResponse {
+    if state.clear_console_logs().await {
+        return responses::json(StatusCode::OK, &ConsoleLogDeleteResponse { success: true });
+    }
+    responses::json(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &serde_json::json!({
+            "success": false,
+            "error": "The console-log buffer is held by nullrouter-state, which did not answer.",
+        }),
+    )
 }
 
 async fn method_not_allowed() -> HttpResponse {

@@ -1,3 +1,4 @@
+mod console_logs;
 mod mcp;
 mod routes;
 mod usage_stream;

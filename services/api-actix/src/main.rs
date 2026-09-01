@@ -6,6 +6,7 @@ const DEFAULT_PORT: u16 = 20129;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    nullrouter_logship::install("nullrouter-api");
     let config = ServerConfig::from_env();
     let app_config = AppConfig::default();
     // Holds a connection pool, so it is built once and shared across workers.

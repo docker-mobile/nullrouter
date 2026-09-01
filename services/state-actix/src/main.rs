@@ -5,6 +5,7 @@ use nullrouter_state::{DEFAULT_HOST, DEFAULT_PORT, StateStore, configure};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    nullrouter_logship::install("nullrouter-state");
     let server = ServerConfig::from_env();
     let store = build_store(server.state_file.as_ref())?;
 

@@ -1,5 +1,11 @@
 #![allow(clippy::future_not_send)]
 
+#![allow(
+    clippy::indexing_slicing,
+    reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
+              is a test failure, which is what the panic reports"
+)]
+
 use actix_web::{
     App,
     body::to_bytes,
@@ -195,7 +201,10 @@ async fn translator_routes_return_defaults_and_validate_json() -> TestResult {
     // services/runtime-actix/tests/translator_inspector.rs.
     assert_eq!(load_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&load, "success")?, false);
-    assert_eq!(logs_status, StatusCode::OK);
+    // Console logs join them: the buffer is held by the state service, so that this slice cannot
+    // read it is a real condition rather than "the router logged nothing".
+    assert_eq!(logs_status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(field(&logs, "success")?, false);
     assert_eq!(field(&logs, "logs")?, &serde_json::json!([]));
     assert_eq!(save_status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(field(&save, "success")?, false);

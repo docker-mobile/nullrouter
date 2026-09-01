@@ -12,6 +12,12 @@ pub const INTERNAL_API_KEY_VALIDATE_PATH: &str = "/internal/v1/keys/validate";
 /// separately meant two loopback round trips on the hottest path in the router.
 pub const INTERNAL_API_KEY_GATE_PATH: &str = "/internal/v1/keys/gate";
 
+/// The state service's console-log buffer: `POST` a batch, `GET` since a cursor, `DELETE` to clear.
+///
+/// Internal, so the gateway refuses it from outside. Anything able to write here can put arbitrary
+/// text in front of an operator reading what they believe are their own router's logs.
+pub const INTERNAL_CONSOLE_LOGS_PATH: &str = "/internal/v1/console-logs";
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SecretString(String);

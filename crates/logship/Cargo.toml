@@ -1,0 +1,20 @@
+[package]
+name = "nullrouter-logship"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Ships each service's tracing output to the state service's console-log buffer"
+repository.workspace = true
+
+[dependencies]
+nullrouter-contracts.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "net"] }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

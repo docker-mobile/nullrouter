@@ -3,6 +3,7 @@ use nullrouter_events::{DEFAULT_HOST, DEFAULT_PORT, McpBridge, UsageReader, conf
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    nullrouter_logship::install("nullrouter-events");
     let server = ServerConfig::from_env();
     // Holds a connection pool, so it is built once and shared across workers.
     let usage = web::Data::new(UsageReader::from_env());

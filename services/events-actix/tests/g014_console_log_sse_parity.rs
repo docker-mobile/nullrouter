@@ -36,13 +36,44 @@ async fn request(method: Method, uri: &str) -> TestResult<TestResponse> {
     let res = test::call_service(&app, req).await;
     let status = res.status();
     let headers = res.headers().clone();
-    let body = test::read_body(res).await;
+    let body = read_opening_frames(res).await;
 
     Ok(TestResponse {
         status,
         headers,
         body,
     })
+}
+
+/// The first three frames of a response body, rather than all of it.
+///
+/// The console-log stream is live and never ends — it polls the buffer in the state service — so
+/// reading to completion would hang. Three is the opening frame count this file asserts: `connected`,
+/// the named `console_logs` init, and the unnamed duplicate an `onmessage` client reads. They are all
+/// written into the stream's first yield, before any poll happens.
+///
+/// A non-streaming response yields once and then ends, so the loop terminates on `None` for the
+/// other routes this helper serves.
+async fn read_opening_frames(response: actix_web::dev::ServiceResponse) -> web::Bytes {
+    use actix_web::body::MessageBody as _;
+
+    const FRAMES: usize = 3;
+
+    let mut collected: Vec<u8> = Vec::new();
+    let mut body = response.into_body();
+    let mut stream = std::pin::Pin::new(&mut body);
+    while collected
+        .windows(2)
+        .filter(|window| *window == b"\n\n")
+        .count()
+        < FRAMES
+    {
+        match futures_util::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
+            Some(Ok(chunk)) => collected.extend_from_slice(chunk.as_ref()),
+            Some(Err(_)) | None => break,
+        }
+    }
+    web::Bytes::from(collected)
 }
 
 fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error> {

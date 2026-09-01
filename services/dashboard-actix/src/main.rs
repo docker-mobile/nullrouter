@@ -14,6 +14,7 @@ struct Args {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    nullrouter_logship::install("nullrouter-dashboard");
     let args = Args::parse();
     let config = args
         .static_root

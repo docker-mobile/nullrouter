@@ -259,13 +259,15 @@ async fn usage_stream_returns_parseable_default_sse_when_requested() -> TestResu
 
 #[actix_web::test]
 async fn console_logs_stream_returns_parseable_default_sse_when_requested() -> TestResult {
-    // Given: no translator console log backend is connected.
+    // Given: no state service to hold the buffer, so nothing can be captured.
 
-    // When: the translator console log stream is requested.
-    let response = get("/api/translator/console-logs/stream").await?;
+    // When: the opening frames are read. This stream is now live and never ends — it polls the
+    // buffer in the state service — so only a bounded prefix is consumed. Reading to completion
+    // would hang, which is what it did when this test was written against a static body.
+    let response = get_stream_prefix("/api/translator/console-logs/stream", 2).await?;
     let frames = parse_sse(&response.body)?;
 
-    // Then: the finite stream is event-stream encoded and carries empty log data.
+    // Then: the stream is event-stream encoded and opens with the same two frames it always did.
     assert_eq!(response.status, StatusCode::OK);
     assert_sse_headers(&response.headers)?;
 
@@ -275,8 +277,34 @@ async fn console_logs_stream_returns_parseable_default_sse_when_requested() -> T
 
     let logs = frame_data(&frames, "console_logs")?;
     assert_eq!(field(logs, "type")?, "init");
+    // `liveCapture: false` in the opening frame, because at this point nothing has been read yet.
+    // Whether capture is actually live is answered by the polled frames that follow.
     assert_eq!(field(logs, "liveCapture")?, false);
     assert!(array_field(logs, "logs")?.is_empty());
+    Ok(())
+}
+
+#[actix_web::test]
+async fn the_console_log_stream_reports_an_unreachable_buffer_rather_than_going_quiet() -> TestResult
+{
+    // Given: no state service listening, which is what these tests run against.
+
+    // When: enough of the stream is read to get past the opening frames. Those are three —
+    // `connected`, the named `console_logs` init, and its unnamed duplicate for `onmessage` — and
+    // they arrive before any poll, so the fourth is the first polled frame.
+    let response = get_stream_prefix("/api/translator/console-logs/stream", 4).await?;
+    let body = String::from_utf8_lossy(&response.body).into_owned();
+
+    // Then: the outage is said out loud. An empty pane would read as a quiet router, which is the
+    // opposite of what someone opening their logs needs to know.
+    assert!(
+        body.contains("unreachable"),
+        "the stream should report that the buffer cannot be read: {body}"
+    );
+    assert!(
+        body.contains("\"liveCapture\":false"),
+        "and mark capture as not live: {body}"
+    );
     Ok(())
 }
 

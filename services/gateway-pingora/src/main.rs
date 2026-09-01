@@ -103,14 +103,14 @@ fn main() -> PingoraResult<()> {
     run(config)
 }
 
+/// Stderr logging plus the shipper that feeds the dashboard's console pane.
+///
+/// Installed through `nullrouter_logship` like every service, which is possible here only because
+/// the shipper runs on its own thread: this is called before Pingora starts its runtime, so there is
+/// none to spawn onto.
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("nullrouter_gateway=info"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .compact()
-        .try_init();
+    let _ = EnvFilter::try_from_default_env();
+    nullrouter_logship::install_with_default_filter("nullrouter-gateway", "nullrouter_gateway=info");
 }
 
 fn run(config: GatewayConfig) -> PingoraResult<()> {

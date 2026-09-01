@@ -20,6 +20,7 @@ path = "src/main.rs"
 bench-internals = []
 
 [dependencies]
+nullrouter-logship.workspace = true
 actix-web.workspace = true
 futures-util.workspace = true
 nullrouter-contracts.workspace = true

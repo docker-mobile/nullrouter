@@ -1,4 +1,5 @@
 mod api_keys;
+mod console_logs;
 mod internal;
 mod migrate;
 mod provider_nodes;
@@ -18,4 +19,5 @@ pub fn configure(config: &mut actix_web::web::ServiceConfig) {
     routes::configure(config);
     provider_nodes::configure(config);
     internal::configure(config);
+    console_logs::configure(config);
 }

@@ -20,6 +20,7 @@ pub fn configure(config: &mut web::ServiceConfig) {
         // already made, so a `main` that wants to reap children at shutdown can still supply its
         // own bridge and keep the handle.
         .app_data(web::Data::new(crate::mcp::bridge::Bridge::default()))
+        .app_data(web::Data::new(crate::console_logs::LogReader::default()))
         .route("/health", web::get().to(health))
         .service(
             web::resource("/api/usage/stream")
@@ -126,8 +127,64 @@ async fn usage_stream(reader: web::Data<crate::usage_stream::UsageReader>) -> Ht
     builder.streaming(body)
 }
 
-async fn console_logs_stream() -> HttpResponse {
-    sse_body_response(console_logs_stream_body())
+/// Stream the router's log output for as long as the client stays connected.
+///
+/// The opening `connected` frame is kept — it is the contract this route already had — and is now
+/// followed by real frames polled from the buffer in the state service. See [`crate::console_logs`]
+/// for why the buffer is not here.
+async fn console_logs_stream(reader: web::Data<crate::console_logs::LogReader>) -> HttpResponse {
+    use futures_util::stream;
+
+    let opening = match console_logs_stream_body() {
+        Ok(opening) => opening,
+        Err(error) => return sse_body_response(Err(error)),
+    };
+
+    let reader = reader.into_inner();
+    // The opening frame is carried in the fold's state rather than captured, because the closure is
+    // `FnMut` and cannot move it out — `Option::take` is what makes it a once-only send.
+    let body = stream::unfold(
+        (Some(opening), crate::console_logs::StreamState::default()),
+        move |(mut opening, mut state)| {
+            let reader = std::sync::Arc::clone(&reader);
+            async move {
+                // The opening frames are yielded alone, before any poll. Two reasons, and the
+                // second is the load-bearing one: a client gets the established
+                // `connected`/`console_logs`/`message` sequence as its first chunk exactly as it
+                // always did, and a reader that bounds itself to those frames — which several
+                // suites do, because this stream never ends — does not have a live frame arrive in
+                // the middle of the sequence it is counting.
+                if let Some(opening) = opening.take() {
+                    return Some((
+                        Ok::<actix_web::web::Bytes, actix_web::Error>(actix_web::web::Bytes::from(
+                            opening,
+                        )),
+                        (None, state),
+                    ));
+                }
+
+                actix_web::rt::time::sleep(crate::console_logs::poll_interval()).await;
+                let page = reader.poll(state.cursor).await;
+                let mut frame = String::new();
+                if let Some(next) = crate::console_logs::next_frame(&mut state, page.as_ref()) {
+                    frame.push_str(&next);
+                }
+                // A tick with nothing to say still yields, with an empty body. Returning `None`
+                // would end the stream, which is the one thing a live log view must not do because
+                // the router went quiet for half a second.
+                Some((
+                    Ok::<actix_web::web::Bytes, actix_web::Error>(actix_web::web::Bytes::from(
+                        frame,
+                    )),
+                    (opening, state),
+                ))
+            }
+        },
+    );
+
+    let mut builder = HttpResponse::Ok();
+    insert_sse_headers(&mut builder);
+    builder.streaming(body)
 }
 
 /// Relay one MCP server's stdout as SSE for as long as the client stays connected.

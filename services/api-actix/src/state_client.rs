@@ -497,6 +497,38 @@ impl StateClient {
     }
 
     /// GET a loopback path as JSON, logging `label` when state cannot be read.
+    /// The console-log buffer, from the state service that holds it.
+    ///
+    /// Read from there rather than kept here so the list this service serves and the stream the
+    /// events service serves are the same buffer. Two local buffers would each hold one process's
+    /// lines, and both routes would look like they worked while disagreeing.
+    pub(crate) async fn console_logs(&self, cursor: Option<u64>) -> Option<Value> {
+        let path = match cursor {
+            Some(cursor) => format!(
+                "{}?cursor={cursor}",
+                nullrouter_contracts::INTERNAL_CONSOLE_LOGS_PATH
+            ),
+            None => nullrouter_contracts::INTERNAL_CONSOLE_LOGS_PATH.to_owned(),
+        };
+        self.get_json(&path, "console logs").await
+    }
+
+    /// Empty the shared buffer.
+    pub(crate) async fn clear_console_logs(&self) -> bool {
+        let url = format!(
+            "{}{}",
+            self.base,
+            nullrouter_contracts::INTERNAL_CONSOLE_LOGS_PATH
+        );
+        match self.client.delete(&url).send().await {
+            Ok(response) => response.status().is_success(),
+            Err(error) => {
+                tracing::warn!(%error, "clearing console logs failed");
+                false
+            }
+        }
+    }
+
     async fn get_json(&self, path: &str, label: &str) -> Option<Value> {
         let url = format!("{}{path}", self.base);
         match self.client.get(&url).send().await {

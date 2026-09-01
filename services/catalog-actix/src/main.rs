@@ -3,6 +3,7 @@ use nullrouter_catalog::{DEFAULT_HOST, DEFAULT_PORT, configure};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    nullrouter_logship::install("nullrouter-catalog");
     let server = ServerConfig::from_env();
 
     HttpServer::new(|| App::new().configure(configure))

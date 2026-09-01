@@ -8,6 +8,7 @@ use nullrouter_auth::{AuthConfig, AuthService, DEFAULT_HOST, DEFAULT_PORT, confi
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
+    nullrouter_logship::install("nullrouter-auth");
     let listen_addr = listen_addr()?;
     let service = AuthService::from_config(
         AuthConfig::from_env()

@@ -16,6 +16,7 @@ name = "nullrouter-state"
 path = "src/main.rs"
 
 [dependencies]
+nullrouter-logship.workspace = true
 rusqlite.workspace = true
 actix-web.workspace = true
 getrandom = "0.3"

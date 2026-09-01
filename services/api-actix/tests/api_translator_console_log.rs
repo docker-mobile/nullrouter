@@ -1,5 +1,11 @@
 #![allow(clippy::future_not_send)]
 
+#![allow(
+    clippy::indexing_slicing,
+    reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
+              is a test failure, which is what the panic reports"
+)]
+
 use actix_web::{
     App,
     body::to_bytes,
@@ -90,18 +96,26 @@ fn json(response: &ApiResponse) -> TestResult<&Value> {
 }
 
 #[actix_rt::test]
-async fn translator_console_logs_get_returns_successful_empty_log_buffer() -> TestResult {
-    // Given: nullrouter-api starts without a translator console-log buffer.
+async fn translator_console_logs_get_reports_an_unreachable_buffer() -> TestResult {
+    // Given: no state service, which is where the buffer lives. These tests point at a closed port.
 
-    // When: a browser requests the upstream-compatible log buffer.
+    // When: a browser requests the log buffer.
     let response = request(Method::GET, "/api/translator/console-logs", "").await?;
 
-    // Then: the route returns the upstream success envelope with an empty log array.
-    assert_eq!(response.status, StatusCode::OK);
+    // Then: the route says the buffer could not be read, rather than returning an empty one. An
+    // empty list here would read as a quiet router, which is the opposite of what someone opening
+    // their logs needs to know — and the buffer being in another process makes its absence a real
+    // condition rather than "no logs".
+    assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_structured_json(&response);
-    assert_eq!(
-        json(&response)?,
-        &serde_json::json!({ "success": true, "logs": [] })
+    let body = json(&response)?;
+    assert_eq!(body["success"], false, "{body}");
+    assert_eq!(body["logs"], serde_json::json!([]), "{body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("nullrouter-state")),
+        "the reason should name the service that holds the buffer: {body}"
     );
     Ok(())
 }
@@ -113,10 +127,12 @@ async fn translator_console_logs_delete_returns_success_without_body_requirement
     // When: the dashboard clears the console-log buffer without a request body.
     let response = request(Method::DELETE, "/api/translator/console-logs", "").await?;
 
-    // Then: the route reports success as structured JSON.
-    assert_eq!(response.status, StatusCode::OK);
+    // Then: the failure to reach the buffer is reported rather than a success that cleared nothing.
+    // Reporting success here would tell a user their logs were cleared while the buffer still held
+    // them.
+    assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_structured_json(&response);
-    assert_eq!(json(&response)?, &serde_json::json!({ "success": true }));
+    assert_eq!(json(&response)?["success"], false);
     Ok(())
 }
 

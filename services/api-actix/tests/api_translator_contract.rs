@@ -1,5 +1,11 @@
 #![allow(clippy::future_not_send)]
 
+#![allow(
+    clippy::indexing_slicing,
+    reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
+              is a test failure, which is what the panic reports"
+)]
+
 use actix_web::{
     App,
     body::to_bytes,
@@ -189,19 +195,19 @@ async fn translator_send_returns_explicit_not_implemented_json_for_valid_input()
 }
 
 #[actix_rt::test]
-async fn translator_console_logs_returns_empty_logs_json() -> TestResult {
-    // Given: nullrouter-api does not capture dashboard translator console logs.
+async fn translator_console_logs_reads_the_buffer_from_the_state_service() -> TestResult {
+    // Given: the buffer lives in the state service, and this suite points at a closed port.
 
     // When: the dashboard requests the console log buffer.
     let response = request_json(Method::GET, "/api/translator/console-logs", "").await?;
 
-    // Then: the route returns the upstream-compatible empty logs JSON object.
-    assert_eq!(response.status, StatusCode::OK);
+    // Then: the route reports that it could not be read. The buffer is deliberately not local: the
+    // gateway sends this list here and the live stream to the events service, so a buffer in either
+    // would make the two show different lines while both looked like they worked.
+    assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_structured_json(&response);
-    assert_eq!(
-        response.json,
-        serde_json::json!({ "success": true, "logs": [] })
-    );
+    assert_eq!(response.json["success"], false, "{}", response.json);
+    assert_eq!(response.json["logs"], serde_json::json!([]));
     Ok(())
 }
 
