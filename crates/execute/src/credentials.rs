@@ -271,6 +271,12 @@ pub fn build_headers(
         headers.insert("Accept".to_owned(), "text/event-stream".to_owned());
     }
 
+    // Headers derived from the connection rather than from the request: Codex's account binding and
+    // session id. Applied before the auth override so that override still has the last word.
+    for (key, value) in crate::bespoke::credential_headers(provider, credentials) {
+        headers.insert(key, value);
+    }
+
     // A few providers authenticate in a way no descriptor can express — a session cookie rather than a
     // header, for one. Applied last so it can remove what `apply_auth` inserted: leaving an
     // `Authorization` header on a cookie-authenticated web endpoint is how a request gets rejected for

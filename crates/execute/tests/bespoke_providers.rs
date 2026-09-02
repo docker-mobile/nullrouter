@@ -713,3 +713,180 @@ async fn a_perplexity_thread_is_remembered_and_continued_on_the_next_request() {
     // And the query is just the new question, because perplexity still holds the rest.
     assert_eq!(continued.body.get("query_str"), Some(&json!("And 2.0?")));
 }
+
+// ── codex ─────────────────────────────────────────────────────────────────────
+//
+// Third of the six, and the one whose story text was misleading: `is_executor_supported("codex")` was
+// already true, because the registry resolves it to `openai-responses`. So it was never refused with a
+// 501 — it dispatched with an unshaped body, which the backend rejects. That is a worse failure than a
+// clean refusal, and these tests pin the shaping that fixes it.
+
+fn codex_credentials(account: Option<&str>) -> Credentials {
+    let mut credentials = Credentials {
+        access_token: Some("chatgpt-access-token".to_owned()),
+        connection_id: "conn_codex_1".to_owned(),
+        connection_name: "codex".to_owned(),
+        ..Credentials::default()
+    };
+    if let Some(account) = account {
+        credentials
+            .provider_specific_data
+            .insert("chatgptAccountId".to_owned(), json!(account));
+    }
+    credentials
+}
+
+#[test]
+fn codex_bodies_are_shaped_for_a_backend_that_refuses_the_raw_request() {
+    let body = json!({
+        "model": "gpt-5.3-codex-high",
+        "input": [
+            { "type": "message", "role": "system", "content": [{ "type": "input_text", "text": "rules" }] },
+            { "id": "rs_server_generated", "role": "assistant", "content": [{ "type": "output_text", "text": "prior" }] },
+        ],
+        "temperature": 0.7,
+        "max_output_tokens": 8192,
+        "store": true,
+        "stream": false,
+    });
+
+    let prepared = prepare(&ExecuteRequest {
+        provider: "codex",
+        body: &body,
+        stream: true,
+        credentials: &codex_credentials(Some("acct-9")),
+    });
+
+    // The four requirements that make an unshaped request fail outright.
+    assert_eq!(prepared.body.get("store"), Some(&json!(false)));
+    assert_eq!(prepared.body.get("stream"), Some(&json!(true)));
+    assert_eq!(
+        prepared.body.pointer("/input/0/role"),
+        Some(&json!("developer"))
+    );
+    assert!(
+        prepared.body.pointer("/input/1/id").is_none(),
+        "a server-generated id is unresolvable with store:false: {}",
+        prepared.body
+    );
+
+    // The effort suffix is read off the model and the model is sent without it.
+    assert_eq!(prepared.body.get("model"), Some(&json!("gpt-5.3-codex")));
+    assert_eq!(
+        prepared.body.pointer("/reasoning/effort"),
+        Some(&json!("high"))
+    );
+
+    // Unknown fields are gone: these are `routing_unsupported` upstream.
+    let object = prepared.body.as_object().expect("an object");
+    assert!(!object.contains_key("temperature"));
+    assert!(!object.contains_key("max_output_tokens"));
+}
+
+#[test]
+fn codex_binds_a_request_to_its_own_chatgpt_account() {
+    // With more than one Codex connection configured, a request without this header can land on the
+    // wrong account and fail as `token_invalid` — which reads as an expired token rather than as a
+    // mis-routed request.
+    let prepared = prepare(&ExecuteRequest {
+        provider: "codex",
+        body: &json!({ "model": "gpt-5.3-codex" }),
+        stream: true,
+        credentials: &codex_credentials(Some("acct-9")),
+    });
+    assert_eq!(
+        prepared
+            .headers
+            .get("ChatGPT-Account-ID")
+            .map(String::as_str),
+        Some("acct-9")
+    );
+    // The registry already supplies the CLI identity; the session header is added per connection.
+    assert_eq!(
+        prepared.headers.get("originator").map(String::as_str),
+        Some("codex_cli_rs")
+    );
+    assert!(
+        prepared
+            .headers
+            .get("session_id")
+            .is_some_and(|session| !session.is_empty())
+    );
+
+    // No account configured: the header is omitted rather than sent blank.
+    let anonymous = prepare(&ExecuteRequest {
+        provider: "codex",
+        body: &json!({ "model": "gpt-5.3-codex" }),
+        stream: true,
+        credentials: &codex_credentials(None),
+    });
+    assert!(!anonymous.headers.contains_key("ChatGPT-Account-ID"));
+}
+
+#[test]
+fn codexs_session_and_cache_key_are_stable_across_requests_on_one_connection() {
+    // Codex keys its prompt cache by these. A value that changes per request still succeeds, so this
+    // would never surface as an error — it would just re-bill the whole conversation every turn.
+    let credentials = codex_credentials(Some("acct-9"));
+    let request = || {
+        prepare(&ExecuteRequest {
+            provider: "codex",
+            body: &json!({ "model": "gpt-5.3-codex" }),
+            stream: true,
+            credentials: &credentials,
+        })
+    };
+    let first = request();
+    let second = request();
+
+    assert_eq!(
+        first.headers.get("session_id"),
+        second.headers.get("session_id"),
+        "the session must survive a turn or the prompt cache is discarded"
+    );
+    assert_eq!(
+        first.body.get("prompt_cache_key"),
+        second.body.get("prompt_cache_key")
+    );
+}
+
+#[test]
+fn a_client_supplied_codex_session_is_used_as_the_cache_key() {
+    // A client managing its own conversation ids knows better than this router which requests belong
+    // together.
+    let prepared = prepare(&ExecuteRequest {
+        provider: "codex",
+        body: &json!({ "model": "gpt-5.3-codex", "session_id": "client-conversation-3" }),
+        stream: true,
+        credentials: &codex_credentials(None),
+    });
+    assert_eq!(
+        prepared.body.get("prompt_cache_key"),
+        Some(&json!("client-conversation-3"))
+    );
+    // And `session_id` itself is not a Codex body field.
+    assert!(prepared.body.get("session_id").is_none());
+}
+
+#[test]
+fn another_responses_provider_is_left_unshaped() {
+    // The shaping is keyed off the provider id, not the format. Every other `openai-responses` provider
+    // must reach its endpoint with the body its client sent.
+    let credentials = Credentials {
+        api_key: Some("sk-test".to_owned()),
+        connection_id: "conn_other".to_owned(),
+        ..Credentials::default()
+    };
+    let body = json!({ "model": "gpt-4.1", "input": "hi", "temperature": 0.5, "store": true });
+    let prepared = prepare(&ExecuteRequest {
+        provider: "openai-compatible-responses-abc",
+        body: &body,
+        stream: true,
+        credentials: &credentials,
+    });
+
+    assert_eq!(
+        prepared.body, body,
+        "a non-codex provider must not be reshaped"
+    );
+}

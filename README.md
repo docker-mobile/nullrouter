@@ -475,10 +475,26 @@ entire reply once per event. Citation markers (`[1]`) are stripped because they 
 this surface never returns, while a markdown link is left intact. Declared tools cannot be called, so
 they are described in the instructions instead of dropped silently.
 
+`codex` is the third, and its entry on the unported list was misleading in a way worth recording: it was
+never actually refused. The registry resolves it to `openai-responses`, so the generic executor already
+reached it — with a body the backend rejects, which is a worse failure than a clean 501 and does not look
+like a missing feature. What it needed was the body rules, and four of them are load-bearing. `store:
+false` is mandatory, and it makes every server-generated item id (`rs_`/`fc_`/`resp_`/`msg_`)
+unresolvable, so those have to be stripped or the backend answers 404 for an id it issued itself. A
+`system` role must become `developer`: both are accepted, but only the developer message sits in the
+cacheable prefix, so the wrong one silently re-bills the whole prompt every turn. The field set is an
+**allowlist**, because an unknown field is `routing_unsupported` upstream and real clients send plenty
+(`max_output_tokens`, `metadata`, `stream_options`, `safety_identifier`, `previous_response_id`). And the
+reasoning effort arrives three ways — explicit block, `reasoning_effort` param, or a suffix on the model
+name — where the suffix must be stripped before the model is sent.
+
+Codex also caches prompts against a session id, so this port keeps a bounded per-connection session
+store. An id that changed per request would still succeed; it would just discard the cache on every turn.
+
 The remaining protocols need genuine request signing or a binary protocol and still return an explicit
 **501 naming the provider and its protocol**, rather than a plausible wrong answer:
 
-`kiro` · `cursor` · `codex` · `antigravity`
+`kiro` · `cursor` · `antigravity`
 
 A test asserts that more than 75% of registry entries with a transport remain executable.
 
@@ -731,9 +747,9 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **Four of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
-  `grok-web` and `perplexity-web` are now ported from the reference and execute; the other four are
-  being ported the same way. Their protocols are undocumented, so what a loopback test can establish is that the request
+- **Three of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
+  `grok-web`, `perplexity-web` and `codex` are now ported from the reference; the other three are being
+  ported the same way. Their protocols are undocumented, so what a loopback test can establish is that the request
   matches the reference — not that the provider accepts it. That distinction is stated rather than
   papered over: verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP

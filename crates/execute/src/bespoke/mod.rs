@@ -15,8 +15,10 @@ use serde_json::{Value, json};
 
 use crate::credentials::Credentials;
 
+pub(crate) mod codex;
 pub(crate) mod grok_web;
 pub(crate) mod perplexity_web;
+pub(crate) mod session;
 
 /// The `x-session-id` header `CommandCode` expects on every request.
 const SESSION_HEADER: &str = "x-session-id";
@@ -66,6 +68,19 @@ pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) 
             &preference,
             follow_up.as_deref(),
         ));
+    }
+    // Codex resolves to `OpenAiResponses` — the registry routes it correctly and the generic executor
+    // can already reach it. What it cannot do is meet the backend's body requirements, which are strict
+    // enough that an unshaped request is refused rather than merely uncached. Keyed off the provider id
+    // rather than the format, because every other `openai-responses` provider must be left alone.
+    if provider == "codex" {
+        let session = session::resolve(
+            "codex",
+            body,
+            credentials.setting("workspaceId"),
+            &credentials.connection_id,
+        );
+        return Some(codex::shape_body(body, &session));
     }
     if target_format(provider) != Format::GeminiCli {
         return None;
@@ -156,6 +171,25 @@ pub(crate) fn auth_override(
         }
         _other => None,
     }
+}
+
+/// Extra headers a provider needs that depend on its credentials.
+///
+/// Separate from [`extra_headers`] because that hook has no access to credentials, and separate from
+/// [`auth_override`] because these do not replace the auth header. Codex is the only user: its account
+/// binding and session id both come from the connection.
+pub(crate) fn credential_headers(
+    provider: &str,
+    credentials: &Credentials,
+) -> Vec<(String, String)> {
+    if provider != "codex" {
+        return Vec::new();
+    }
+    // The session id is resolved from the connection alone here. A client-supplied one in the body
+    // reaches `prompt_cache_key` through `envelope`; this header only has to be stable per connection,
+    // and Codex reads the cache key from the body rather than from the header.
+    let session = session::for_connection("codex", &credentials.connection_id);
+    codex::headers(&session, codex::account_id(credentials).as_deref())
 }
 
 /// Headers this provider needs beyond the registry's own.
