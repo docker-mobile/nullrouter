@@ -1526,7 +1526,7 @@ impl Runtime {
 
         // Cursor's response is Connect-RPC carrying protobuf, and `pipe_stream` reads its input as lossy
         // UTF-8 split on newlines — which corrupts binary frames and finds boundaries that are not there.
-        let binary_upstream = target_format == nullrouter_providers::Format::Cursor;
+        let binary_upstream = nullrouter_execute::bespoke::is_binary_protocol(&target.provider);
         let stream_model = target.model.clone();
         // Cursor retired `ChatService` for plain-text turns and routes those to `AgentService`, which needs
         // HTTP/2 duplex and is not ported. Saying so in the log is the difference between a diagnosable
@@ -1545,6 +1545,7 @@ impl Runtime {
             let summary = if binary_upstream {
                 nullrouter_execute::pipe_binary_stream(
                     outcome.response,
+                    target_format,
                     source_format,
                     &stream_model,
                     &mut state,

@@ -236,6 +236,7 @@ where
 /// converting it.
 pub async fn pipe_binary_stream<S>(
     response: Response,
+    target: Format,
     source: Format,
     model: &str,
     state: &mut StreamState,
@@ -244,8 +245,6 @@ pub async fn pipe_binary_stream<S>(
 where
     S: FrameSink,
 {
-    use crate::bespoke::cursor::{protobuf, response as cursor_response};
-
     let framing = ClientFraming::for_format(source);
     let mut summary = StreamSummary::default();
     let mut pending: Vec<u8> = Vec::new();
@@ -255,10 +254,9 @@ where
     let response_id = state
         .message_id
         .clone()
-        .unwrap_or_else(|| format!("chatcmpl-cursor-{}", state.clock.now_millis()));
+        .unwrap_or_else(|| format!("chatcmpl-{}", state.clock.now_millis()));
     state.message_id = Some(response_id.clone());
-    let mut decoder =
-        cursor_response::Stream::new(response_id, state.clock.now_seconds(), model.to_owned());
+    let mut decoder = BinaryDecoder::new(target, response_id, state.clock.now_seconds(), model);
 
     'outer: while let Some(chunk) = body.next().await {
         let Ok(bytes) = chunk else {
@@ -266,34 +264,30 @@ where
             break;
         };
         pending.extend_from_slice(&bytes);
-        let (frames, consumed) = protobuf::frames(&pending);
-        // Whatever was not consumed is an incomplete frame: keep it for the next read rather than
-        // discarding a partial one.
-        pending.drain(..consumed);
-
-        for frame in &frames {
-            if frame.is_trailer() {
-                continue;
-            }
-            if let Some(error) = cursor_response::error_frame(&frame.payload) {
-                // An error after content is a truncation of a real answer, so the answer is kept and the
-                // stream ends. An error before any content is the whole response.
-                let (message, _rate_limited) = cursor_response::error_detail(&error);
-                if !decoder.has_content() {
-                    summary.error = Some(message);
-                }
-                break 'outer;
-            }
-            let decoded = cursor_response::decode_frame(&frame.payload);
-            if decoded == cursor_response::Decoded::default() {
-                continue;
-            }
-            for chunk in nullrouter_translate::to_client(&decoder.push(&decoded), source, state) {
+        // Whatever is not consumed is an incomplete frame: it is kept for the next read rather than
+        // discarded, since a frame does not have to arrive whole.
+        let step = decoder.consume(&mut pending);
+        if let Some(message) = step.fatal {
+            // A failure that arrives before any content *is* the response. One that arrives after is a
+            // truncation, and the text already delivered stays.
+            summary.error = Some(message);
+            break 'outer;
+        }
+        if step.stop_after {
+            for chunk in nullrouter_translate::to_client(&step.chunks, source, state) {
                 collect_text(&chunk, &mut summary);
                 if sink.send(frame_for(&chunk, framing, source)).await.is_err() {
                     client_gone = true;
-                    break 'outer;
+                    break;
                 }
+            }
+            break 'outer;
+        }
+        for chunk in nullrouter_translate::to_client(&step.chunks, source, state) {
+            collect_text(&chunk, &mut summary);
+            if sink.send(frame_for(&chunk, framing, source)).await.is_err() {
+                client_gone = true;
+                break 'outer;
             }
         }
     }
@@ -328,12 +322,134 @@ where
     summary
 }
 
+/// What one pass over the pending bytes produced.
+struct BinaryStep {
+    /// OpenAI-shaped chunks to relay.
+    chunks: Vec<Value>,
+    /// A failure that arrived before any content, which *is* the response.
+    fatal: Option<String>,
+    /// Whether the stream ends after these chunks — a truncating error, or the protocol's own terminator.
+    stop_after: bool,
+}
+
+/// A decoder for one of the two binary upstream protocols.
+///
+/// The two share a shape — accumulate bytes, split frames, decode each to OpenAI chunks — and nothing else:
+/// Cursor's frames are Connect-RPC carrying protobuf, Kiro's are CRC-checked `vnd.amazon.eventstream`
+/// carrying JSON. Keeping them behind one enum is what lets the pump above stay single-purpose.
+enum BinaryDecoder {
+    Cursor(Box<crate::bespoke::cursor::response::Stream>),
+    Kiro(Box<crate::bespoke::kiro::response::Stream>),
+}
+
+impl BinaryDecoder {
+    fn new(target: Format, id: String, created: u64, model: &str) -> Self {
+        if target == Format::Kiro {
+            Self::Kiro(Box::new(crate::bespoke::kiro::response::Stream::new(
+                id,
+                created,
+                model.to_owned(),
+            )))
+        } else {
+            Self::Cursor(Box::new(crate::bespoke::cursor::response::Stream::new(
+                id,
+                created,
+                model.to_owned(),
+            )))
+        }
+    }
+
+    /// Read every complete frame at the front of `pending`, draining what was consumed.
+    fn consume(&mut self, pending: &mut Vec<u8>) -> BinaryStep {
+        match self {
+            Self::Cursor(stream) => {
+                use crate::bespoke::cursor::{protobuf, response as cursor};
+                let (frames, consumed) = protobuf::frames(pending);
+                pending.drain(..consumed);
+                let mut chunks = Vec::new();
+                for frame in &frames {
+                    if frame.is_trailer() {
+                        continue;
+                    }
+                    if let Some(error) = cursor::error_frame(&frame.payload) {
+                        let (message, _rate_limited) = cursor::error_detail(&error);
+                        return BinaryStep {
+                            chunks,
+                            fatal: (!stream.has_content()).then_some(message),
+                            stop_after: true,
+                        };
+                    }
+                    let decoded = cursor::decode_frame(&frame.payload);
+                    if decoded == cursor::Decoded::default() {
+                        continue;
+                    }
+                    chunks.extend(stream.push(&decoded));
+                }
+                BinaryStep {
+                    chunks,
+                    fatal: None,
+                    stop_after: false,
+                }
+            }
+            Self::Kiro(stream) => {
+                use crate::bespoke::kiro::{eventstream, response as kiro};
+                let mut chunks = Vec::new();
+                loop {
+                    match eventstream::read_frame(pending) {
+                        eventstream::Read::Incomplete => {
+                            return BinaryStep {
+                                chunks,
+                                fatal: None,
+                                stop_after: false,
+                            };
+                        }
+                        // A CRC or bounds failure means the length fields cannot be trusted, so there is no
+                        // safe offset to resume from. The stream ends rather than guessing one.
+                        eventstream::Read::Failed(error) => {
+                            let message = error.to_string();
+                            return BinaryStep {
+                                chunks,
+                                fatal: (!stream.has_content()).then_some(message),
+                                stop_after: true,
+                            };
+                        }
+                        eventstream::Read::Frame(frame, consumed) => {
+                            pending.drain(..consumed);
+                            let decoded = kiro::decode(&frame);
+                            if let Some(exception) = decoded.exception.clone() {
+                                return BinaryStep {
+                                    chunks,
+                                    fatal: (!stream.has_content()).then_some(exception),
+                                    stop_after: true,
+                                };
+                            }
+                            if decoded == kiro::Decoded::default() {
+                                continue;
+                            }
+                            chunks.extend(stream.push(&decoded));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The terminal chunks.
+    fn finish(&mut self) -> Vec<Value> {
+        match self {
+            Self::Cursor(stream) => stream.finish(),
+            Self::Kiro(stream) => stream.finish(),
+        }
+    }
+}
+
 /// Drain a binary upstream body, handing decoded OpenAI chunks to `take`.
 ///
 /// Shared with the streaming path in spirit but not in code: this one has no sink and no client format,
 /// because the caller is assembling a single JSON response rather than relaying frames.
 async fn collapse_binary_body<B, C, F>(
     body: &mut B,
+    target: Format,
     model: &str,
     state: &mut StreamState,
     take: &mut F,
@@ -342,31 +458,21 @@ async fn collapse_binary_body<B, C, F>(
     C: AsRef<[u8]>,
     F: FnMut(Vec<Value>),
 {
-    use crate::bespoke::cursor::{protobuf, response as cursor_response};
-
     let response_id = state
         .message_id
         .clone()
-        .unwrap_or_else(|| format!("chatcmpl-cursor-{}", state.clock.now_millis()));
+        .unwrap_or_else(|| format!("chatcmpl-{}", state.clock.now_millis()));
     state.message_id = Some(response_id.clone());
-    let mut decoder =
-        cursor_response::Stream::new(response_id, state.clock.now_seconds(), model.to_owned());
+    let mut decoder = BinaryDecoder::new(target, response_id, state.clock.now_seconds(), model);
     let mut pending: Vec<u8> = Vec::new();
 
     while let Some(chunk) = body.next().await {
         let Ok(bytes) = chunk else { break };
         pending.extend_from_slice(bytes.as_ref());
-        let (frames, consumed) = protobuf::frames(&pending);
-        pending.drain(..consumed);
-        for frame in &frames {
-            if frame.is_trailer() || cursor_response::error_frame(&frame.payload).is_some() {
-                continue;
-            }
-            let decoded = cursor_response::decode_frame(&frame.payload);
-            if decoded == cursor_response::Decoded::default() {
-                continue;
-            }
-            take(decoder.push(&decoded));
+        let step = decoder.consume(&mut pending);
+        take(step.chunks);
+        if step.stop_after {
+            break;
         }
     }
     take(decoder.finish());
@@ -524,10 +630,10 @@ pub async fn collapse_stream_to_json(
         }
     };
 
-    if target == Format::Cursor {
+    if matches!(target, Format::Cursor | Format::Kiro) {
         // A binary upstream has no lines to parse. Its frames are decoded to OpenAI chunks directly, so
         // they are taken as they are rather than run through a translator that has no arm for this format.
-        collapse_binary_body(&mut body, model, state, &mut take).await;
+        collapse_binary_body(&mut body, target, model, state, &mut take).await;
     } else {
         while let Some(chunk) = body.next().await {
             let Ok(bytes) = chunk else { break };

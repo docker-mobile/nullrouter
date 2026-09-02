@@ -38,7 +38,9 @@ pub use stream::{
 
 /// Provider formats this port can actually execute.
 ///
-/// The excluded format needs a binary protocol this executor cannot express (`kiro`).
+/// Every format the port has an executor for. All of them, now that the six bespoke protocols are ported —
+/// though `cursor`'s `AgentService` endpoint needs HTTP/2 duplex and only its `ChatService` one is
+/// reachable, and `kiro`'s integrity gate is deliberately not ported (see its module docs).
 ///
 /// `ollama`, `gemini-cli`, and `commandcode` are included. None of them needs a
 /// distinct executor: what they need is an envelope, a per-request header, or a URL
@@ -58,6 +60,7 @@ pub const fn is_format_supported(format: Format) -> bool {
             | Format::PerplexityWeb
             | Format::Antigravity
             | Format::Cursor
+            | Format::Kiro
     )
 }
 
@@ -101,15 +104,11 @@ mod tests {
     }
 
     #[test]
-    fn bespoke_formats_are_refused() {
-        // Each of these needs provider-specific request signing or a binary
-        // protocol, which no hook on the shared path can supply.
-        // One format is left. `kiro` signs its requests against AWS and speaks an event-stream protocol,
-        // neither of which a hook on the shared path can supply.
-        assert!(
-            !is_format_supported(Format::Kiro),
-            "kiro must still be refused"
-        );
+    fn kiro_dispatches_on_its_own_event_stream_protocol() {
+        // Ported from `open-sse/executors/kiro.js`: a CodeWhisperer `conversationState` request and a
+        // CRC-framed `vnd.amazon.eventstream` response. It was the last format without an executor.
+        assert!(is_format_supported(Format::Kiro));
+        assert!(is_executor_supported("kiro"));
     }
 
     #[test]
@@ -167,28 +166,54 @@ mod tests {
     }
 
     #[test]
-    fn bespoke_providers_are_reported_unsupported_with_a_clear_message() {
-        assert!(!is_executor_supported("kiro"));
-        let message = unsupported_executor_message("kiro");
-        assert!(message.contains("kiro"), "{message}");
+    fn every_provider_in_the_registry_now_has_an_executor() {
+        // `kiro` was the last one refused, and it stood here until its event-stream protocol was ported.
+        // Nothing in the registry resolves to an unsupported format any more.
+        let refused: Vec<&str> = nullrouter_providers::entries()
+            .iter()
+            .filter(|entry| entry.transport.is_some())
+            .map(|entry| entry.id.as_str())
+            .filter(|provider| !is_executor_supported(provider))
+            .collect();
+        assert!(
+            refused.is_empty(),
+            "these providers have a transport but no executor: {refused:?}"
+        );
+    }
+
+    #[test]
+    fn the_refusal_message_still_names_a_provider_and_its_protocol() {
+        // `Format::Codex` is the one variant no registry entry resolves to — `codex` itself is an
+        // `openai-responses` provider. The refusal path is kept and tested so a future registry entry
+        // declaring an unported format gets a clear 501 rather than a plausible wrong answer.
+        assert!(!is_format_supported(Format::Codex));
+        let message = unsupported_executor_message("some-future-provider");
+        assert!(message.contains("some-future-provider"), "{message}");
         assert!(message.contains("not implemented"), "{message}");
     }
 
     #[test]
-    fn the_supported_set_covers_most_of_the_registry() {
+    fn the_supported_set_covers_the_whole_registry() {
         let with_transport: Vec<&str> = nullrouter_providers::entries()
             .iter()
             .filter(|entry| entry.transport.is_some())
             .map(|entry| entry.id.as_str())
             .collect();
-        let supported = with_transport
+        let unsupported: Vec<&&str> = with_transport
             .iter()
-            .filter(|provider| is_executor_supported(provider))
-            .count();
-        // The bespoke formats are a small minority of the registry.
+            .filter(|provider| !is_executor_supported(provider))
+            .collect();
+        // This asserted >75% while protocols were still being ported. All six bespoke ones are done, so the
+        // weaker bar would now pass while hiding a regression in any one of them.
         assert!(
-            supported * 4 > with_transport.len() * 3,
-            "expected >75% executable, got {supported}/{}",
+            unsupported.is_empty(),
+            "every provider with a transport should execute; these do not: {unsupported:?}"
+        );
+        // A guard on the assertion above: an empty list would satisfy it vacuously. The registry carries 81
+        // entries with a transport at the time of writing, so this only catches a load failure.
+        assert!(
+            with_transport.len() > 50,
+            "the registry should be loaded, got {} entries with a transport",
             with_transport.len()
         );
     }

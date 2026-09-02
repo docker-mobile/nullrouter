@@ -119,6 +119,45 @@ fn generate() -> String {
     format!("{}{millis}", super::session_id().replace('-', ""))
 }
 
+/// A stable identifier derived from a seed.
+///
+/// Used where an id must be the same on every turn of one conversation but need not be secret: a provider
+/// that reads it as a conversation identity sees one agent run rather than a new one per request. Derived
+/// rather than stored so it survives a restart, and rather than random so two turns agree.
+pub(crate) fn derive(seed: &str) -> String {
+    use sha2::{Digest as _, Sha256};
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut bytes = [0_u8; 16];
+    for (target, source) in bytes.iter_mut().zip(digest.iter()) {
+        *target = *source;
+    }
+    // Version 5, variant 1, so the value is a well-formed uuid wherever one is expected.
+    if let Some(byte) = bytes.get_mut(6) {
+        *byte = (*byte & 0x0F) | 0x50;
+    }
+    if let Some(byte) = bytes.get_mut(8) {
+        *byte = (*byte & 0x3F) | 0x80;
+    }
+    let hex = bytes
+        .iter()
+        .fold(String::with_capacity(32), |mut hex, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
+    [
+        hex.get(..8),
+        hex.get(8..12),
+        hex.get(12..16),
+        hex.get(16..20),
+        hex.get(20..32),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("-")
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

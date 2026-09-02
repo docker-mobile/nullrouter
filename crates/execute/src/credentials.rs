@@ -128,6 +128,12 @@ pub fn build_url(provider: &str, credentials: &Credentials, url_index: usize) ->
 
     let transport = registry::transport(provider)?;
     let urls = transport.urls();
+    // A few providers expose several endpoints of one service that are not interchangeable, and which one
+    // works depends on the credential rather than on availability. Those reorder the list — and may rewrite
+    // a host — before an index is taken from it.
+    if let Some(ordered) = crate::bespoke::ordered_urls(provider, credentials, &urls) {
+        return ordered.get(url_index).or_else(|| ordered.first()).cloned();
+    }
     let base = urls
         .get(url_index)
         .or_else(|| urls.first())
@@ -267,7 +273,11 @@ pub fn build_headers(
 
     apply_auth(provider, credentials, &mut headers);
 
-    if stream {
+    // A streaming request asks for SSE — except from a provider whose stream is not SSE. Kiro answers
+    // `application/vnd.amazon.eventstream` and declares that in the registry; overriding it with
+    // `text/event-stream` asks for a framing it does not produce. Keyed off the binary-protocol check
+    // rather than off "declares an Accept header", because `github` declares one and does stream SSE.
+    if stream && !crate::bespoke::is_binary_protocol(provider) {
         headers.insert("Accept".to_owned(), "text/event-stream".to_owned());
     }
 

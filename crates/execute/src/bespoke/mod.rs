@@ -19,6 +19,7 @@ pub(crate) mod antigravity;
 pub(crate) mod codex;
 pub mod cursor;
 pub(crate) mod grok_web;
+pub(crate) mod kiro;
 pub(crate) mod perplexity_web;
 pub(crate) mod session;
 
@@ -46,9 +47,12 @@ pub(crate) fn binary_body(
     Some(cursor::body(body, &ids))
 }
 
-/// Whether this provider's response is a binary protocol rather than SSE or NDJSON.
-pub(crate) fn is_binary_protocol(provider: &str) -> bool {
-    target_format(provider) == Format::Cursor
+/// Whether this provider's *response* is a binary protocol rather than SSE or NDJSON.
+///
+/// Cursor is binary in both directions; Kiro sends a JSON body and receives CRC-framed
+/// `vnd.amazon.eventstream`, so it is binary only here.
+pub fn is_binary_protocol(provider: &str) -> bool {
+    matches!(target_format(provider), Format::Cursor | Format::Kiro)
 }
 
 /// Milliseconds since the Unix epoch.
@@ -116,6 +120,13 @@ pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) 
             &credentials.connection_id,
         );
         return Some(codex::shape_body(body, &session));
+    }
+    // Kiro's body is a CodeWhisperer `conversationState` document, which shares nothing with a
+    // chat-completions body, so it replaces it outright. Its *response* is binary, but that is a separate
+    // hook — this one is still JSON.
+    if target_format(provider) == Format::Kiro {
+        let ids = kiro::Ids::for_connection(&credentials.connection_id, now_millis());
+        return Some(kiro::body(body, credentials, &ids));
     }
     // Antigravity is Cloud Code Assist reached as the Antigravity IDE reaches it: the same wrap plus an
     // IDE-shaped request id, per-turn content fixes, and a strict field blacklist. Its envelope is
@@ -241,6 +252,12 @@ pub(crate) fn credential_headers(
     provider: &str,
     credentials: &Credentials,
 ) -> Vec<(String, String)> {
+    // Kiro's auth headers depend on how the credential was obtained: an API key needs `TokenType: API_KEY`
+    // or CodeWhisperer reads it as an OIDC token and refuses it. The URL matters too, so the target header
+    // is added at the dispatch site where the chosen endpoint is known.
+    if target_format(provider) == Format::Kiro {
+        return kiro::request_headers(credentials, "", &session_id());
+    }
     // Cursor's whole header set is derived from the credential: the bearer token, a device id, and a
     // checksum over both. `auth_override` cannot serve because these do not replace the auth header — the
     // bearer is one of them.
@@ -349,6 +366,43 @@ pub(crate) fn url_suffix(provider: &str, model: &str, stream: bool) -> Option<&'
         // at the dispatch site instead.
         _other => None,
     }
+}
+
+/// Reorder a provider's fallback endpoints for this connection.
+///
+/// Returns `None` when the registry's own order stands, which is every provider but one. Kiro exposes three
+/// endpoints of one service that are not interchangeable: which accepts a credential depends on how that
+/// credential was obtained, and one of them rejects a valid body with a *terminal* 400 — so trying it first
+/// means the working endpoint is never reached.
+pub(crate) fn ordered_urls(
+    provider: &str,
+    credentials: &Credentials,
+    urls: &[&'static str],
+) -> Option<Vec<String>> {
+    if target_format(provider) != Format::Kiro {
+        return None;
+    }
+    let owned: Vec<String> = urls.iter().map(|url| (*url).to_owned()).collect();
+    kiro::ordered_urls(credentials, &owned)
+}
+
+/// Whether this status should advance to the next endpoint for this provider.
+///
+/// Beyond the shared 429 rule. Kiro's three endpoints are alternate auth surfaces rather than replicas, so a
+/// 401/403/404 from one means the credential belongs to another — not that the request failed.
+pub fn advances_on_status(provider: &str, status: u16) -> bool {
+    target_format(provider) == Format::Kiro && kiro::is_endpoint_fallback_status(status)
+}
+
+/// Headers that depend on which endpoint was chosen, rather than only on the credential.
+///
+/// Applied at the dispatch site because `prepare` has not picked a URL yet. Kiro is the only user: its
+/// `X-Amz-Target` names an RPC method that one of its three surfaces serves and the others do not.
+pub(crate) fn url_headers(provider: &str, url: &str) -> Vec<(String, String)> {
+    if target_format(provider) != Format::Kiro {
+        return Vec::new();
+    }
+    kiro::url_headers(url)
 }
 
 /// The RPC path a provider's request posts to, replacing the base URL's own path.

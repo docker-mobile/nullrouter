@@ -1249,6 +1249,7 @@ async fn cursor_protobuf_frames_reach_the_client_as_openai_chunks() {
     let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
     let summary = pipe_binary_stream(
         response,
+        Format::Cursor,
         Format::OpenAi,
         "claude-4.5-sonnet",
         &mut state,
@@ -1307,6 +1308,7 @@ async fn a_cursor_error_frame_before_any_content_is_reported_rather_than_swallow
     let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
     let summary = pipe_binary_stream(
         response,
+        Format::Cursor,
         Format::OpenAi,
         "claude-4.5-sonnet",
         &mut state,
@@ -1343,6 +1345,7 @@ async fn a_cursor_error_after_content_keeps_the_answer_already_streamed() {
     let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
     let summary = pipe_binary_stream(
         response,
+        Format::Cursor,
         Format::OpenAi,
         "claude-4.5-sonnet",
         &mut state,
@@ -1382,6 +1385,7 @@ async fn cursor_frames_split_across_reads_are_reassembled() {
     let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
     let summary = pipe_binary_stream(
         response,
+        Format::Cursor,
         Format::OpenAi,
         "claude-4.5-sonnet",
         &mut state,
@@ -1449,6 +1453,7 @@ async fn cursor_chunks_are_carried_on_to_a_claude_client() {
     let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
     let _summary = pipe_binary_stream(
         response,
+        Format::Cursor,
         Format::Claude,
         "claude-4.5-sonnet",
         &mut state,
@@ -1464,4 +1469,417 @@ async fn cursor_chunks_are_carried_on_to_a_claude_client() {
     assert!(sent.contains("content_block_delta"), "{sent}");
     assert!(sent.contains("hello"), "{sent}");
     assert!(!sent.contains("chat.completion.chunk"), "{sent}");
+}
+
+fn kiro_credentials(auth_method: Option<&str>) -> Credentials {
+    let mut credentials = Credentials {
+        access_token: Some("kiro-token".to_owned()),
+        connection_id: "conn_kiro".to_owned(),
+        connection_name: "kiro".to_owned(),
+        ..Credentials::default()
+    };
+    if let Some(method) = auth_method {
+        credentials
+            .provider_specific_data
+            .insert("authMethod".to_owned(), json!(method));
+    }
+    credentials
+}
+
+#[test]
+fn kiro_sends_a_conversation_state_document_rather_than_a_chat_body() {
+    // CodeWhisperer takes a `conversationState`, which shares nothing with a chat-completions body.
+    let prepared = prepare(&ExecuteRequest {
+        provider: "kiro",
+        body: &json!({
+            "model": "claude-sonnet-4",
+            "messages": [
+                { "role": "user", "content": "first" },
+                { "role": "assistant", "content": "reply" },
+                { "role": "user", "content": "second" },
+            ],
+        }),
+        stream: true,
+        credentials: &kiro_credentials(None),
+    });
+
+    assert_eq!(
+        prepared.body.pointer("/conversationState/chatTriggerType"),
+        Some(&json!("MANUAL"))
+    );
+    // The last user turn is the current message and is not repeated in the history.
+    let current = prepared
+        .body
+        .pointer("/conversationState/currentMessage/userInputMessage/content")
+        .and_then(Value::as_str)
+        .expect("a current message");
+    assert!(current.contains("second"), "{current}");
+    let history = prepared
+        .body
+        .pointer("/conversationState/history")
+        .and_then(Value::as_array)
+        .expect("a history");
+    assert_eq!(history.len(), 2, "{history:?}");
+    // The body is JSON, so no binary body is built even though the response is binary.
+    assert!(prepared.binary_body.is_none());
+    // An OAuth connection keeps the shared default profile ARN, which its token accepts.
+    assert!(prepared.body.get("profileArn").is_some());
+}
+
+#[test]
+fn kiro_asks_for_an_event_stream_and_marks_an_api_key_as_one() {
+    let plain = prepare(&ExecuteRequest {
+        provider: "kiro",
+        body: &json!({ "model": "m", "messages": [] }),
+        stream: true,
+        credentials: &kiro_credentials(None),
+    });
+    let read = |prepared: &nullrouter_execute::PreparedRequest, name: &str| {
+        prepared
+            .headers
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    // The registry's own Accept header: the response is `vnd.amazon.eventstream`, not SSE.
+    assert_eq!(read(&plain, "Accept"), "application/vnd.amazon.eventstream");
+    assert_eq!(read(&plain, "Authorization"), "Bearer kiro-token");
+    // A Kiro OIDC token carries no TokenType.
+    assert!(!plain.headers.contains_key("TokenType"));
+    assert!(
+        !read(&plain, "Amz-Sdk-Invocation-Id").is_empty(),
+        "the AWS SDK invocation id must be present"
+    );
+
+    // An API key needs the marker, or CodeWhisperer reads it as an OIDC token and refuses it.
+    let mut api_key = kiro_credentials(Some("api_key"));
+    api_key.api_key = Some("kiro-api-key".to_owned());
+    let keyed = prepare(&ExecuteRequest {
+        provider: "kiro",
+        body: &json!({ "model": "m", "messages": [] }),
+        stream: true,
+        credentials: &api_key,
+    });
+    assert_eq!(read(&keyed, "TokenType"), "API_KEY");
+    assert_eq!(read(&keyed, "Authorization"), "Bearer kiro-api-key");
+    // And an account-bound credential is never sent the shared default ARN.
+    assert!(keyed.body.get("profileArn").is_none());
+}
+
+#[test]
+fn an_api_key_connection_reaches_the_q_endpoint_first() {
+    // `codewhisperer.*` authenticates the key and then rejects the same valid body with a terminal 400, so
+    // ordering decides whether the working endpoint is ever tried.
+    let mut api_key = kiro_credentials(Some("api_key"));
+    api_key.api_key = Some("k".to_owned());
+    let first = build_url("kiro", &api_key, 0).expect("a first url");
+    assert!(first.contains("://q."), "{first}");
+
+    // A Kiro OIDC connection keeps the registry's order, whose first entry is the kiro.dev gateway.
+    let oauth = build_url("kiro", &kiro_credentials(None), 0).expect("a first url");
+    assert!(oauth.contains("kiro.dev"), "{oauth}");
+}
+
+#[test]
+fn an_aws_credential_from_another_region_is_sent_to_that_region() {
+    // An AWS token is only valid where it was minted, and the registry's URLs are hardcoded to us-east-1.
+    let mut frankfurt = kiro_credentials(Some("idc"));
+    frankfurt
+        .provider_specific_data
+        .insert("region".to_owned(), json!("eu-central-1"));
+    let url = build_url("kiro", &frankfurt, 0).expect("a url");
+    assert!(url.contains("eu-central-1"), "{url}");
+    assert!(url.ends_with("/generateAssistantResponse"), "{url}");
+}
+
+/// An AWS event-stream frame, built by hand so the fixture is independent of the parser.
+fn kiro_frame(event: &str, payload: Option<&str>) -> Vec<u8> {
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFF_u32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _bit in 0..8 {
+                crc = (crc >> 1) ^ if crc & 1 == 1 { 0xEDB8_8320 } else { 0 };
+            }
+        }
+        crc ^ 0xFFFF_FFFF
+    }
+    fn text_header(block: &mut Vec<u8>, name: &str, value: &str) {
+        block.push(u8::try_from(name.len()).unwrap_or(0));
+        block.extend_from_slice(name.as_bytes());
+        block.push(7);
+        block.extend_from_slice(&u16::try_from(value.len()).unwrap_or(0).to_be_bytes());
+        block.extend_from_slice(value.as_bytes());
+    }
+
+    let mut headers = Vec::new();
+    text_header(&mut headers, ":event-type", event);
+    text_header(&mut headers, ":message-type", "event");
+    let body = payload.unwrap_or("");
+    let total = 16 + headers.len() + body.len();
+
+    let mut frame = Vec::with_capacity(total);
+    frame.extend_from_slice(&u32::try_from(total).unwrap_or(0).to_be_bytes());
+    frame.extend_from_slice(&u32::try_from(headers.len()).unwrap_or(0).to_be_bytes());
+    let prelude = crc32(frame.get(..8).unwrap_or_default());
+    frame.extend_from_slice(&prelude.to_be_bytes());
+    frame.extend_from_slice(&headers);
+    frame.extend_from_slice(body.as_bytes());
+    let message = crc32(&frame);
+    frame.extend_from_slice(&message.to_be_bytes());
+    frame
+}
+
+#[tokio::test]
+async fn kiro_event_stream_frames_reach_the_client_as_openai_chunks() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    let mut body = kiro_frame("assistantResponseEvent", Some(r#"{"content":"Rust 1.0 "}"#));
+    body.extend_from_slice(&kiro_frame(
+        "assistantResponseEvent",
+        Some(r#"{"content":"shipped in May 2015."}"#),
+    ));
+    // An accounting event, which must contribute nothing.
+    body.extend_from_slice(&kiro_frame("meteringEvent", Some(r#"{"credits":1}"#)));
+    body.extend_from_slice(&kiro_frame("messageStopEvent", None));
+
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/vnd.amazon.eventstream",
+        body,
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let frames = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let collected = std::sync::Arc::clone(&frames);
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::Kiro,
+        Format::OpenAi,
+        "claude-sonnet-4",
+        &mut state,
+        move |frame: String| {
+            collected.lock().expect("the lock").push(frame);
+            Ok(())
+        },
+    )
+    .await;
+
+    assert_eq!(summary.text, "Rust 1.0 shipped in May 2015.");
+    assert!(summary.error.is_none());
+
+    let sent = frames.lock().expect("the lock").clone();
+    // Two content frames, a terminal chunk, and `[DONE]`. The metering event added nothing.
+    assert_eq!(sent.len(), 4, "{sent:?}");
+    assert!(
+        sent.first()
+            .is_some_and(|frame| frame.contains("\"role\":\"assistant\"")),
+        "{sent:?}"
+    );
+    // Kiro sends no finish reason of its own, so it is derived — `stop`, with no tool used.
+    assert!(
+        sent.get(2)
+            .is_some_and(|frame| frame.contains("\"finish_reason\":\"stop\"")),
+        "{sent:?}"
+    );
+    assert_eq!(sent.last().map(String::as_str), Some("data: [DONE]\n\n"));
+}
+
+#[tokio::test]
+async fn kiro_tool_fragments_are_relayed_for_the_client_to_reassemble() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // The tool input is one JSON document split across events. A fragment cannot be parsed alone.
+    let mut body = kiro_frame(
+        "toolUseEvent",
+        Some(r#"{"toolUseId":"t1","name":"read_file","input":"{\"path\":","stop":false}"#),
+    );
+    body.extend_from_slice(&kiro_frame(
+        "toolUseEvent",
+        Some(r#"{"toolUseId":"t1","name":"read_file","input":"\"a.txt\"}","stop":true}"#),
+    ));
+    body.extend_from_slice(&kiro_frame("messageStopEvent", None));
+
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/vnd.amazon.eventstream",
+        body,
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let frames = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let collected = std::sync::Arc::clone(&frames);
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let _summary = pipe_binary_stream(
+        response,
+        Format::Kiro,
+        Format::OpenAi,
+        "claude-sonnet-4",
+        &mut state,
+        move |frame: String| {
+            collected.lock().expect("the lock").push(frame);
+            Ok(())
+        },
+    )
+    .await;
+
+    let sent = frames.lock().expect("the lock").join("");
+    // Both fragments are relayed against index 0, so a client can concatenate them into one document.
+    assert!(sent.contains(r#"\"path\":"#), "{sent}");
+    assert!(sent.contains(r#"\"a.txt\"}"#), "{sent}");
+    // A tool was used, so the derived finish reason says so.
+    assert!(sent.contains("\"finish_reason\":\"tool_calls\""), "{sent}");
+}
+
+#[tokio::test]
+async fn a_kiro_exception_frame_is_reported_rather_than_ending_in_silence() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // Kiro reports a throttle in-band, after the headers already said 200 — the one failure that cannot
+    // become a status code.
+    fn exception_frame() -> Vec<u8> {
+        fn crc32(bytes: &[u8]) -> u32 {
+            let mut crc = 0xFFFF_FFFF_u32;
+            for byte in bytes {
+                crc ^= u32::from(*byte);
+                for _bit in 0..8 {
+                    crc = (crc >> 1) ^ if crc & 1 == 1 { 0xEDB8_8320 } else { 0 };
+                }
+            }
+            crc ^ 0xFFFF_FFFF
+        }
+        let mut headers = Vec::new();
+        for (name, value) in [
+            (":message-type", "exception"),
+            (":exception-type", "ThrottlingException"),
+        ] {
+            headers.push(u8::try_from(name.len()).unwrap_or(0));
+            headers.extend_from_slice(name.as_bytes());
+            headers.push(7);
+            headers.extend_from_slice(&u16::try_from(value.len()).unwrap_or(0).to_be_bytes());
+            headers.extend_from_slice(value.as_bytes());
+        }
+        let body = r#"{"message":"Too many requests"}"#;
+        let total = 16 + headers.len() + body.len();
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&u32::try_from(total).unwrap_or(0).to_be_bytes());
+        frame.extend_from_slice(&u32::try_from(headers.len()).unwrap_or(0).to_be_bytes());
+        frame.extend_from_slice(&crc32(frame.get(..8).unwrap_or_default()).to_be_bytes());
+        frame.extend_from_slice(&headers);
+        frame.extend_from_slice(body.as_bytes());
+        let message = crc32(&frame);
+        frame.extend_from_slice(&message.to_be_bytes());
+        frame
+    }
+
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/vnd.amazon.eventstream",
+        exception_frame(),
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::Kiro,
+        Format::OpenAi,
+        "claude-sonnet-4",
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+
+    assert_eq!(
+        summary.error.as_deref(),
+        Some("ThrottlingException: Too many requests")
+    );
+    assert!(summary.text.is_empty());
+}
+
+#[tokio::test]
+async fn a_corrupt_kiro_frame_stops_the_stream_rather_than_resuming_at_a_guess() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // A CRC failure means the length fields cannot be trusted, so there is no safe offset to resume from.
+    // The text already delivered is kept; the stream ends there.
+    let mut body = kiro_frame("assistantResponseEvent", Some(r#"{"content":"partial"}"#));
+    let mut corrupt = kiro_frame("assistantResponseEvent", Some(r#"{"content":"lost"}"#));
+    let last = corrupt.len().saturating_sub(6);
+    if let Some(byte) = corrupt.get_mut(last) {
+        *byte ^= 0xFF;
+    }
+    body.extend_from_slice(&corrupt);
+
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/vnd.amazon.eventstream",
+        body,
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::Kiro,
+        Format::OpenAi,
+        "claude-sonnet-4",
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+
+    assert_eq!(summary.text, "partial", "the delivered text must survive");
+    // Content had already been produced, so the corruption truncates rather than replaces the answer.
+    assert!(summary.error.is_none());
+}
+
+#[test]
+fn kiro_advances_endpoints_on_an_auth_failure_but_not_on_a_bad_body() {
+    use nullrouter_execute::bespoke::advances_on_status;
+
+    // Kiro's three endpoints are alternate auth surfaces, not replicas: a 401/403/404 from one says the
+    // credential belongs to another, which the next may accept.
+    for status in [401_u16, 403, 404] {
+        assert!(
+            advances_on_status("kiro", status),
+            "{status} should advance to the next kiro endpoint"
+        );
+    }
+    // A 400 is about the body. Advancing on it would send the same rejected body to every surface and burn
+    // the one that might have worked — which is exactly the api-key trap that made endpoint order matter.
+    assert!(!advances_on_status("kiro", 400));
+    // And no other provider advances on these: its endpoints are replicas, so a 403 is a real failure.
+    for status in [401_u16, 403, 404, 400] {
+        assert!(
+            !advances_on_status("openai", status),
+            "openai must not advance on {status}"
+        );
+    }
 }

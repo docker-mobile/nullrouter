@@ -535,17 +535,52 @@ is HTTP/2 duplex: the server asks for IDE file context mid-stream and the client
 open stream before the response continues. This executor's request/response shape has no room for that,
 so a plain-text turn is logged as belonging to the unported endpoint rather than failing obscurely.
 
-One protocol is left. `kiro` signs its requests against AWS and speaks an event-stream protocol, and it
-still returns an explicit **501 naming the provider and its protocol** rather than a plausible wrong
-answer:
+`kiro` is the sixth and last. It is Amazon CodeWhisperer reached as the Kiro IDE reaches it: a
+`conversationState` request and a response in `vnd.amazon.eventstream` — CRC-framed binary carrying JSON
+payloads. Both CRCs are checked, and a frame that fails either stops the stream rather than being read
+past: the length fields come from the wire, and trusting a corrupt one means slicing at an arbitrary offset
+and parsing whatever lands there. Text already delivered survives that; the stream simply ends.
 
-`kiro`
+Three request rules exist because CodeWhisperer answers `400 REQUEST_BODY_INVALID` rather than degrading:
+turns must alternate, so consecutive user turns are merged — **with their contexts**, or a tool result that
+arrived on the second one is silently dropped; the current message is the last *user* turn, lifted out of
+the history rather than repeated in it; and a tool result belongs to a user turn, since OpenAI's `tool`
+role has no equivalent here. An empty turn is rejected too, so an empty user turn carries `continue` and an
+empty assistant turn `...`.
 
-A test asserts that more than 75% of registry entries with a transport remain executable.
+Its real complication is not the wire format but the **auth surface**: one provider has three endpoints
+that are not interchangeable, and which one works depends on how the credential was obtained. A Kiro OIDC
+or social token is what `runtime.*.kiro.dev` accepts. An IAM Identity Center, enterprise, or API-key
+credential is an AWS token, which that gateway refuses with `403 bearer token invalid`, so those use the
+`*.amazonaws.com` surface — in the region the token was minted in, since the registry's URLs are hardcoded
+to `us-east-1`. And an API key must reach `q.*` **first**: the older `codewhisperer.*` endpoint
+authenticates the key and then rejects the same valid body with a *terminal* 400, so trying it first means
+the working endpoint is never reached. That is why a 401/403/404 advances to the next endpoint here and a
+400 does not. Two more consequences: `X-Amz-Target` names an RPC method the CodeWhisperer surface serves
+and the kiro.dev gateway does not, so it is added per-endpoint rather than per-request; and an
+account-bound credential is never sent the shared default profile ARN, which belongs to a different
+account.
 
-None of this has been verified against a live provider account. The request shapes match the reference
-and are asserted against loopback fixtures; whether grok.com accepts them is not something a stub can
-establish.
+**Not ported: Kiro's integrity gate.** Upstream inspects the finished answer and silently re-prompts when
+it looks truncated — an ellipsis-only reply, a malformed tool wrapper, or a final that only announces a
+future action. That last check is a page of language-specific regular expressions, including one tied to a
+single observed Chinese sentence. It re-runs the user's request against their quota on a heuristic
+judgment about prose, and a false positive spends a call to replace an answer that was fine. Left out
+deliberately rather than overlooked; the answer Kiro returns is the answer relayed.
+
+Every protocol in the registry now has an executor, so no provider answers 501 for want of one. The
+refusal path is kept and tested against `Format::Codex` — the one format variant nothing resolves to — so
+a future registry entry declaring an unported format still gets an explicit **501 naming the provider and
+its protocol** rather than a plausible wrong answer.
+
+A test asserts that **every** registry entry with a transport is executable — it used to assert 75%, which
+was the right bar while protocols were still being ported and is now weaker than the truth.
+
+None of this has been verified against a live provider account. The request shapes match the reference and
+are asserted against loopback fixtures; whether grok.com, Cursor, or CodeWhisperer accepts them is not
+something a stub can establish. That is the honest limit of what is claimed here: six protocols were read
+from the reference and reproduced, with the deliberate narrowings named above — not six integrations that
+have been seen to work.
 
 ## Security model
 
@@ -792,12 +827,13 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **One of the six bespoke provider executors, plus one endpoint of another** — Listed
-  [above](#what-executes-and-what-refuses). `grok-web`, `perplexity-web`, `codex`, `antigravity` and
-  `cursor` are now ported from the reference; `kiro` is not, and Cursor's `AgentService` endpoint needs
-  HTTP/2 duplex that this executor cannot express. Their protocols are undocumented, so what a loopback
-  test can establish is that the request matches the reference — not that the provider accepts it. That
-  distinction is stated rather than papered over: verifying acceptance needs a real account per provider.
+- **Two pieces of the bespoke provider executors** — Listed
+  [above](#what-executes-and-what-refuses). All six protocols are ported; what is not is Cursor's
+  `AgentService` endpoint, which needs HTTP/2 duplex this executor cannot express, and Kiro's integrity
+  gate, which re-prompts on a heuristic reading of the answer's prose and is left out deliberately. Their
+  protocols are undocumented, so what a loopback test can establish is that the request matches the
+  reference — not that the provider accepts it. That distinction is stated rather than papered over:
+  verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP
   bridge that starts it is implemented and tested (see below), and it will spawn the server on
   request. What this port cannot supply is the browser it drives: without Chrome and the Browser MCP

@@ -477,7 +477,7 @@ async fn upstream_failure_falls_back_to_the_next_account() -> TestResult {
 async fn unsupported_provider_protocol_is_refused_explicitly() -> TestResult {
     let state = fake_state("http://127.0.0.1:1").await;
 
-    // When: a request targets a provider whose protocol needs a bespoke executor.
+    // When: a request targets `kiro`, which was the last provider without a ported executor.
     let response = post(
         &state.addr_string(),
         "/v1/chat/completions",
@@ -485,11 +485,13 @@ async fn unsupported_provider_protocol_is_refused_explicitly() -> TestResult {
     )
     .await?;
 
-    // Then: it is refused with a clear reason rather than a wrong answer.
-    assert_eq!(
+    // Then: it is *not* refused as unported. Its event-stream protocol is implemented, so the request
+    // reaches the executor and fails on the unreachable endpoint instead — which is what distinguishes a
+    // missing feature from a failed call. A 501 here would mean the format gate had been reverted.
+    assert_ne!(
         response.status,
         StatusCode::NOT_IMPLEMENTED,
-        "{}",
+        "kiro executes now; a 501 means the format gate regressed: {}",
         response.body
     );
     let json: Value = serde_json::from_str(&response.body)?;
@@ -497,8 +499,10 @@ async fn unsupported_provider_protocol_is_refused_explicitly() -> TestResult {
         .pointer("/error/message")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    assert!(message.contains("kiro"), "{message}");
-    assert!(message.contains("not implemented"), "{message}");
+    assert!(
+        !message.contains("not implemented"),
+        "the refusal message must no longer apply to kiro: {message}"
+    );
     Ok(())
 }
 
@@ -763,13 +767,14 @@ async fn a_combo_falls_through_to_its_next_model_when_the_first_fails() -> TestR
 
 #[actix_rt::test]
 async fn a_single_model_request_keeps_its_own_error() -> TestResult {
-    // Given: a request for one unexecutable provider, not a combo. The combo
-    // fallback path must not replace a real 501 with a generic "all models
-    // unavailable" — the caller needs to know *which* protocol is unported.
+    // Given: a request for one failing provider, not a combo. The combo fallback path must not replace a
+    // real, specific error with a generic "all models unavailable" — the caller needs to know what actually
+    // went wrong with the model they named.
     //
-    // `kiro` stands in for that class: it needs AWS-style request signing. This
-    // test used to name `ollama`, which is now executable, so it would have made a
-    // real call instead of exercising the refusal.
+    // The provider named here has drifted twice as the port progressed: first `ollama`, then `kiro`, both
+    // of which became executable. What the test protects is the error-propagation rule, not any one
+    // provider's status, so it now names a provider that fails for a reason no port can remove: a model id
+    // the registry does not know.
     let provider = FakeServer::start(vec![("/chat/completions", Reply::json("{}"))]).await;
     let state = fake_state(&provider.base_url()).await;
 
@@ -777,20 +782,25 @@ async fn a_single_model_request_keeps_its_own_error() -> TestResult {
     let response = post(
         &state.addr_string(),
         "/v1/chat/completions",
-        r#"{"model":"kiro/claude-sonnet-4-5","messages":[{"role":"user","content":"ping"}]}"#,
+        r#"{"model":"kiro/not-a-real-kiro-model","messages":[{"role":"user","content":"ping"}]}"#,
     )
     .await?;
 
-    // Then: the explicit 501 naming the provider survives.
-    assert_eq!(
-        response.status,
-        StatusCode::NOT_IMPLEMENTED,
-        "body: {}",
+    // Then: the specific error survives rather than becoming a generic combo failure.
+    assert_ne!(response.status, StatusCode::OK, "body: {}", response.body);
+    assert!(
+        !response.body.contains("All models"),
+        "a single-model request must keep its own error: {}",
         response.body
     );
+    let json: Value = serde_json::from_str(&response.body)?;
+    let message = json
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     assert!(
-        response.body.contains("kiro"),
-        "the refusal must name the provider: {}",
+        !message.is_empty(),
+        "the error must say something: {}",
         response.body
     );
     Ok(())
@@ -798,14 +808,16 @@ async fn a_single_model_request_keeps_its_own_error() -> TestResult {
 
 #[actix_rt::test]
 async fn a_combo_whose_every_model_is_unexecutable_reports_the_last_real_error() -> TestResult {
-    // Given: a combo where no model can be executed. The client should still get
-    // a real refusal naming a provider, not a synthesised placeholder.
+    // Given: a combo where no model can answer. The client should get the last model's real error, not a
+    // synthesised placeholder that hides which one failed and why.
+    //
+    // Both entries used to be providers with no ported executor, which produced a clean 501. Every format
+    // is ported now, so the combo is built from model ids the registry does not know — a failure whose
+    // cause no further porting removes.
     let provider = FakeServer::start(vec![("/chat/completions", Reply::json("{}"))]).await;
-    // `kiro` is the last format without a ported executor, so it is the one that still refuses. `cursor`
-    // used to stand here and now dispatches on its own protobuf protocol.
     let state = fake_state_with_combo(
         &provider.base_url(),
-        &["ollama/llama3", "kiro/claude-sonnet-4"],
+        &["ollama/no-such-ollama-model", "kiro/no-such-kiro-model"],
         "fallback",
     )
     .await;
@@ -818,11 +830,16 @@ async fn a_combo_whose_every_model_is_unexecutable_reports_the_last_real_error()
     )
     .await?;
 
-    // Then: the last model's own 501 is reported.
-    assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED);
+    // Then: a real error is reported rather than a generic placeholder.
+    assert_ne!(response.status, StatusCode::OK, "{}", response.body);
+    let json: Value = serde_json::from_str(&response.body)?;
+    let message = json
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     assert!(
-        response.body.contains("kiro"),
-        "the last model's refusal should be the reported one: {}",
+        !message.is_empty() && !message.contains("All models"),
+        "the last model's own error should be the reported one: {}",
         response.body
     );
     Ok(())

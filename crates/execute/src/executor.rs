@@ -530,6 +530,13 @@ impl Executor {
             for (key, value) in headers {
                 builder = builder.header(key, value);
             }
+            // A few headers name the endpoint rather than the credential, so they can only be added once a
+            // URL has been chosen from the fallback list.
+            let mut per_url = headers.clone();
+            for (key, value) in bespoke::url_headers(provider, &url) {
+                builder = builder.header(&key, &value);
+                per_url.insert(key, value);
+            }
 
             match builder.body(payload.clone()).send().await {
                 Ok(response) => {
@@ -544,7 +551,13 @@ impl Executor {
                     }
 
                     // 429 with another URL available: try the next endpoint.
-                    if status == 429 && url_index + 1 < total_urls {
+                    //
+                    // A provider whose endpoints are alternate auth surfaces advances on more than that: a
+                    // 401/403/404 there says the credential does not belong to *that* surface, which the
+                    // next one may accept. A 400 is deliberately excluded — it is about the body, and
+                    // sending the same body elsewhere cannot repair it.
+                    let advances = status == 429 || bespoke::advances_on_status(provider, status);
+                    if advances && url_index + 1 < total_urls {
                         url_index += 1;
                         continue;
                     }
@@ -552,7 +565,8 @@ impl Executor {
                     return Ok(ExecuteOutcome {
                         response,
                         url,
-                        headers: headers.clone(),
+                        // The set that actually went out, endpoint-specific headers included.
+                        headers: per_url,
                         // What actually went out, envelope included, so request
                         // logging shows the body the provider received.
                         sent_body: outgoing.clone(),

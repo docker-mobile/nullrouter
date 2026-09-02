@@ -137,7 +137,7 @@ impl request::Ids {
 ///
 /// Written out rather than pulling in a date crate for one field: Cursor reads it as an opaque string, and
 /// the conversion from a Unix millisecond count is a fixed calculation.
-fn iso8601(millis: u128) -> String {
+pub(crate) fn iso8601(millis: u128) -> String {
     let total_seconds = millis / 1000;
     let sub_milli = millis % 1000;
     let days = total_seconds / 86_400;
