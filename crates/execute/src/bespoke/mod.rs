@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use crate::credentials::Credentials;
 
+pub(crate) mod antigravity;
 pub(crate) mod codex;
 pub(crate) mod grok_web;
 pub(crate) mod perplexity_web;
@@ -81,6 +82,30 @@ pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) 
             &credentials.connection_id,
         );
         return Some(codex::shape_body(body, &session));
+    }
+    // Antigravity is Cloud Code Assist reached as the Antigravity IDE reaches it: the same wrap plus an
+    // IDE-shaped request id, per-turn content fixes, and a strict field blacklist. Its envelope is
+    // rebuilt on every call rather than skipped when one is already present, because the fixes are
+    // idempotent and a retry must not send a body the first attempt already had rejected.
+    if target_format(provider) == Format::Antigravity {
+        let session = session::resolve(
+            "antigravity",
+            body,
+            credentials.setting("workspaceId"),
+            &credentials.connection_id,
+        );
+        // The project id is per-connection: it appears in Google's own logs against this account, so a
+        // fresh one per request would scatter one user's traffic across many project names.
+        let project = credentials
+            .setting("projectId")
+            .map(str::to_owned)
+            .or_else(|| {
+                body.get("project")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| antigravity::project_id(&credentials.connection_id));
+        return Some(antigravity::envelope(body, &session, &project));
     }
     if target_format(provider) != Format::GeminiCli {
         return None;
@@ -237,6 +262,27 @@ pub(crate) fn extra_headers(provider: &str, model: &str, stream: bool) -> Vec<(S
         // Perplexity's front-end headers. Its credential is applied by `auth_override`, which can be
         // either a bearer token or a session cookie.
         Format::PerplexityWeb => perplexity_web::headers(),
+        // The IDE's own user agent. Unlike gemini-cli's, the model does not appear in it — Antigravity
+        // sends a fixed IDE build string, and the registry supplies the version.
+        Format::Antigravity => {
+            let version = registry::transport(provider)
+                .and_then(|transport| transport.cli_version.clone())
+                .unwrap_or_else(|| "2.1.1".to_owned());
+            vec![
+                (
+                    "User-Agent".to_owned(),
+                    format!("antigravity/ide/{version} darwin/arm64"),
+                ),
+                (
+                    "Accept".to_owned(),
+                    if stream && !antigravity::is_image_model(model) {
+                        "text/event-stream".to_owned()
+                    } else {
+                        "application/json".to_owned()
+                    },
+                ),
+            ]
+        }
         _ => Vec::new(),
     }
 }
@@ -245,15 +291,21 @@ pub(crate) fn extra_headers(provider: &str, model: &str, stream: bool) -> Vec<(S
 ///
 /// Cloud Code Assist selects the method in the URL, and the streaming method needs
 /// `alt=sse` or it answers with a single JSON blob.
-pub(crate) fn url_suffix(provider: &str, stream: bool) -> Option<&'static str> {
-    if target_format(provider) != Format::GeminiCli {
-        return None;
+///
+/// The model is needed because Antigravity's image models cannot stream, so the method depends on it
+/// rather than on the request's own `stream` flag alone.
+pub(crate) fn url_suffix(provider: &str, model: &str, stream: bool) -> Option<&'static str> {
+    match target_format(provider) {
+        Format::GeminiCli => Some(if stream {
+            ":streamGenerateContent?alt=sse"
+        } else {
+            ":generateContent"
+        }),
+        // Antigravity's method lives under `/v1internal`, so it carries its own leading path rather
+        // than appending to a version the registry already declared.
+        Format::Antigravity => Some(antigravity::url_suffix(model, stream)),
+        _other => None,
     }
-    Some(if stream {
-        ":streamGenerateContent?alt=sse"
-    } else {
-        ":generateContent"
-    })
 }
 
 /// A random v4 UUID.
@@ -401,11 +453,14 @@ mod tests {
     fn gemini_cli_selects_its_method_in_the_url() {
         // Without `alt=sse` the streaming method answers with one JSON blob.
         assert_eq!(
-            url_suffix("gemini-cli", true),
+            url_suffix("gemini-cli", "gemini-2.5-pro", true),
             Some(":streamGenerateContent?alt=sse")
         );
-        assert_eq!(url_suffix("gemini-cli", false), Some(":generateContent"));
-        assert_eq!(url_suffix("openai", true), None);
+        assert_eq!(
+            url_suffix("gemini-cli", "gemini-2.5-pro", false),
+            Some(":generateContent")
+        );
+        assert_eq!(url_suffix("openai", "gpt-5", true), None);
     }
 
     #[test]

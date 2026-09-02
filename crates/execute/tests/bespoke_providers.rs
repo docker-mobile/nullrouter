@@ -632,7 +632,7 @@ async fn a_perplexity_thread_is_remembered_and_continued_on_the_next_request() {
     //
     // Without it every turn re-sends the whole conversation as a fresh query document, so perplexity
     // re-reads context it was already holding and the thread it kept is abandoned.
-    use nullrouter_execute::{ClientFraming, StreamSummary, pipe_stream};
+    use nullrouter_execute::{StreamSummary, pipe_stream};
     use nullrouter_providers::Format;
     use nullrouter_translate::state::{Clock, StreamState};
 
@@ -889,4 +889,164 @@ fn another_responses_provider_is_left_unshaped() {
         prepared.body, body,
         "a non-codex provider must not be reshaped"
     );
+}
+
+fn antigravity_credentials() -> Credentials {
+    Credentials {
+        access_token: Some("ya29.ag-token".to_owned()),
+        connection_id: "conn_ag".to_owned(),
+        connection_name: "antigravity".to_owned(),
+        ..Credentials::default()
+    }
+}
+
+#[test]
+fn antigravity_wraps_its_body_in_the_ide_envelope_and_names_its_internal_method() {
+    let credentials = antigravity_credentials();
+    let body = json!({
+        "model": "gemini-3-pro",
+        "request": { "contents": [{ "role": "user", "parts": [{ "text": "hi" }] }] },
+    });
+    let prepared = prepare(&ExecuteRequest {
+        provider: "antigravity",
+        body: &body,
+        stream: true,
+        credentials: &credentials,
+    });
+
+    assert_eq!(prepared.body.get("userAgent"), Some(&json!("antigravity")));
+    assert_eq!(prepared.body.get("requestType"), Some(&json!("agent")));
+    // No project on the connection, so one is derived from it rather than left null — Google rejects a
+    // request with no project.
+    let project = prepared
+        .body
+        .get("project")
+        .and_then(Value::as_str)
+        .expect("a project id");
+    assert!(!project.is_empty(), "got {project:?}");
+
+    // The request id has the IDE's five-field shape. Antigravity reads it as a conversation identity.
+    let request_id = prepared
+        .body
+        .get("requestId")
+        .and_then(Value::as_str)
+        .expect("a request id");
+    let fields: Vec<&str> = request_id.split('/').collect();
+    assert_eq!(fields.len(), 5, "got {request_id}");
+    assert_eq!(fields.first(), Some(&"agent"));
+
+    // The method lives under `/v1internal`, which the registry's base URL does not already include.
+    let base = build_url("antigravity", &credentials, 0).expect("a base url");
+    assert_eq!(base, "https://daily-cloudcode-pa.googleapis.com");
+    assert_eq!(
+        format!("{base}{}", prepared.url_suffix),
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+    );
+}
+
+#[test]
+fn antigravity_sends_the_ide_user_agent_and_its_oauth_token() {
+    let prepared = prepare(&ExecuteRequest {
+        provider: "antigravity",
+        body: &json!({ "model": "gemini-3-pro", "request": { "contents": [] } }),
+        stream: true,
+        credentials: &antigravity_credentials(),
+    });
+
+    let agent = prepared
+        .headers
+        .get("User-Agent")
+        .map(String::as_str)
+        .expect("a user agent");
+    // The IDE build string, not the generic reqwest one. Unlike gemini-cli's, no model appears in it.
+    assert!(agent.starts_with("antigravity/ide/"), "got {agent}");
+    assert!(!agent.contains("gemini-3-pro"), "got {agent}");
+    assert_eq!(
+        prepared.headers.get("Authorization").map(String::as_str),
+        Some("Bearer ya29.ag-token")
+    );
+    assert_eq!(
+        prepared.headers.get("Accept").map(String::as_str),
+        Some("text/event-stream")
+    );
+}
+
+#[test]
+fn an_antigravity_image_request_cannot_stream_even_when_asked_to() {
+    // The streaming method refuses an image request outright, so the flag is overridden by the model.
+    let prepared = prepare(&ExecuteRequest {
+        provider: "antigravity",
+        body: &json!({
+            "model": "gemini-3-pro-image-16x9",
+            "request": { "contents": [{ "role": "user", "parts": [{ "text": "a cat" }] }] },
+        }),
+        stream: true,
+        credentials: &antigravity_credentials(),
+    });
+
+    assert_eq!(prepared.url_suffix, "/v1internal:generateContent");
+    assert_eq!(
+        prepared.headers.get("Accept").map(String::as_str),
+        Some("application/json")
+    );
+    assert_eq!(prepared.body.get("requestType"), Some(&json!("image_gen")));
+    // The dimension suffix is this router's own convention and is not a model Antigravity knows.
+    assert_eq!(
+        prepared.body.get("model"),
+        Some(&json!("gemini-3-pro-image"))
+    );
+    assert_eq!(
+        prepared
+            .body
+            .pointer("/request/generationConfig/imageConfig/aspectRatio"),
+        Some(&json!("16:9"))
+    );
+}
+
+#[test]
+fn one_antigravity_connection_keeps_one_conversation_identity() {
+    // Both uuids in the request id derive from the session, and the session derives from the connection.
+    // A fresh identity per request would make Antigravity see each turn as a new agent run.
+    let credentials = antigravity_credentials();
+    let request = || {
+        prepare(&ExecuteRequest {
+            provider: "antigravity",
+            body: &json!({ "model": "gemini-3-pro", "request": { "contents": [] } }),
+            stream: true,
+            credentials: &credentials,
+        })
+    };
+    let ids = |prepared: &nullrouter_execute::PreparedRequest| {
+        prepared
+            .body
+            .get("requestId")
+            .and_then(Value::as_str)
+            .map(|id| id.split('/').map(str::to_owned).collect::<Vec<_>>())
+            .expect("a request id")
+    };
+    let (first, second) = (request(), request());
+    let (a, b) = (ids(&first), ids(&second));
+    assert_eq!(
+        a.get(1),
+        b.get(1),
+        "the conversation id must survive a turn"
+    );
+    assert_eq!(a.get(3), b.get(3), "the trajectory id must survive a turn");
+    // And the project is stable for the same reason: it appears in Google's logs against this account.
+    assert_eq!(first.body.get("project"), second.body.get("project"));
+}
+
+#[test]
+fn a_gemini_cli_request_is_not_given_the_antigravity_envelope() {
+    // Both formats wrap a Gemini payload, and both reach a `cloudcode-pa` host. Only Antigravity adds
+    // the IDE fields, and sending them to plain Cloud Code Assist is a rejection.
+    let prepared = prepare(&ExecuteRequest {
+        provider: "gemini-cli",
+        body: &gemini_body(),
+        stream: true,
+        credentials: &gemini_cli_credentials("proj-1"),
+    });
+    assert!(prepared.body.get("requestId").is_none());
+    assert!(prepared.body.get("userAgent").is_none());
+    assert!(prepared.body.get("requestType").is_none());
 }

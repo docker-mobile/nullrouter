@@ -491,10 +491,27 @@ name — where the suffix must be stripped before the model is sent.
 Codex also caches prompts against a session id, so this port keeps a bounded per-connection session
 store. An id that changed per request would still succeed; it would just discard the cache on every turn.
 
+`antigravity` is the fourth. It is Cloud Code Assist again, but reached the way the Antigravity IDE
+reaches it, so the Gemini payload takes a second envelope carrying a project, an IDE user agent, and a
+request id shaped `agent/<conversation>/<millis>/<trajectory>/<step>`. Both uuids in that id are derived
+from the connection rather than random, because Antigravity reads them as a conversation identity — a
+fresh pair per request makes every turn look like a new agent run. Four of its rules exist because the
+backend *refuses* rather than degrades: Gemini 3+ rejects a `functionCall` part with no
+`thoughtSignature`, and no client persists one in its history, so the IDE's own default signature is
+backfilled or every second turn of a tool conversation fails; tool groups must be flattened into a
+single `functionDeclarations` list; a function with no schema needs a placeholder one; and thinking
+fields are stripped from *both* the envelope and the inner request, because this router's own thinking
+translation writes them at the body root and Google rejects the field wherever it appears. Image models
+take a different envelope entirely and cannot stream, so the method in the URL is chosen by the model
+rather than by the request's `stream` flag. One further rule is worth naming plainly: upstream found
+that Zed's Claude system prompt draws an immediate 429, so that one sentence is removed from the system
+instruction. That is avoiding a block triggered by naming another vendor's agent, not evading a rate
+limit.
+
 The remaining protocols need genuine request signing or a binary protocol and still return an explicit
 **501 naming the provider and its protocol**, rather than a plausible wrong answer:
 
-`kiro` · `cursor` · `antigravity`
+`kiro` · `cursor`
 
 A test asserts that more than 75% of registry entries with a transport remain executable.
 
@@ -747,11 +764,11 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **Three of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
-  `grok-web`, `perplexity-web` and `codex` are now ported from the reference; the other three are being
-  ported the same way. Their protocols are undocumented, so what a loopback test can establish is that the request
-  matches the reference — not that the provider accepts it. That distinction is stated rather than
-  papered over: verifying acceptance needs a real account per provider.
+- **Two of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
+  `grok-web`, `perplexity-web`, `codex` and `antigravity` are now ported from the reference; `kiro` and
+  `cursor` are being ported the same way. Their protocols are undocumented, so what a loopback test can
+  establish is that the request matches the reference — not that the provider accepts it. That
+  distinction is stated rather than papered over: verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP
   bridge that starts it is implemented and tested (see below), and it will spawn the server on
   request. What this port cannot supply is the browser it drives: without Chrome and the Browser MCP

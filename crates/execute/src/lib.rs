@@ -37,7 +37,7 @@ pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_str
 /// Provider formats this port can actually execute.
 ///
 /// The excluded formats need provider-specific request signing or binary protocols
-/// (`kiro`, `cursor`, `grok-web`, `perplexity-web`, `codex`, `antigravity`).
+/// (`kiro`, `cursor`).
 ///
 /// `ollama`, `gemini-cli`, and `commandcode` are included. None of them needs a
 /// distinct executor: what they need is an envelope, a per-request header, or a URL
@@ -55,6 +55,7 @@ pub const fn is_format_supported(format: Format) -> bool {
             | Format::CommandCode
             | Format::GrokWeb
             | Format::PerplexityWeb
+            | Format::Antigravity
     )
 }
 
@@ -101,12 +102,7 @@ mod tests {
     fn bespoke_formats_are_refused() {
         // Each of these needs provider-specific request signing or a binary
         // protocol, which no hook on the shared path can supply.
-        for format in [
-            Format::Kiro,
-            Format::Cursor,
-            Format::Codex,
-            Format::Antigravity,
-        ] {
+        for format in [Format::Kiro, Format::Cursor] {
             assert!(!is_format_supported(format), "{format:?} must be refused");
         }
     }
@@ -127,6 +123,15 @@ mod tests {
         // whole-answer SSE blocks rather than deltas.
         assert!(is_format_supported(Format::PerplexityWeb));
         assert!(is_executor_supported("perplexity-web"));
+    }
+
+    #[test]
+    fn antigravity_dispatches_on_its_own_protocol() {
+        // Ported from `open-sse/executors/antigravity.js`: Cloud Code Assist reached as the Antigravity
+        // IDE reaches it, so the Gemini payload takes an envelope with an IDE-shaped request id, tool
+        // groups are merged into one, and thinking fields are stripped at both levels.
+        assert!(is_format_supported(Format::Antigravity));
+        assert!(is_executor_supported("antigravity"));
     }
 
     #[test]

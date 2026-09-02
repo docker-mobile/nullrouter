@@ -148,7 +148,7 @@ pub fn prepare(request: &ExecuteRequest<'_>) -> PreparedRequest {
         body: bespoke::envelope(provider, request.body, request.credentials)
             .unwrap_or_else(|| request.body.clone()),
         // Some providers select the method in the URL rather than the body.
-        url_suffix: bespoke::url_suffix(provider, request.stream).unwrap_or_default(),
+        url_suffix: bespoke::url_suffix(provider, model, request.stream).unwrap_or_default(),
     }
 }
 
