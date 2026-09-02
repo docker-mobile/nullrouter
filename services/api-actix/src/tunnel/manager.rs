@@ -149,7 +149,8 @@ impl Manager {
 
     /// Run one operation by id.
     pub(crate) async fn run(&self, id: &str, args: &Args) -> Result<Outcome, OpError> {
-        let operation = super::catalog::operation(id).ok_or_else(|| OpError::Unknown(id.to_owned()))?;
+        let operation =
+            super::catalog::operation(id).ok_or_else(|| OpError::Unknown(id.to_owned()))?;
         self.run_operation(operation, args).await
     }
 

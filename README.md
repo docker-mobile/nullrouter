@@ -801,9 +801,17 @@ repository implements these; each names the thing it does not own.
 interpreter it discovers and has no supervisor for a detached daemon. The second half was a reason to
 build a supervisor, and the first half was never the requirement — owning an interpreter is not what
 invoking one safely needs. It is now implemented; see below.)
-- **MITM control** (`/api/cli-tools/antigravity-mitm`) — *the intercepting proxy and its certificate
-  authority*. URL validation is real. Issuing a CA and rewriting a machine's trust store is not
-  something a router should do on a user's behalf.
+- **The MITM *interception proxy*** (`/api/cli-tools/antigravity-mitm`) — *a TLS listener on 443, per-SNI
+  leaf issuance, and request forwarding*. The **control** half is implemented and described
+  [below](#mitm-control-is-implemented-the-interceptor-is-not); what remains unbuilt is the proxy that
+  would sit behind it. `POST` (start) and `DELETE` (stop) still answer 501, because there is no process to
+  start or stop, and answering 200 for a no-op would tell a dashboard it had started something.
+
+  This entry previously said that issuing a CA and rewriting a machine's trust store "is not something a
+  router should do on a user's behalf". Half of that was a real boundary and half was overreach: issuing a
+  CA into the router's own data directory is ordinary, and it is now done. Rewriting the *system's* trust
+  store or hosts file is the part that needs root, and that lives in a separate binary the operator runs
+  themselves.
 (Tunnel and Tailscale control was listed here, on the grounds that driving a daemon with its own
 lifecycle and credentials was out of scope. That was a reason to build a supervisor, not a reason to
 refuse; it is now implemented — see below.)
@@ -1062,6 +1070,30 @@ credential the caller already holds, so restricting it to loopback would stop a 
 deploying to their own account while protecting nothing on this host. A dashboard session is still
 required.
 
+**MITM control is implemented; the interceptor is not.** <a id="mitm-control-is-implemented-the-interceptor-is-not"></a>
+`/api/cli-tools/antigravity-mitm` generates the root CA into `$DATA_DIR/mitm/`, reports its path and
+SHA-256 fingerprint, and reads back whether each tool's traffic is actually being redirected.
+`/alias` reads and writes the model-alias map. Both are host-only, pinned by the gateway's existing
+prefix rule.
+
+Two things make this the useful half rather than a stub. The CA is what a client must trust before any
+interception works at all, and it cannot be bootstrapped by the proxy that needs it. And the alias map
+is a *file*, at `$DATA_DIR/mitm/aliases.json`, in upstream's own `{tool: {alias: model}}` shape,
+written atomically — upstream's standalone MITM server has no SQLite binding, so the file is the
+interface, and an interceptor built later reads it without changing anything here.
+
+What needs root is separated rather than skipped. Installing the CA into a system trust store and
+editing `/etc/hosts` both do; this service runs unprivileged and stays that way, so those routes report
+the exact `nullrouter-mitm-helper` command instead of running it. That helper refuses to execute unless
+it is *already* root and never invokes `sudo` or prompts for a password — a router that could rewrite
+the system's name resolution would be a much larger thing to trust than one that routes API calls.
+Reading the hosts file needs no privilege, so `dnsStatus` reports real state rather than a placeholder.
+
+Upstream's guard on alias edits is kept: an alias for a tool whose traffic is not being redirected is
+refused with 403, because saving it would configure a rewrite that nothing performs while looking like
+it took effect.
+
+
 **Cloudflare and Tailscale are driven for real, under supervision.** Quick tunnels, named tunnels,
 Tailscale Funnel, login, certificates and status all work, using the official `cloudflared` and
 `tailscaled` binaries. This was previously refused on the grounds that driving a daemon with its own
@@ -1183,6 +1215,27 @@ the proxy answers.
 buffered lines, its `/stream` companion pushes new ones as they arrive, and `DELETE` empties the
 buffer. 200 lines are kept, matching upstream's `CONSOLE_LOG_CONFIG.maxLines`.
 
+**Every completed request emits a line, and every line is scrubbed.** The pane would otherwise show
+service logs only, which is not what a console-log view is for — so the runtime emits one event per
+finished call carrying endpoint, provider, model, status, latency, and tokens. Deliberately *not* the
+bodies: upstream's pane shows whatever `console.log` was handed, which in a router means user prompts and
+model answers rendered in a browser tab that anyone with dashboard access can read and screenshot. The
+summary is what makes the pane useful for diagnosis; the prompt is what would make it a disclosure.
+
+Scrubbing is the other half, and it is a departure from upstream rather than a port of it — upstream does
+none. Credentials reach logs by being formatted next to their own names, so a `Bearer` token, a header or
+JSON field that names a credential, and the two self-identifying token shapes (an `sk-`-style key and a
+JWT) are replaced with `[redacted]` before the line is shipped, and again when the state service accepts
+it. Scrubbing happens at the source so a credential never crosses even a loopback socket, and twice
+because that ingest endpoint accepts a post from anything on loopback. What is deliberately not attempted
+is redacting bare high-entropy strings: a 40-character hex blob is as likely a commit hash as a key, and
+redacting every one would make a stack trace unreadable.
+
+Stderr is left unscrubbed on purpose. It goes to whoever runs the binary, which is the same trust
+boundary the credential already lives in — that process is holding the token in order to use it. The pane
+is a different boundary. Scrubbing the shipped copy protects the second without blinding an operator
+debugging an auth failure in their own terminal.
+
 Upstream is one Node process, so it patches `console.log` and keeps an array in module scope. Here
 there are eight processes, and the gateway sends the list to the API service and the stream to the
 events service — so a buffer in either would make the two disagree, each showing one process's output
@@ -1238,8 +1291,9 @@ The one whitelisted plugin, `browsermcp`, additionally needs a running Chrome wi
 installed — see the does-not-own list above. The bridge itself is verified against a loopback MCP
 server in `services/events-actix`.
 
-**Honest-but-empty surfaces:** Console-log streams connect and emit an empty init frame — there is no
-live capture backend.
+**No honest-but-empty surfaces remain.** Console-log streams used to connect and emit an empty init
+frame with no capture behind them; they now carry real lines, including one per completed request. See
+[Console-log capture](#console-log-capture-is-live-across-every-service) above.
 
 **The translator inspector runs the real engine.** Its steps used to echo shapes back —
 `sourceFormat: "unknown"` and an empty body. Each step now runs the same translation the live `/v1`

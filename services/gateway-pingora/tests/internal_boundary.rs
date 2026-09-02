@@ -40,7 +40,8 @@ fn internal_paths_are_forbidden_from_every_peer_and_route() {
                 RouteKind::Catalog,
                 RouteKind::Events,
             ] {
-                let requirement = AccessRequirement::for_request(path, &http::Method::GET, route, peer, false);
+                let requirement =
+                    AccessRequirement::for_request(path, &http::Method::GET, route, peer, false);
                 assert_eq!(
                     requirement,
                     AccessRequirement::Forbidden,
@@ -54,8 +55,13 @@ fn internal_paths_are_forbidden_from_every_peer_and_route() {
 #[test]
 fn forbidden_internal_paths_resolve_to_a_forbidden_decision() {
     for path in INTERNAL_PATHS {
-        let requirement =
-            AccessRequirement::for_request(path, &http::Method::GET, RouteKind::State, Some(REMOTE), false);
+        let requirement = AccessRequirement::for_request(
+            path,
+            &http::Method::GET,
+            RouteKind::State,
+            Some(REMOTE),
+            false,
+        );
         // Regardless of authorization state, the decision stays Forbidden: a
         // valid session must not unlock the credential surface.
         for state in [
@@ -82,8 +88,13 @@ fn credential_lookalike_paths_are_not_accidentally_forbidden() {
         "/dashboard/internal-notes",
         "/v1/chat/completions",
     ] {
-        let requirement =
-            AccessRequirement::for_request(path, &http::Method::GET, RouteKind::State, Some(REMOTE), false);
+        let requirement = AccessRequirement::for_request(
+            path,
+            &http::Method::GET,
+            RouteKind::State,
+            Some(REMOTE),
+            false,
+        );
         assert_ne!(
             requirement,
             AccessRequirement::Forbidden,

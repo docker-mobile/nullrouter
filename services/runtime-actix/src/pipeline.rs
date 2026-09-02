@@ -1894,6 +1894,27 @@ impl Runtime {
             latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             error,
         };
+        // The console-log pane's traffic line. Every completed request funnels through here, so one
+        // event covers all of them — and because it goes through `tracing`, the log shipper carries it
+        // to the pane without this module knowing the pane exists.
+        //
+        // What is recorded is the *shape* of the exchange: endpoint, provider, model, status, latency,
+        // tokens. Deliberately not the bodies. Upstream's pane shows whatever `console.log` was given,
+        // which in a router means user prompts and model answers in a browser tab that anyone with
+        // dashboard access can read and screenshot. The summary is what makes the pane useful for
+        // diagnosis; the prompt is what makes it a disclosure.
+        tracing::info!(
+            endpoint = %report.endpoint.as_deref().unwrap_or("-"),
+            provider = %report.provider,
+            model = %report.model,
+            status = %report.status,
+            status_code = report.status_code.unwrap_or(0),
+            latency_ms = report.latency_ms,
+            prompt_tokens = report.prompt_tokens,
+            completion_tokens = report.completion_tokens,
+            "request complete"
+        );
+
         // Spawned rather than awaited. The caller is holding a finished response, and the client
         // was waiting on this round trip — ~1.7ms of the router's overhead spent after the answer
         // already existed. Usage is best-effort by construction (`record_usage` logs and moves on),

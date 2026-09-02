@@ -110,7 +110,10 @@ fn main() -> PingoraResult<()> {
 /// none to spawn onto.
 fn init_tracing() {
     let _ = EnvFilter::try_from_default_env();
-    nullrouter_logship::install_with_default_filter("nullrouter-gateway", "nullrouter_gateway=info");
+    nullrouter_logship::install_with_default_filter(
+        "nullrouter-gateway",
+        "nullrouter_gateway=info",
+    );
 }
 
 fn run(config: GatewayConfig) -> PingoraResult<()> {
@@ -227,9 +230,7 @@ mod threads_tests {
             match value {
                 // SAFETY: the lock above is held, so no other test in this process reads or
                 // writes this variable here.
-                Some(value) => unsafe {
-                    std::env::set_var("NULLROUTER_GATEWAY_THREADS", value)
-                },
+                Some(value) => unsafe { std::env::set_var("NULLROUTER_GATEWAY_THREADS", value) },
                 // SAFETY: as above.
                 None => unsafe { std::env::remove_var("NULLROUTER_GATEWAY_THREADS") },
             }

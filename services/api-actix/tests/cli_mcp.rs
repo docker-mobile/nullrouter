@@ -78,7 +78,9 @@ fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
 /// reached out to Anthropic would depend on the network and on whatever the registry happens to be
 /// listing that day.
 async fn stub_registry(pages: Vec<String>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
     let addr = listener.local_addr().expect("addr").to_string();
     let served = Arc::new(Mutex::new(0_usize));
 
@@ -93,7 +95,9 @@ async fn stub_registry(pages: Vec<String>) -> String {
                 let mut discard = [0_u8; 4096];
                 let _ = stream.read(&mut discard).await;
                 let index = {
-                    let mut count = served.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut count = served
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let index = *count;
                     *count += 1;
                     index
@@ -206,7 +210,11 @@ async fn the_tool_probe_refuses_a_target_only_this_service_can_reach() -> TestRe
             &serde_json::json!({"url": url}).to_string(),
         )
         .await?;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{url} was not refused: {body}");
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{url} was not refused: {body}"
+        );
         assert_eq!(field(&body, "tools")?, &serde_json::json!([]), "{url}");
     }
     Ok(())

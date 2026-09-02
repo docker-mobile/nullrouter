@@ -79,7 +79,9 @@ pub(crate) const SYSTEM_SOCKET: &str = "/var/run/tailscale/tailscaled.sock";
 ///
 /// Every CLI operation begins here, which is what keeps them off a system daemon.
 pub(crate) fn socket_argv() -> Result<Argv, ArgError> {
-    Argv::new().flag("--socket").abs_path("tailscale socket", &socket_path()?)
+    Argv::new()
+        .flag("--socket")
+        .abs_path("tailscale socket", &socket_path()?)
 }
 
 /// `funnel --bg <port>`: expose a loopback port publicly.
@@ -184,9 +186,7 @@ pub(crate) fn system_daemon_present() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Args, cert_argv, daemon_argv, funnel_start_argv, login_url, socket_argv, up_argv,
-    };
+    use super::{Args, cert_argv, daemon_argv, funnel_start_argv, login_url, socket_argv, up_argv};
 
     #[test]
     fn every_cli_operation_is_addressed_at_our_own_socket() {
@@ -199,7 +199,8 @@ mod tests {
             Some("--socket")
         );
         assert!(
-            built.as_slice()
+            built
+                .as_slice()
                 .get(1)
                 .is_some_and(|path| path.ends_with("tailscaled.sock")),
             "{:?}",
@@ -230,7 +231,10 @@ mod tests {
         let built = daemon_argv().expect("builds");
         let rendered = built.as_slice().join(" ");
 
-        assert!(rendered.contains("--tun=userspace-networking"), "{rendered}");
+        assert!(
+            rendered.contains("--tun=userspace-networking"),
+            "{rendered}"
+        );
         assert!(rendered.contains("--socket="), "{rendered}");
         assert!(rendered.contains("--statedir="), "{rendered}");
         assert!(!rendered.contains("sudo"), "{rendered}");
@@ -290,7 +294,10 @@ mod tests {
                 "Funnel is not enabled: https://login.tailscale.com/f/funnel?node=abc",
                 Some("https://login.tailscale.com/f/funnel?node=abc"),
             ),
-            ("visit https://login.tailscale.com/a/xyz.", Some("https://login.tailscale.com/a/xyz")),
+            (
+                "visit https://login.tailscale.com/a/xyz.",
+                Some("https://login.tailscale.com/a/xyz"),
+            ),
             ("Success.", None),
             ("https://login.tailscale.com/", None),
             ("https://evil.example.com/login.tailscale.com/a/1", None),

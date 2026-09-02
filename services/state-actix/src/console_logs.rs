@@ -130,7 +130,11 @@ impl Buffer {
             inner.lines.push_back(Line {
                 service: service.to_owned(),
                 level: line.level,
-                message: truncate(line.message),
+                // Scrubbed again here, though the shipper already scrubbed at the source. This endpoint
+                // accepts a post from anything on loopback, so a line can arrive without having passed
+                // through that layer — and one leaked credential in a pane the operator screenshots is
+                // worse than the cost of a second pass over a 200-line ring.
+                message: truncate(nullrouter_logship::scrub::scrub(&line.message)),
                 at_ms,
                 seq,
             });
@@ -234,16 +238,14 @@ struct SinceQuery {
 pub(crate) fn configure(config: &mut actix_web::web::ServiceConfig) {
     use actix_web::web;
 
-    config
-        .app_data(web::Data::new(Buffer::default()))
-        .service(
-            // Internal, so the gateway refuses it from outside: anything that can write here can
-            // put arbitrary text in front of an operator reading their own logs.
-            web::resource(nullrouter_contracts::INTERNAL_CONSOLE_LOGS_PATH)
-                .route(web::post().to(ingest))
-                .route(web::get().to(read))
-                .route(web::delete().to(clear)),
-        );
+    config.app_data(web::Data::new(Buffer::default())).service(
+        // Internal, so the gateway refuses it from outside: anything that can write here can
+        // put arbitrary text in front of an operator reading their own logs.
+        web::resource(nullrouter_contracts::INTERNAL_CONSOLE_LOGS_PATH)
+            .route(web::post().to(ingest))
+            .route(web::get().to(read))
+            .route(web::delete().to(clear)),
+    );
 }
 
 /// Accept a batch from a service's log shipper.
@@ -322,7 +324,10 @@ mod tests {
         // A cursor from before the eviction is reported as having missed lines, rather than
         // silently returning a partial tail that reads as continuous.
         let stale = buffer.since(Some(1));
-        assert!(stale.dropped, "eviction outran this reader and must be said");
+        assert!(
+            stale.dropped,
+            "eviction outran this reader and must be said"
+        );
     }
 
     #[test]
@@ -362,7 +367,10 @@ mod tests {
         let page = buffer.since(None);
         let message = &page.lines[0].message;
         assert!(message.len() <= MAX_LINE_BYTES + 32, "{}", message.len());
-        assert!(message.ends_with("… [truncated]"), "truncation must be visible");
+        assert!(
+            message.ends_with("… [truncated]"),
+            "truncation must be visible"
+        );
         // The kept part is whole characters, with none split at the cut. `MAX_LINE_BYTES` is even
         // and `é` is two bytes, so an off-by-one cut would land mid-character and show up here as a
         // replacement character or a short count rather than as a panic.

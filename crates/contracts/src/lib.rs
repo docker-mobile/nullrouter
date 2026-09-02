@@ -4,17 +4,17 @@ mod auth;
 mod errors;
 mod mcp;
 
+pub use auth::INTERNAL_CONSOLE_LOGS_PATH;
 pub use auth::{
     ApiKeyGateRequest, ApiKeyGateResponse, AuthorizeRequest, AuthorizeResponse,
     INTERNAL_API_KEY_GATE_PATH, INTERNAL_API_KEY_VALIDATE_PATH, INTERNAL_AUTHORIZE_PATH,
     SecretString, ValidateApiKeyRequest, ValidateApiKeyResponse,
 };
-pub use auth::INTERNAL_CONSOLE_LOGS_PATH;
-pub use mcp::{BRIDGEABLE_PLUGINS, BridgeablePlugin, bridgeable_plugin};
 pub use errors::{
     ErrorBody, ErrorEnvelope, ResponsesFailedEvent, ResponsesFailedResponse, invalid_request_error,
     provider_execution_error, responses_failed_event,
 };
+pub use mcp::{BRIDGEABLE_PLUGINS, BridgeablePlugin, bridgeable_plugin};
 
 const MODEL_ROWS: [(&str, &str); 6] = [
     ("openai/gpt-5", "openai"),

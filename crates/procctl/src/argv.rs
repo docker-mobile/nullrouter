@@ -91,8 +91,7 @@ impl Charset {
 
     /// Whether one character is acceptable.
     const fn allows(self, character: char) -> bool {
-        let token = character.is_ascii_alphanumeric()
-            || matches!(character, '-' | '_' | '.');
+        let token = character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.');
         match self {
             Self::Token => token,
             Self::Path => token || matches!(character, '/' | '\\' | ':' | '+' | '@' | ' '),
@@ -421,7 +420,10 @@ mod tests {
             .requirement("requirement", "headroom-ai[proxy,code,ml]")
             .expect("a real extras requirement is valid");
 
-        assert_eq!(argv.into_vec(), vec!["install", "headroom-ai[proxy,code,ml]"]);
+        assert_eq!(
+            argv.into_vec(),
+            vec!["install", "headroom-ai[proxy,code,ml]"]
+        );
         assert!(
             Argv::new()
                 .requirement("requirement", "headroom-ai==1.2.3")

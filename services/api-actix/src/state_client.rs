@@ -533,11 +533,7 @@ impl StateClient {
                 let body = response.json::<Value>().await.ok()?;
                 // State wraps it as `{proxyPool: {...}}`; the inner object is what a caller wants,
                 // and the wrapper is unwrapped here rather than at each call site.
-                Some(
-                    body.get("proxyPool")
-                        .cloned()
-                        .unwrap_or(body),
-                )
+                Some(body.get("proxyPool").cloned().unwrap_or(body))
             }
             Ok(response) => {
                 tracing::warn!(status = %response.status(), "creating a proxy pool failed");

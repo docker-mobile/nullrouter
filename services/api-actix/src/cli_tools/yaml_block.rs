@@ -33,7 +33,8 @@ fn model_block(text: &str) -> Option<std::ops::Range<usize>> {
                 // The header must be exactly `model:` plus optional trailing tabs and spaces —
                 // upstream anchors with `^model:[ \t]*$`, so `model: gpt-4` is not a block.
                 if bare.strip_prefix("model:").is_some_and(|rest| {
-                    rest.chars().all(|character| character == ' ' || character == '\t')
+                    rest.chars()
+                        .all(|character| character == ' ' || character == '\t')
                 }) {
                     start = Some(line_start);
                 }
@@ -185,7 +186,10 @@ mod tests {
         let text = "logging:\n  level: debug\nmodel:\n  default: \"old\"\n  provider: \"custom\"\nagent:\n  name: mine\n";
         let block = build_model_block("new", "http://new/v1");
         let replaced = upsert_model_block(text, &block);
-        assert!(replaced.starts_with("logging:\n  level: debug\n"), "{replaced}");
+        assert!(
+            replaced.starts_with("logging:\n  level: debug\n"),
+            "{replaced}"
+        );
         assert!(replaced.contains("agent:\n  name: mine\n"), "{replaced}");
         assert!(replaced.contains("\"new\""), "{replaced}");
         assert!(!replaced.contains("\"old\""), "{replaced}");
@@ -198,7 +202,10 @@ mod tests {
         let text = "model: gpt-4\nagent:\n  name: mine\n";
         let block = build_model_block("new", "http://new/v1");
         let result = upsert_model_block(text, &block);
-        assert!(result.contains("model: gpt-4"), "the scalar must survive: {result}");
+        assert!(
+            result.contains("model: gpt-4"),
+            "the scalar must survive: {result}"
+        );
         assert!(result.contains("agent:\n  name: mine\n"), "{result}");
     }
 

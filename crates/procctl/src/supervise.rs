@@ -151,9 +151,7 @@ impl RestartPolicy {
     #[must_use]
     pub fn delay_for(&self, attempt: u32) -> Duration {
         let shift = attempt.saturating_sub(1).min(16);
-        let scaled = self
-            .backoff
-            .saturating_mul(2_u32.saturating_pow(shift));
+        let scaled = self.backoff.saturating_mul(2_u32.saturating_pow(shift));
         scaled.min(self.max_backoff)
     }
 }
@@ -355,9 +353,7 @@ enum Command {
         reply: oneshot::Sender<Result<Option<String>, StartError>>,
     },
     /// Stop the current child, if any.
-    Stop {
-        reply: oneshot::Sender<StopOutcome>,
-    },
+    Stop { reply: oneshot::Sender<StopOutcome> },
 }
 
 /// A handle to one supervised child.

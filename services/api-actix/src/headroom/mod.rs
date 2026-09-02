@@ -707,8 +707,7 @@ fn install_spec(accepted: &[String]) -> String {
 const EXTERNAL_PROXY: &str = "External Headroom proxies must be started outside 9Router";
 
 /// What `installMessage` says now that installing works.
-const INSTALL_SUPPORTED: &str =
-    "Installing extras runs pip against the interpreter reported in `python`, with a 15 minute \
+const INSTALL_SUPPORTED: &str = "Installing extras runs pip against the interpreter reported in `python`, with a 15 minute \
      deadline. The `ml` extra pulls large packages.";
 
 /// What `restartMessage` says now that restarting works.

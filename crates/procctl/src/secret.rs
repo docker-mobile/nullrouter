@@ -139,7 +139,10 @@ mod tests {
 
         let scrubbed = scrub(line, &[&token]);
 
-        assert_eq!(scrubbed, "failed to connect with token <redacted>, retrying");
+        assert_eq!(
+            scrubbed,
+            "failed to connect with token <redacted>, retrying"
+        );
     }
 
     #[test]
@@ -150,10 +153,7 @@ mod tests {
 
         let scrubbed = scrub(line, &[&first, &second]);
 
-        assert_eq!(
-            scrubbed,
-            "<redacted> then <redacted> then <redacted> again"
-        );
+        assert_eq!(scrubbed, "<redacted> then <redacted> then <redacted> again");
     }
 
     #[test]

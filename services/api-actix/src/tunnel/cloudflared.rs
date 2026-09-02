@@ -97,8 +97,7 @@ pub(crate) fn quick_tunnel_url(line: &str) -> Option<String> {
         let tail = rest.get(at..)?;
         let end = tail
             .find(|character: char| {
-                !(character.is_ascii_alphanumeric()
-                    || matches!(character, '-' | '.' | '/' | ':'))
+                !(character.is_ascii_alphanumeric() || matches!(character, '-' | '.' | '/' | ':'))
             })
             .unwrap_or(tail.len());
         let candidate = tail.get(..end)?.trim_end_matches('/');
@@ -191,7 +190,13 @@ mod tests {
         assert!(!rendered.contains("--token"), "{rendered}");
         assert_eq!(
             built.as_slice(),
-            ["tunnel", "--no-autoupdate", "--dns-resolver-addrs", "1.1.1.1:53", "run"]
+            [
+                "tunnel",
+                "--no-autoupdate",
+                "--dns-resolver-addrs",
+                "1.1.1.1:53",
+                "run"
+            ]
         );
     }
 
@@ -271,7 +276,8 @@ mod tests {
     #[test]
     fn a_later_hostname_in_one_line_wins() {
         // A reconnect logs the new hostname after the old one.
-        let line = "old https://first-one.trycloudflare.com new https://second-one.trycloudflare.com";
+        let line =
+            "old https://first-one.trycloudflare.com new https://second-one.trycloudflare.com";
 
         assert_eq!(
             quick_tunnel_url(line).as_deref(),

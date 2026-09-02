@@ -118,7 +118,10 @@ async fn proxy_pool_deploy_routes_report_an_unreachable_platform() -> TestResult
     );
 
     let cases = [
-        ("/api/proxy-pools/vercel-deploy", r#"{"vercelToken":"token"}"#),
+        (
+            "/api/proxy-pools/vercel-deploy",
+            r#"{"vercelToken":"token"}"#,
+        ),
         (
             "/api/proxy-pools/cloudflare-deploy",
             r#"{"accountId":"account","apiToken":"token"}"#,

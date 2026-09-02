@@ -6,6 +6,7 @@ use crate::{json_body, responses};
 mod cowork_mcp;
 mod detect;
 mod mitm;
+mod mitm_control;
 mod mutations;
 mod spec;
 mod toml_text;
@@ -139,7 +140,9 @@ async fn mutate_tool(
     }
 
     match actix_web::rt::task::spawn_blocking(move || writer.run(direction, &payload)).await {
-        Ok(Ok(outcome)) => responses::json(StatusCode::OK, &mutation_body(tool, direction, &outcome)),
+        Ok(Ok(outcome)) => {
+            responses::json(StatusCode::OK, &mutation_body(tool, direction, &outcome))
+        }
         Ok(Err(error)) => responses::json(
             StatusCode::INTERNAL_SERVER_ERROR,
             &serde_json::json!({ "error": error.message() }),
@@ -195,7 +198,11 @@ fn mutation_body(
     }
     // Upstream names the written path per tool, so the dashboard's success pane finds whichever it
     // reads.
-    if let Some(first) = outcome.written.first().map(|path| path.display().to_string()) {
+    if let Some(first) = outcome
+        .written
+        .first()
+        .map(|path| path.display().to_string())
+    {
         for key in ["settingsPath", "configPath", "authPath", "globalStatePath"] {
             responses::insert_key(&mut body, key, serde_json::Value::String(first.clone()));
         }

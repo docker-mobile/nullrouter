@@ -340,7 +340,10 @@ pub(crate) const OPERATIONS: &[Operation] = &[
         tool: Tool::Tailscale,
         effect: Effect::Mutate,
         mode: REMOTE,
-        params: &[Param::required("hostname", "The device's full tailnet DNS name")],
+        params: &[Param::required(
+            "hostname",
+            "The device's full tailnet DNS name",
+        )],
         build: tailscale::cert_argv,
         env: None,
     },
@@ -540,7 +543,11 @@ mod tests {
     fn a_missing_required_parameter_is_refused_rather_than_defaulted() {
         let empty = Args::default();
         for entry in OPERATIONS {
-            if !entry.params.iter().any(|param| param.required && !param.secret) {
+            if !entry
+                .params
+                .iter()
+                .any(|param| param.required && !param.secret)
+            {
                 continue;
             }
             assert!(

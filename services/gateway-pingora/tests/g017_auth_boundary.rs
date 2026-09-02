@@ -82,7 +82,8 @@ fn public_paths_bypass_authorize() {
 #[test]
 fn dashboard_denial_redirects_to_login() {
     // Given: a protected dashboard route without a valid session.
-    let requirement = GatewayConfig::default().access_requirement("/dashboard", &Method::GET, Some(LOOPBACK));
+    let requirement =
+        GatewayConfig::default().access_requirement("/dashboard", &Method::GET, Some(LOOPBACK));
 
     // When: Auth denies the session.
     let decision = requirement.decision(AuthorizationState::Denied);
@@ -97,8 +98,11 @@ fn dashboard_denial_redirects_to_login() {
 #[test]
 fn protected_api_denial_returns_json_401() {
     // Given: a protected API route without a valid session.
-    let requirement =
-        GatewayConfig::default().access_requirement("/api/providers/client", &Method::GET, Some(LOOPBACK));
+    let requirement = GatewayConfig::default().access_requirement(
+        "/api/providers/client",
+        &Method::GET,
+        Some(LOOPBACK),
+    );
 
     // When: Auth denies the session.
     let decision = requirement.decision(AuthorizationState::Denied);
@@ -153,8 +157,11 @@ fn host_only_route_rejects_non_loopback_peer() {
     // When: the actual socket peer is remote rather than loopback.
     let remote =
         config.access_requirement("/api/cli-tools/cowork-settings", &Method::GET, Some(REMOTE));
-    let local =
-        config.access_requirement("/api/cli-tools/cowork-settings", &Method::GET, Some(LOOPBACK));
+    let local = config.access_requirement(
+        "/api/cli-tools/cowork-settings",
+        &Method::GET,
+        Some(LOOPBACK),
+    );
 
     // Then: the remote peer is forbidden while the local peer still needs a session.
     assert_eq!(remote, AccessRequirement::Forbidden);

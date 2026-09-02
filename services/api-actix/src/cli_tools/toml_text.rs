@@ -39,7 +39,9 @@ fn section_range(text: &str, section: &str) -> Option<Range<usize>> {
             None => {
                 // Exactly the header, plus optional trailing spaces and tabs.
                 if let Some(rest) = bare.strip_prefix(&header)
-                    && rest.chars().all(|character| character == ' ' || character == '\t')
+                    && rest
+                        .chars()
+                        .all(|character| character == ' ' || character == '\t')
                 {
                     start = Some(line_start);
                 }
@@ -67,22 +69,25 @@ fn body_of<'a>(text: &'a str, range: &Range<usize>) -> &'a str {
 /// A quoted string field from a section, if it has one.
 pub(crate) fn get_field(text: &str, section: &str, key: &str) -> Option<String> {
     let range = section_range(text, section)?;
-    field_lines(body_of(text, &range), key).next().and_then(|line| {
-        let value = line.split_once('=')?.1.trim();
-        // Only the double-quoted form, which is what upstream's pattern accepts and what it
-        // writes. A bare or single-quoted value is left to be read as absent rather than guessed
-        // at, so this port and upstream agree on the same file.
-        value
-            .strip_prefix('"')
-            .and_then(|value| value.split('"').next())
-            .map(str::to_owned)
-    })
+    field_lines(body_of(text, &range), key)
+        .next()
+        .and_then(|line| {
+            let value = line.split_once('=')?.1.trim();
+            // Only the double-quoted form, which is what upstream's pattern accepts and what it
+            // writes. A bare or single-quoted value is left to be read as absent rather than guessed
+            // at, so this port and upstream agree on the same file.
+            value
+                .strip_prefix('"')
+                .and_then(|value| value.split('"').next())
+                .map(str::to_owned)
+        })
 }
 
 /// The lines in a body that assign `key`.
 fn field_lines<'a>(body: &'a str, key: &'a str) -> impl Iterator<Item = &'a str> {
     body.lines().filter(move |line| {
-        line.split_once('=').is_some_and(|(name, _)| name.trim() == key)
+        line.split_once('=')
+            .is_some_and(|(name, _)| name.trim() == key)
     })
 }
 
@@ -100,7 +105,10 @@ pub(crate) fn set_field(text: &str, section: &str, key: &str, value: &str) -> St
     let replaced = if field_lines(body, key).next().is_some() {
         body.lines()
             .map(|existing| {
-                if existing.split_once('=').is_some_and(|(name, _)| name.trim() == key) {
+                if existing
+                    .split_once('=')
+                    .is_some_and(|(name, _)| name.trim() == key)
+                {
                     line.clone()
                 } else {
                     existing.to_owned()
@@ -124,7 +132,11 @@ pub(crate) fn delete_field(text: &str, section: &str, key: &str) -> String {
     let body = body_of(text, &range);
     let kept: Vec<&str> = body
         .lines()
-        .filter(|line| !line.split_once('=').is_some_and(|(name, _)| name.trim() == key))
+        .filter(|line| {
+            !line
+                .split_once('=')
+                .is_some_and(|(name, _)| name.trim() == key)
+        })
         .collect();
     if kept.iter().all(|line| line.trim().is_empty()) {
         return collapse_blank_runs(&splice(text, &range, ""));
@@ -253,8 +265,8 @@ pub(crate) fn collapse_blank_runs(text: &str) -> String {
 )]
 mod tests {
     use super::{
-        delete_field, get_field, insert_marker, read_marker, remove_marker,
-        remove_section, set_field, upsert_section,
+        delete_field, get_field, insert_marker, read_marker, remove_marker, remove_section,
+        set_field, upsert_section,
     };
 
     const USER_CONFIG: &str = "# my notes\ntheme = \"dark\"\n\n\
@@ -285,16 +297,28 @@ mod tests {
         assert!(updated.contains("default = \"9router\""), "{updated}");
         assert!(!updated.contains("default = \"grok-4\""), "{updated}");
         // Everything else is byte-identical, which is the property the whole module is for.
-        assert!(updated.starts_with("# my notes\ntheme = \"dark\"\n"), "{updated}");
-        assert!(updated.contains("[model.grok-4]\nmodel = \"grok-4\""), "{updated}");
+        assert!(
+            updated.starts_with("# my notes\ntheme = \"dark\"\n"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("[model.grok-4]\nmodel = \"grok-4\""),
+            "{updated}"
+        );
     }
 
     #[test]
     fn setting_a_field_in_a_missing_section_appends_one() {
         let updated = set_field("theme = \"dark\"\n", "models", "default", "9router");
-        assert_eq!(updated, "theme = \"dark\"\n\n[models]\ndefault = \"9router\"\n");
+        assert_eq!(
+            updated,
+            "theme = \"dark\"\n\n[models]\ndefault = \"9router\"\n"
+        );
         // And on an empty file.
-        assert_eq!(set_field("", "models", "default", "x"), "\n[models]\ndefault = \"x\"\n");
+        assert_eq!(
+            set_field("", "models", "default", "x"),
+            "\n[models]\ndefault = \"x\"\n"
+        );
     }
 
     #[test]
@@ -312,11 +336,7 @@ mod tests {
 
     #[test]
     fn a_section_is_replaced_rather_than_duplicated() {
-        let first = upsert_section(
-            USER_CONFIG,
-            "model.9router",
-            &["model = \"a\"".to_owned()],
-        );
+        let first = upsert_section(USER_CONFIG, "model.9router", &["model = \"a\"".to_owned()]);
         let second = upsert_section(&first, "model.9router", &["model = \"b\"".to_owned()]);
         assert_eq!(
             second.matches("[model.9router]").count(),
@@ -326,7 +346,10 @@ mod tests {
         assert!(second.contains("model = \"b\""), "{second}");
         assert!(!second.contains("model = \"a\""), "{second}");
         // The user's own model section is untouched throughout.
-        assert!(second.contains("[model.grok-4]\nmodel = \"grok-4\""), "{second}");
+        assert!(
+            second.contains("[model.grok-4]\nmodel = \"grok-4\""),
+            "{second}"
+        );
     }
 
     #[test]
@@ -349,7 +372,10 @@ mod tests {
             "model.9router",
             "# 9router-prev-default = \"grok-4\"\n",
         );
-        assert_eq!(read_marker(&text, "9router-prev-default").as_deref(), Some("grok-4"));
+        assert_eq!(
+            read_marker(&text, "9router-prev-default").as_deref(),
+            Some("grok-4")
+        );
 
         // Surviving an unrelated edit is the part that matters.
         let edited = set_field(&text, "models", "default", "9router");
@@ -360,7 +386,10 @@ mod tests {
         );
 
         let cleared = remove_marker(&edited, "9router-prev-default");
-        assert!(read_marker(&cleared, "9router-prev-default").is_none(), "{cleared}");
+        assert!(
+            read_marker(&cleared, "9router-prev-default").is_none(),
+            "{cleared}"
+        );
         // And the config it was sitting in is otherwise intact.
         assert!(cleared.contains("theme = \"dark\""), "{cleared}");
         assert!(cleared.contains("default = \"9router\""), "{cleared}");
@@ -368,7 +397,11 @@ mod tests {
 
     #[test]
     fn a_marker_goes_above_the_section_it_describes() {
-        let text = insert_marker("[model.9router]\nmodel = \"a\"\n", "model.9router", "# m = \"1\"\n");
+        let text = insert_marker(
+            "[model.9router]\nmodel = \"a\"\n",
+            "model.9router",
+            "# m = \"1\"\n",
+        );
         assert!(text.starts_with("# m = \"1\"\n[model.9router]"), "{text:?}");
         // With no anchor it is appended rather than dropped.
         let text = insert_marker("theme = \"dark\"\n", "model.9router", "# m = \"1\"\n");

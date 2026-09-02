@@ -81,7 +81,9 @@ impl ControlError {
         use actix_web::http::StatusCode;
         match self {
             // The capability exists; the dependency does not.
-            Self::NotInstalled | Self::NoPython | Self::Binary(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::NotInstalled | Self::NoPython | Self::Binary(_) => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             // The environment is the way it is, and no retry changes it.
             Self::ExternallyManaged { .. } => StatusCode::CONFLICT,
             Self::Run(_) | Self::Start(_) | Self::PipFailed { .. } => StatusCode::BAD_GATEWAY,
@@ -163,10 +165,7 @@ fn daemon_argv(options: DaemonOptions) -> Vec<String> {
 /// reads it for caches and a missing one turns into confusing import failures; `PATH` because
 /// the proxy shells out to tokenizer helpers.
 fn child_env() -> Vec<(String, String)> {
-    let mut env = vec![(
-        "PATH".to_owned(),
-        "/usr/local/bin:/usr/bin:/bin".to_owned(),
-    )];
+    let mut env = vec![("PATH".to_owned(), "/usr/local/bin:/usr/bin:/bin".to_owned())];
     if let Some(home) = std::env::var_os("HOME") {
         env.push(("HOME".to_owned(), home.to_string_lossy().into_owned()));
     }
@@ -256,12 +255,12 @@ impl PipJob {
             Self::Uninstall { packages } => {
                 let mut argv = base.word("uninstall").flag("-y");
                 for package in packages {
-                    argv = argv
-                        .token("package name", package)
-                        .map_err(|error| ControlError::PipFailed {
+                    argv = argv.token("package name", package).map_err(|error| {
+                        ControlError::PipFailed {
                             code: "refused".to_owned(),
                             detail: error.to_string(),
-                        })?;
+                        }
+                    })?;
                 }
                 Ok(argv.into_vec())
             }
@@ -291,9 +290,9 @@ fn is_plausible_requirement(spec: &str) -> bool {
     };
     let identifier = |text: &str| {
         !text.is_empty()
-            && text
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+            && text.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            })
     };
     identifier(name)
         && extras.is_none_or(|extras| !extras.is_empty() && extras.split(',').all(identifier))
@@ -445,7 +444,13 @@ mod tests {
 
         assert_eq!(
             argv,
-            ["proxy", "--port", "9000", "--code-aware", "--disable-kompress"]
+            [
+                "proxy",
+                "--port",
+                "9000",
+                "--code-aware",
+                "--disable-kompress"
+            ]
         );
     }
 

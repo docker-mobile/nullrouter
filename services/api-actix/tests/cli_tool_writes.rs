@@ -15,7 +15,6 @@
     reason = "free helpers here are not #[test] fns, so clippy.toml's allow-expect-in-tests does \
               not cover them, and assertions read clearer with expect than error plumbing"
 )]
-
 #![allow(
     clippy::indexing_slicing,
     reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
@@ -293,7 +292,10 @@ async fn a_claude_revoke_removes_only_the_keys_upstream_lists() -> TestResult {
     // Then: our keys are gone and nothing else is.
     assert_eq!(status, StatusCode::OK, "{body}");
     let settings = home.read_json(CLAUDE_SETTINGS);
-    assert!(settings["env"]["ANTHROPIC_BASE_URL"].is_null(), "{settings}");
+    assert!(
+        settings["env"]["ANTHROPIC_BASE_URL"].is_null(),
+        "{settings}"
+    );
     assert!(settings["env"]["API_TIMEOUT_MS"].is_null(), "{settings}");
     assert_eq!(settings["env"]["MY_OWN"], "keep me");
     assert_eq!(settings["hooks"]["mine"], 1);
@@ -361,7 +363,10 @@ async fn a_codex_apply_writes_both_the_config_and_the_credential() -> TestResult
     assert!(config.contains("[agents.subagent]"), "{config}");
     assert!(config.contains(r#"model = "cc/opus""#), "{config}");
     // And the key never lands in config.toml.
-    assert!(!config.contains("sk-codex"), "the key must stay out of the config: {config}");
+    assert!(
+        !config.contains("sk-codex"),
+        "the key must stay out of the config: {config}"
+    );
 
     let auth = home.read_json(CODEX_AUTH);
     assert_eq!(auth["OPENAI_API_KEY"], "sk-codex");
@@ -519,7 +524,10 @@ async fn kilo_writes_its_own_auth_and_vs_codes_settings() -> TestResult {
 
     let auth = home.read_json(KILO_AUTH);
     assert_eq!(auth["openai-compatible"]["type"], "api-key");
-    assert_eq!(auth["openai-compatible"]["baseUrl"], "http://127.0.0.1:20128/v1");
+    assert_eq!(
+        auth["openai-compatible"]["baseUrl"],
+        "http://127.0.0.1:20128/v1"
+    );
     assert_eq!(auth["openai-compatible"]["apiKey"], "sk-kilo");
     assert_eq!(auth["openai-compatible"]["model"], "cc/haiku");
 
@@ -566,7 +574,10 @@ async fn copilot_is_written_as_a_top_level_array_with_the_azure_fragment() -> Te
     assert_eq!(entries[0]["name"], "mine");
 
     let ours = &entries[1];
-    assert_eq!(ours["name"], "9Router", "the capitalisation copilot matches on");
+    assert_eq!(
+        ours["name"], "9Router",
+        "the capitalisation copilot matches on"
+    );
     assert_eq!(ours["vendor"], "azure");
     // The key is defaulted, not required.
     assert_eq!(ours["apiKey"], "sk_9router");
@@ -669,7 +680,10 @@ async fn an_empty_active_model_clears_the_opencode_selection() -> TestResult {
     // Then: the selection is empty while the models stay listed.
     let config = home.read_json(OPENCODE_CONFIG);
     assert_eq!(config["model"], "", "{config}");
-    assert!(config["provider"]["9router"]["models"]["a"].is_object(), "{config}");
+    assert!(
+        config["provider"]["9router"]["models"]["a"].is_object(),
+        "{config}"
+    );
 
     // And a missing `activeModel` picks the first instead.
     apply(
@@ -726,7 +740,10 @@ async fn droid_ids_are_indexed_and_the_default_is_moved_to_the_front() -> TestRe
     let settings = home.read_json(DROID_SETTINGS);
     let models = settings["customModels"].as_array().expect("array");
     // Droid takes the first entry as the default, so the reorder *is* the setting.
-    assert_eq!(models[0]["model"], "c", "the default must be first: {settings}");
+    assert_eq!(
+        models[0]["model"], "c",
+        "the default must be first: {settings}"
+    );
     // And `index` is renumbered to match the new order.
     for (position, model) in models.iter().enumerate() {
         assert_eq!(model["index"], position, "{settings}");
@@ -748,7 +765,11 @@ async fn droid_ids_are_indexed_and_the_default_is_moved_to_the_front() -> TestRe
     // Droid's placeholder is its own, not the one the other tools use.
     let placeholder = models
         .iter()
-        .find(|model| model["id"].as_str().is_some_and(|id| id.starts_with("custom:9Router")))
+        .find(|model| {
+            model["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("custom:9Router"))
+        })
         .and_then(|model| model["apiKey"].as_str());
     assert_eq!(placeholder, Some("your_api_key"), "{settings}");
     Ok(())
@@ -765,12 +786,20 @@ async fn a_droid_reapply_replaces_its_entries_rather_than_stacking_them() -> Tes
     .await?;
 
     // When: a second apply names one.
-    apply("droid-settings", &json!({"baseUrl": "http://x", "models": ["a"]})).await?;
+    apply(
+        "droid-settings",
+        &json!({"baseUrl": "http://x", "models": ["a"]}),
+    )
+    .await?;
 
     // Then: the two dropped models are gone. Matching by prefix is what makes this work; an
     // equality match would leave `custom:9Router-1` and `-2` behind forever.
     let settings = home.read_json(DROID_SETTINGS);
-    assert_eq!(settings["customModels"].as_array().map(Vec::len), Some(1), "{settings}");
+    assert_eq!(
+        settings["customModels"].as_array().map(Vec::len),
+        Some(1),
+        "{settings}"
+    );
 
     // And a revoke removes the array entirely rather than leaving `[]`.
     revoke("droid-settings").await?;
@@ -786,7 +815,8 @@ async fn a_droid_reapply_replaces_its_entries_rather_than_stacking_them() -> Tes
 async fn hermes_gets_a_yaml_block_and_keeps_the_rest_byte_identical() -> TestResult {
     // Given: a hand-written config with comments and the user's own sections.
     let home = HomeGuard::new();
-    let original = "# my notes\nagent:\n  name: mine\n  tools:\n    - shell\n\nlogging:\n  level: debug\n";
+    let original =
+        "# my notes\nagent:\n  name: mine\n  tools:\n    - shell\n\nlogging:\n  level: debug\n";
     home.seed(HERMES_CONFIG, original);
 
     // When: an apply runs.
@@ -805,8 +835,14 @@ async fn hermes_gets_a_yaml_block_and_keeps_the_rest_byte_identical() -> TestRes
     // file is edited by block rather than parsed and re-serialised.
     let config = home.read(HERMES_CONFIG);
     assert!(config.contains(original), "the rest must survive: {config}");
-    assert!(config.contains("model:\n  default: \"cc/opus\""), "{config}");
-    assert!(config.contains("base_url: \"http://127.0.0.1:20128/v1\""), "{config}");
+    assert!(
+        config.contains("model:\n  default: \"cc/opus\""),
+        "{config}"
+    );
+    assert!(
+        config.contains("base_url: \"http://127.0.0.1:20128/v1\""),
+        "{config}"
+    );
     // The key is a literal `${OPENAI_API_KEY}` reference, and the secret is in `.env`.
     assert!(config.contains("api_key: ${OPENAI_API_KEY}"), "{config}");
     assert!(
@@ -840,7 +876,10 @@ async fn a_hermes_apply_without_a_key_does_not_create_an_env_file() -> TestResul
     // that the user may own it for real OpenAI.
     home.seed(HERMES_ENV, "OPENAI_API_KEY=theirs\n");
     revoke("hermes-settings").await?;
-    assert!(!home.read(HERMES_CONFIG).contains("model:"), "block removed");
+    assert!(
+        !home.read(HERMES_CONFIG).contains("model:"),
+        "block removed"
+    );
     assert_eq!(home.read(HERMES_ENV), "OPENAI_API_KEY=theirs\n");
     Ok(())
 }
@@ -867,11 +906,21 @@ async fn deepseek_is_merged_rather_than_overwritten() -> TestResult {
     let config = home.read(DEEPSEEK_CONFIG);
     assert!(config.contains(r#"provider = "openai""#), "{config}");
     assert!(config.contains("[providers.openai]"), "{config}");
-    assert!(config.contains(r#"base_url = "http://127.0.0.1:20128/v1""#), "{config}");
-    assert!(config.contains("keep-me"), "the user's provider must survive: {config}");
+    assert!(
+        config.contains(r#"base_url = "http://127.0.0.1:20128/v1""#),
+        "{config}"
+    );
+    assert!(
+        config.contains("keep-me"),
+        "the user's provider must survive: {config}"
+    );
     // No `9router` string appears in a deepseek config, which is why `spec`'s marker tests the
     // provider and URL rather than grepping for a name.
-    assert_eq!(config.matches("9router").count(), 1, "only the placeholder key: {config}");
+    assert_eq!(
+        config.matches("9router").count(),
+        1,
+        "only the placeholder key: {config}"
+    );
     Ok(())
 }
 
@@ -891,7 +940,10 @@ async fn a_deepseek_revoke_keeps_a_real_openai_section() -> TestResult {
     // Then: the section is left alone, because its URL is not local and so is not ours. Upstream
     // cannot make this distinction: it writes a two-line default over the whole file.
     let config = home.read(DEEPSEEK_CONFIG);
-    assert!(config.contains("sk-real"), "the user's key must survive: {config}");
+    assert!(
+        config.contains("sk-real"),
+        "the user's key must survive: {config}"
+    );
     assert!(config.contains("api.openai.com"), "{config}");
     Ok(())
 }
@@ -917,16 +969,35 @@ async fn jcode_points_at_an_env_file_it_also_writes() -> TestResult {
     // those strings: a config written without the env file leaves jcode looking up a variable
     // nothing sets, and `requires_api_key` makes it fail rather than send an unauthenticated call.
     let config = home.read(JCODE_CONFIG);
-    assert!(config.contains(r#"api_key_env = "JCODE_9ROUTER_API_KEY""#), "{config}");
-    assert!(config.contains(r#"env_file = "provider-9router.env""#), "{config}");
-    assert!(config.contains(r#"default_model = "cc/opus""#), "the first model: {config}");
+    assert!(
+        config.contains(r#"api_key_env = "JCODE_9ROUTER_API_KEY""#),
+        "{config}"
+    );
+    assert!(
+        config.contains(r#"env_file = "provider-9router.env""#),
+        "{config}"
+    );
+    assert!(
+        config.contains(r#"default_model = "cc/opus""#),
+        "the first model: {config}"
+    );
     assert!(config.contains("requires_api_key = true"), "{config}");
-    assert!(!config.contains("sk-jcode"), "the key stays out of the config: {config}");
-    assert!(home.read(JCODE_ENV).contains("JCODE_9ROUTER_API_KEY=sk-jcode"));
+    assert!(
+        !config.contains("sk-jcode"),
+        "the key stays out of the config: {config}"
+    );
+    assert!(
+        home.read(JCODE_ENV)
+            .contains("JCODE_9ROUTER_API_KEY=sk-jcode")
+    );
 
     // And a revoke takes both, since this variable name is ours and nothing else reads it.
     revoke("jcode-settings").await?;
-    assert!(!home.read(JCODE_CONFIG).contains("9router"), "{}", home.read(JCODE_CONFIG));
+    assert!(
+        !home.read(JCODE_CONFIG).contains("9router"),
+        "{}",
+        home.read(JCODE_CONFIG)
+    );
     assert!(!home.read(JCODE_ENV).contains("JCODE_9ROUTER_API_KEY"));
     Ok(())
 }
@@ -958,7 +1029,10 @@ async fn openclaw_writes_the_provider_the_selection_and_the_allowlist() -> TestR
     // The display name is the last path segment, per upstream's `split("/").pop()`.
     assert_eq!(provider["models"][0]["name"], "opus");
     // The selection and the allowlist are both qualified with the provider name.
-    assert_eq!(settings["agents"]["defaults"]["model"]["primary"], "9router/cc/opus");
+    assert_eq!(
+        settings["agents"]["defaults"]["model"]["primary"],
+        "9router/cc/opus"
+    );
     assert!(
         settings["agents"]["defaults"]["models"]["9router/cc/opus"].is_object(),
         "the allowlist gates the selection: {settings}"
@@ -988,7 +1062,10 @@ async fn a_reapply_clears_stale_openclaw_allowlist_entries() -> TestResult {
     let models = &home.read_json(OPENCLAW_SETTINGS)["agents"]["defaults"]["models"];
     assert!(models["9router/old"].is_null(), "{models}");
     assert!(models["9router/new"].is_object(), "{models}");
-    assert!(models["anthropic/opus"].is_object(), "the user's entry: {models}");
+    assert!(
+        models["anthropic/opus"].is_object(),
+        "the user's entry: {models}"
+    );
     Ok(())
 }
 
@@ -1010,10 +1087,19 @@ async fn an_openclaw_revoke_leaves_an_agent_pointed_at_another_provider() -> Tes
 
     // Then: ours is cleared in both forms of the field, and theirs is untouched.
     let settings = home.read_json(OPENCLAW_SETTINGS);
-    assert!(settings["models"]["providers"]["9router"].is_null(), "{settings}");
-    assert!(settings["agents"]["defaults"]["model"]["primary"].is_null(), "{settings}");
+    assert!(
+        settings["models"]["providers"]["9router"].is_null(),
+        "{settings}"
+    );
+    assert!(
+        settings["agents"]["defaults"]["model"]["primary"].is_null(),
+        "{settings}"
+    );
     let agents = settings["agents"]["list"].as_array().expect("list");
-    assert!(agents[0]["model"].is_null(), "the object form must be cleared: {settings}");
+    assert!(
+        agents[0]["model"].is_null(),
+        "the object form must be cleared: {settings}"
+    );
     assert_eq!(agents[1]["model"], "anthropic/opus");
     Ok(())
 }
@@ -1052,18 +1138,27 @@ async fn a_per_agent_models_file_is_written_only_into_a_directory_that_exists() 
     // Then: the existing directory got its file, with the agent's own override rather than the
     // default.
     let models: Value = serde_json::from_str(&std::fs::read_to_string(real.join("models.json"))?)?;
-    assert_eq!(models["providers"]["9router"]["models"][0]["id"], "cc/sonnet");
-    assert_eq!(models["providers"]["9router"]["baseUrl"], "http://127.0.0.1:20128/v1");
+    assert_eq!(
+        models["providers"]["9router"]["models"][0]["id"],
+        "cc/sonnet"
+    );
+    assert_eq!(
+        models["providers"]["9router"]["baseUrl"],
+        "http://127.0.0.1:20128/v1"
+    );
 
     // And the missing one was reported rather than created. `agentDir` is a path out of a config
     // file being used as a destination, so creating it means a settings file naming `../../.ssh`
     // gets a directory tree.
-    assert!(!missing.exists(), "the directory must not have been created");
+    assert!(
+        !missing.exists(),
+        "the directory must not have been created"
+    );
     let warnings = body["warnings"].as_array().expect("warnings reported");
     assert!(
-        warnings
-            .iter()
-            .any(|warning| warning.as_str().is_some_and(|text| text.contains("does not exist"))),
+        warnings.iter().any(|warning| warning
+            .as_str()
+            .is_some_and(|text| text.contains("does not exist"))),
         "{body}"
     );
     Ok(())
@@ -1093,14 +1188,26 @@ async fn grok_remembers_the_users_previous_default_across_a_revoke() -> TestResu
 
     let applied = home.read(GROK_CONFIG);
     assert!(applied.contains("[model.9router]"), "{applied}");
-    assert!(applied.contains(r#"base_url = "http://127.0.0.1:20128/v1""#), "{applied}");
-    assert!(applied.contains(r#"api_backend = "chat_completions""#), "{applied}");
+    assert!(
+        applied.contains(r#"base_url = "http://127.0.0.1:20128/v1""#),
+        "{applied}"
+    );
+    assert!(
+        applied.contains(r#"api_backend = "chat_completions""#),
+        "{applied}"
+    );
     assert!(applied.contains("context_window = 200000"), "{applied}");
     assert!(applied.contains(r#"default = "9router""#), "{applied}");
     // The previous choice is recorded in a comment, which is why this file is edited as text.
-    assert!(applied.contains(r#"# 9router-prev-default = "grok-4""#), "{applied}");
+    assert!(
+        applied.contains(r#"# 9router-prev-default = "grok-4""#),
+        "{applied}"
+    );
     // The user's own content is still there.
-    assert!(applied.contains("# my notes\ntheme = \"dark\""), "{applied}");
+    assert!(
+        applied.contains("# my notes\ntheme = \"dark\""),
+        "{applied}"
+    );
 
     // Then: the revoke puts their choice back rather than the built-in default.
     revoke("grok-build-settings").await?;
@@ -1110,7 +1217,10 @@ async fn grok_remembers_the_users_previous_default_across_a_revoke() -> TestResu
         "the user's own default must come back, not grok-build's: {reverted}"
     );
     assert!(!reverted.contains("[model.9router]"), "{reverted}");
-    assert!(!reverted.contains("9router-prev-default"), "the marker is consumed: {reverted}");
+    assert!(
+        !reverted.contains("9router-prev-default"),
+        "the marker is consumed: {reverted}"
+    );
     assert!(reverted.contains("theme = \"dark\""), "{reverted}");
     Ok(())
 }
@@ -1129,7 +1239,8 @@ async fn a_second_grok_apply_does_not_overwrite_the_remembered_default() -> Test
 
     // Then: the marker still holds their model, and a revoke restores it.
     assert!(
-        home.read(GROK_CONFIG).contains(r#"# 9router-prev-default = "grok-4""#),
+        home.read(GROK_CONFIG)
+            .contains(r#"# 9router-prev-default = "grok-4""#),
         "{}",
         home.read(GROK_CONFIG)
     );
@@ -1183,7 +1294,10 @@ async fn grok_subagent_slots_restore_an_unset_key_by_deleting_it() -> TestResult
     .await?;
     let applied = home.read(GROK_CONFIG);
     assert!(applied.contains("[model.9router-explore]"), "{applied}");
-    assert!(applied.contains(r#"explore = "9router-explore""#), "{applied}");
+    assert!(
+        applied.contains(r#"explore = "9router-explore""#),
+        "{applied}"
+    );
     // The sentinel records that there was nothing there before.
     assert!(applied.contains("__9router_unset__"), "{applied}");
 
@@ -1191,7 +1305,10 @@ async fn grok_subagent_slots_restore_an_unset_key_by_deleting_it() -> TestResult
 
     // Then: the key is gone, not blank, and its section with it.
     let reverted = home.read(GROK_CONFIG);
-    assert!(!reverted.contains("explore ="), "the key must be deleted: {reverted}");
+    assert!(
+        !reverted.contains("explore ="),
+        "the key must be deleted: {reverted}"
+    );
     assert!(!reverted.contains("[model.9router-explore]"), "{reverted}");
     assert!(!reverted.contains("__9router_unset__"), "{reverted}");
     Ok(())
@@ -1201,10 +1318,7 @@ async fn grok_subagent_slots_restore_an_unset_key_by_deleting_it() -> TestResult
 async fn an_absent_subagent_block_leaves_existing_subagent_config_alone() -> TestResult {
     // Given: a config with a subagent the user set up themselves.
     let home = HomeGuard::new();
-    home.seed(
-        GROK_CONFIG,
-        "[subagents.models]\nplan = \"grok-4-fast\"\n",
-    );
+    home.seed(GROK_CONFIG, "[subagents.models]\nplan = \"grok-4-fast\"\n");
 
     // When: an apply arrives with no `subagentModels` at all — which is what a dashboard pane that
     // does not know about subagents sends.
@@ -1309,7 +1423,10 @@ async fn cowork_bridges_a_local_plugin_through_this_routers_sse_endpoint() -> Te
         "isDesktopExtensionSignatureRequired",
         "disableNonessentialTelemetry",
     ] {
-        assert!(config[key].is_null(), "{key} should not be written: {config}");
+        assert!(
+            config[key].is_null(),
+            "{key} should not be written: {config}"
+        );
     }
     Ok(())
 }
@@ -1362,7 +1479,11 @@ async fn an_empty_plugins_array_is_not_replaced_by_the_defaults() -> TestResult 
     )
     .await?;
     let servers = home.read_json(COWORK_CONFIG);
-    assert_eq!(servers["managedMcpServers"].as_array().map(Vec::len), Some(2), "{servers}");
+    assert_eq!(
+        servers["managedMcpServers"].as_array().map(Vec::len),
+        Some(2),
+        "{servers}"
+    );
     Ok(())
 }
 
@@ -1445,9 +1566,15 @@ async fn the_mcp_tool_probe_refuses_a_target_only_this_service_can_reach() -> Te
 
         // Then: it is refused with a reason, and no request is made. Upstream fetches whatever it
         // is handed, which makes the route a server-side request forgery pivot.
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{url} was not refused: {body}");
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{url} was not refused: {body}"
+        );
         assert!(
-            body["error"].as_str().is_some_and(|error| !error.is_empty()),
+            body["error"]
+                .as_str()
+                .is_some_and(|error| !error.is_empty()),
             "{url}: {body}"
         );
         assert_eq!(body["tools"].as_array().map(Vec::len), Some(0), "{url}");

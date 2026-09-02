@@ -69,7 +69,10 @@ mod tests {
     fn names_are_unique_and_url_safe() {
         // The name is interpolated into `/api/mcp/{name}/sse` and matched against a spawn table, so
         // a separator or a duplicate would be a routing bug at best.
-        let mut names: Vec<&str> = BRIDGEABLE_PLUGINS.iter().map(|plugin| plugin.name).collect();
+        let mut names: Vec<&str> = BRIDGEABLE_PLUGINS
+            .iter()
+            .map(|plugin| plugin.name)
+            .collect();
         let before = names.len();
         names.sort_unstable();
         names.dedup();
@@ -88,8 +91,17 @@ mod tests {
     #[test]
     fn lookup_is_exact() {
         assert!(bridgeable_plugin("browsermcp").is_some());
-        for name in ["", "browser", "browsermcp/../x", "BrowserMCP", "browsermcp "] {
-            assert!(bridgeable_plugin(name).is_none(), "{name:?} should not resolve");
+        for name in [
+            "",
+            "browser",
+            "browsermcp/../x",
+            "BrowserMCP",
+            "browsermcp ",
+        ] {
+            assert!(
+                bridgeable_plugin(name).is_none(),
+                "{name:?} should not resolve"
+            );
         }
     }
 
@@ -97,7 +109,11 @@ mod tests {
     fn every_plugin_lists_the_tools_a_policy_is_built_from() {
         // An empty list would mean a client config with no allow-policy, so every call prompts.
         for plugin in BRIDGEABLE_PLUGINS {
-            assert!(!plugin.tool_names.is_empty(), "{} lists no tools", plugin.name);
+            assert!(
+                !plugin.tool_names.is_empty(),
+                "{} lists no tools",
+                plugin.name
+            );
         }
     }
 }

@@ -26,7 +26,9 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum BinaryError {
     /// Nothing was found at any candidate location.
-    #[error("{name} is not installed: looked at {searched} location(s). Install it and retry; this service never downloads it.")]
+    #[error(
+        "{name} is not installed: looked at {searched} location(s). Install it and retry; this service never downloads it."
+    )]
     NotFound {
         /// The program looked for.
         name: &'static str,
@@ -284,8 +286,12 @@ fn usable(path: &Path) -> Result<(), String> {
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("/"));
-    let parent_meta = std::fs::metadata(parent)
-        .map_err(|error| format!("its directory {} could not be inspected: {error}", parent.display()))?;
+    let parent_meta = std::fs::metadata(parent).map_err(|error| {
+        format!(
+            "its directory {} could not be inspected: {error}",
+            parent.display()
+        )
+    })?;
     let parent_mode = parent_meta.permissions().mode();
     // The sticky bit is what makes `/usr/local/bin`-style shared directories safe when
     // they are group-writable: only the owner of a file may replace it.

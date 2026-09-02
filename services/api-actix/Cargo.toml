@@ -13,6 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 nullrouter-logship.workspace = true
+# CA generation for the MITM control surface; the privileged install step lives in its binary.
+nullrouter-mitm-helper.workspace = true
+# geteuid, to skip a permission test that cannot hold for root.
+libc.workspace = true
 actix-web.workspace = true
 futures-util.workspace = true
 nullrouter-contracts.workspace = true

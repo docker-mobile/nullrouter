@@ -33,7 +33,9 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 /// A stub state service answering the console-log route, recording the methods it saw.
 async fn stub_state(page: Value) -> (String, Arc<Mutex<Vec<String>>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
     let addr = listener.local_addr().expect("addr").to_string();
     let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&seen);
@@ -121,7 +123,10 @@ async fn the_list_returns_the_lines_the_state_service_holds() -> TestResult {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["success"], true, "{body}");
     assert_eq!(body["logs"].as_array().map(Vec::len), Some(2), "{body}");
-    assert_eq!(body["logs"][0], "[nullrouter-runtime] info upstream returned 503");
+    assert_eq!(
+        body["logs"][0],
+        "[nullrouter-runtime] info upstream returned 503"
+    );
 
     // And the structured form is carried alongside it, which upstream has no equivalent of: with
     // eight processes writing to one buffer, a bare string is not traceable to what logged it.
@@ -130,7 +135,9 @@ async fn the_list_returns_the_lines_the_state_service_holds() -> TestResult {
     assert_eq!(body["cursor"], 2, "{body}");
 
     // And it really went to the state service rather than being answered locally.
-    let requests = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let requests = seen
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(
         requests
             .iter()
@@ -152,7 +159,9 @@ async fn the_delete_clears_the_buffer_in_the_state_service() -> TestResult {
     // the stream does not read.
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["success"], true, "{body}");
-    let requests = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let requests = seen
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(
         requests
             .iter()

@@ -91,7 +91,11 @@ pub(crate) fn funnel_is_serving(text: &str) -> bool {
     parsed
         .get("AllowFunnel")
         .and_then(serde_json::Value::as_object)
-        .is_some_and(|allowed| allowed.values().any(|value| value == &serde_json::Value::Bool(true)))
+        .is_some_and(|allowed| {
+            allowed
+                .values()
+                .any(|value| value == &serde_json::Value::Bool(true))
+        })
 }
 
 #[cfg(test)]
@@ -123,7 +127,10 @@ mod tests {
         // Left in, every Funnel URL would be `https://host.ts.net./`, which does not resolve.
         let status = TailscaleStatus::parse(LOGGED_IN).expect("parses");
 
-        assert_eq!(status.hostname().as_deref(), Some("r4nd0m.tail1a2b3c.ts.net"));
+        assert_eq!(
+            status.hostname().as_deref(),
+            Some("r4nd0m.tail1a2b3c.ts.net")
+        );
         assert_eq!(
             status.funnel_url().as_deref(),
             Some("https://r4nd0m.tail1a2b3c.ts.net")

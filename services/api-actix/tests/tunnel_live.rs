@@ -211,7 +211,11 @@ async fn an_installed_but_unauthenticated_tailscale_asks_for_a_login() -> TestRe
     // This is the state that cannot be reached with no binary present, and the one where a
     // naive implementation reports a generic failure instead of an actionable step.
     let _installed = Installed::new(&[
-        ("NULLROUTER_TAILSCALE_BIN", "tailscale", TAILSCALE_NEEDS_LOGIN),
+        (
+            "NULLROUTER_TAILSCALE_BIN",
+            "tailscale",
+            TAILSCALE_NEEDS_LOGIN,
+        ),
         ("NULLROUTER_TAILSCALED_BIN", "tailscaled", TAILSCALED),
     ]);
 
@@ -234,7 +238,11 @@ async fn an_installed_unauthenticated_tailscale_is_reported_distinctly_from_an_a
 -> TestResult {
     // Given: installed, daemon up, not logged in.
     let _installed = Installed::new(&[
-        ("NULLROUTER_TAILSCALE_BIN", "tailscale", TAILSCALE_NEEDS_LOGIN),
+        (
+            "NULLROUTER_TAILSCALE_BIN",
+            "tailscale",
+            TAILSCALE_NEEDS_LOGIN,
+        ),
         ("NULLROUTER_TAILSCALED_BIN", "tailscaled", TAILSCALED),
     ]);
 
@@ -317,8 +325,16 @@ async fn the_status_route_reports_a_live_funnel() -> TestResult {
     assert_eq!(status, StatusCode::OK);
     let tailscale = body.get("tailscale").ok_or("no tailscale section")?;
     assert_eq!(tailscale.get("installed"), Some(&Value::Bool(true)));
-    assert_eq!(tailscale.get("loggedIn"), Some(&Value::Bool(true)), "{body}");
-    assert_eq!(tailscale.get("funnelActive"), Some(&Value::Bool(true)), "{body}");
+    assert_eq!(
+        tailscale.get("loggedIn"),
+        Some(&Value::Bool(true)),
+        "{body}"
+    );
+    assert_eq!(
+        tailscale.get("funnelActive"),
+        Some(&Value::Bool(true)),
+        "{body}"
+    );
     assert_eq!(
         tailscale.get("url").and_then(Value::as_str),
         Some("https://r4nd0m.tail1a2b3c.ts.net"),
@@ -528,10 +544,7 @@ async fn the_resolver_refuses_a_world_writable_binary() -> TestResult {
         .get("message")
         .and_then(Value::as_str)
         .ok_or("no message")?;
-    assert!(
-        message.contains("writable by group or others"),
-        "{message}"
-    );
+    assert!(message.contains("writable by group or others"), "{message}");
     Ok(())
 }
 

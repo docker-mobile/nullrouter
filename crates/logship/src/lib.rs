@@ -25,6 +25,8 @@
 //! grow without bound to preserve debug output: the request is the thing that matters, and the
 //! operator can see in the pane that lines were lost.
 
+pub mod scrub;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -194,7 +196,10 @@ where
 
         let line = Line {
             level: event.metadata().level().as_str().to_ascii_lowercase(),
-            message: strip_ansi(&message.text),
+            // Scrubbed here, at the source, so a credential never reaches the channel — let alone the
+            // loopback socket to the state service or the browser tab beyond it. The state service
+            // scrubs again at ingest, because anything may post to that endpoint.
+            message: scrub::scrub(&strip_ansi(&message.text)),
         };
         // `try_send`, never `send`: this runs inside the tracing callback, on whatever thread
         // logged. Awaiting here would block a request behind the state service's availability, and

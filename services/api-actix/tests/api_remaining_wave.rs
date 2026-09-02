@@ -1,5 +1,4 @@
 #![allow(clippy::future_not_send)]
-
 #![allow(
     clippy::indexing_slicing,
     reason = "indexing a serde_json::Value is the assertion: a shape that does not match \
@@ -170,8 +169,9 @@ async fn headroom_and_tunnel_routes_return_safe_defaults() -> TestResult {
     assert!(
         field(&tunnel_enable, "message")?
             .as_str()
-            .is_some_and(|message| message.contains("cloudflared")
-                && message.contains("not installed")),
+            .is_some_and(
+                |message| message.contains("cloudflared") && message.contains("not installed")
+            ),
         "the failure must name the missing binary: {tunnel_enable}"
     );
     // And it must say this service will not fetch it, so nobody waits for a download.

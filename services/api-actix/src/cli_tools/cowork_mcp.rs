@@ -106,9 +106,7 @@ async fn no_content() -> HttpResponse {
 /// The registry listing, from cache unless `?refresh=1`.
 async fn registry(query: web::Query<RefreshQuery>) -> HttpResponse {
     let forced = query.refresh.as_deref() == Some("1");
-    if !forced
-        && let Some(cached) = cached_listing()
-    {
+    if !forced && let Some(cached) = cached_listing() {
         let mut body = cached;
         crate::responses::insert_key(&mut body, "cached", Value::Bool(true));
         return responses::json(StatusCode::OK, &body);
@@ -180,7 +178,10 @@ async fn fetch_registry() -> Result<Vec<Value>, String> {
         if std::time::Instant::now() >= deadline {
             break;
         }
-        let mut url = format!("{}?limit={PAGE_SIZE}&visibility={VISIBILITY}", registry_url());
+        let mut url = format!(
+            "{}?limit={PAGE_SIZE}&visibility={VISIBILITY}",
+            registry_url()
+        );
         if !cursor.is_empty() {
             url.push_str("&cursor=");
             url.push_str(&urlencoding(&cursor));
@@ -197,7 +198,12 @@ async fn fetch_registry() -> Result<Vec<Value>, String> {
         }
         let page: Value = response.json().await.map_err(|error| error.to_string())?;
 
-        for item in page.get("servers").and_then(Value::as_array).into_iter().flatten() {
+        for item in page
+            .get("servers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(entry) = registry_entry(item)
                 && let Some(url) = entry.get("url").and_then(Value::as_str)
             {
@@ -247,7 +253,10 @@ fn registry_entry(item: &Value) -> Option<Value> {
         return None;
     }
 
-    let name = server.get("name").and_then(Value::as_str).unwrap_or_default();
+    let name = server
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let text = |value: Option<&Value>| value.and_then(Value::as_str).unwrap_or_default().to_owned();
     let tool_names = meta
         .get("toolNames")
@@ -358,7 +367,9 @@ fn probe_target_is_allowed(url: &str) -> Result<(), String> {
             parsed.scheme()
         ));
     }
-    let host = parsed.host_str().ok_or_else(|| "Invalid url: no host".to_owned())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Invalid url: no host".to_owned())?;
     if crate::proxy_test::is_local_target(host) {
         return Err(format!(
             "Refusing to probe {host}: it is a loopback or private address, which this service can \
@@ -472,7 +483,10 @@ async fn send(
     let mut request = client
         .post(url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::ACCEPT, "application/json, text/event-stream")
+        .header(
+            reqwest::header::ACCEPT,
+            "application/json, text/event-stream",
+        )
         .header("MCP-Protocol-Version", PROTOCOL_VERSION);
     if let Some(session) = session {
         request = request.header("mcp-session-id", session);

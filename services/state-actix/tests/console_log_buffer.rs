@@ -105,8 +105,7 @@ async fn lines_from_several_services_land_in_one_buffer_in_arrival_order() -> Te
             ("nullrouter-runtime", &["runtime one", "runtime two"][..]),
             ("nullrouter-state", &["state one"][..]),
         ] {
-            let (status, body) =
-                send!(app, Method::POST, PATH, Some(&batch(service, messages)));
+            let (status, body) = send!(app, Method::POST, PATH, Some(&batch(service, messages)));
             assert_eq!(status, StatusCode::OK, "{body}");
             assert_eq!(body["accepted"], messages.len());
         }
@@ -129,14 +128,18 @@ async fn lines_from_several_services_land_in_one_buffer_in_arrival_order() -> Te
 async fn a_cursor_read_returns_only_new_lines() -> TestResult {
     with_app!(app, {
         // Given: a buffer the stream has already read once.
-        send!(app, Method::POST, PATH, Some(&batch("api", &["one", "two"])));
+        send!(
+            app,
+            Method::POST,
+            PATH,
+            Some(&batch("api", &["one", "two"]))
+        );
         let (_status, first) = send!(app, Method::GET, PATH);
         let cursor = first["cursor"].as_u64().expect("a cursor");
 
         // When: more arrives and the stream polls with the cursor it was given.
         send!(app, Method::POST, PATH, Some(&batch("api", &["three"])));
-        let (_status, second) =
-            send!(app, Method::GET, &format!("{PATH}?cursor={cursor}"));
+        let (_status, second) = send!(app, Method::GET, &format!("{PATH}?cursor={cursor}"));
 
         // Then: only the new line comes back. Re-sending the first two would make the pane show
         // every line twice per tick.
@@ -147,10 +150,12 @@ async fn a_cursor_read_returns_only_new_lines() -> TestResult {
 
         // And polling again with nothing new returns nothing, with the cursor still usable.
         let cursor = second["cursor"].as_u64().expect("a cursor");
-        let (_status, third) =
-            send!(app, Method::GET, &format!("{PATH}?cursor={cursor}"));
+        let (_status, third) = send!(app, Method::GET, &format!("{PATH}?cursor={cursor}"));
         assert_eq!(third["logs"].as_array().map(Vec::len), Some(0), "{third}");
-        assert_eq!(third["cursor"], cursor, "an empty poll must not move the cursor");
+        assert_eq!(
+            third["cursor"], cursor,
+            "an empty poll must not move the cursor"
+        );
         Ok(())
     })
 }
@@ -177,8 +182,7 @@ async fn a_clear_empties_the_buffer_and_is_visible_to_a_poller() -> TestResult {
 
         // And numbering continues past the clear, so a stale cursor is not handed lines it has seen.
         send!(app, Method::POST, PATH, Some(&batch("api", &["after"])));
-        let (_status, page) =
-            send!(app, Method::GET, &format!("{PATH}?cursor={cursor}"));
+        let (_status, page) = send!(app, Method::GET, &format!("{PATH}?cursor={cursor}"));
         assert_eq!(page["logs"].as_array().map(Vec::len), Some(1), "{page}");
         assert_eq!(page["logs"][0], "[api] info after");
         Ok(())
@@ -239,4 +243,92 @@ async fn an_empty_buffer_reads_as_empty_rather_than_failing() -> TestResult {
     assert_eq!(page["logs"].as_array().map(Vec::len), Some(0), "{page}");
     assert_eq!(page["dropped"], false);
     Ok(())
+}
+
+#[actix_web::test]
+async fn a_credential_in_a_shipped_line_never_reaches_a_reader() -> TestResult {
+    with_app!(app, {
+        // Given: lines carrying the four shapes a credential actually reaches a log in — a bearer
+        // header, a JSON key field, a cookie, and a bare self-identifying token. Upstream's pane shows
+        // whatever was logged, so any of these would land in a browser tab and from there into a
+        // screenshot or a pasted bug report.
+        let leaky = batch(
+            "nullrouter-runtime",
+            &[
+                "dispatch failed: Authorization: Bearer ya29.a0AfB_alongaccesstokenvalue",
+                r#"body was {"api_key":"sk-proj-abcdefghijklmnopqrstuv","model":"gpt-5"}"#,
+                "grok refused: Cookie: sso=alongsessioncookievaluehere",
+                "decoding eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJlZGF0YQ failed",
+            ][..],
+        );
+        let (status, body) = send!(app, Method::POST, PATH, Some(&leaky));
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        // When: the buffer is read the way the dashboard's pane reads it.
+        let (status, page) = send!(app, Method::GET, PATH);
+        assert_eq!(status, StatusCode::OK);
+        let rendered = page["logs"].to_string();
+
+        // Then: not one of the secrets survives.
+        for secret in [
+            "alongaccesstokenvalue",
+            "abcdefghijklmnopqrstuv",
+            "alongsessioncookievaluehere",
+            "eyJzdWIiOiJ1c2VyIn0",
+        ] {
+            assert!(
+                !rendered.contains(secret),
+                "a credential reached the pane: {secret} in {rendered}"
+            );
+        }
+        // And the lines are still worth reading: the surrounding message survives, which is why this
+        // scrubs rather than drops.
+        // `model` rather than the quoted pair: the page renders as JSON, so the inner quotes arrive
+        // escaped and asserting on them would be asserting on the serialiser.
+        for context in ["dispatch failed", "grok refused", "gpt-5", "decoding"] {
+            assert!(
+                rendered.contains(context),
+                "scrubbing ate the diagnostic text: {context} missing from {rendered}"
+            );
+        }
+        assert_eq!(
+            rendered.matches("[redacted]").count(),
+            4,
+            "each secret should leave a marker: {rendered}"
+        );
+        Ok(())
+    })
+}
+
+#[actix_web::test]
+async fn an_ordinary_traffic_line_is_stored_verbatim() -> TestResult {
+    with_app!(app, {
+        // Given: the per-request line the runtime emits on every completed call. This is what makes the
+        // pane a traffic view rather than a service-log view, so it must survive the scrubber intact.
+        let traffic = batch(
+            "nullrouter-runtime",
+            &[
+                "request complete endpoint=/v1/chat/completions provider=anthropic \
+                 model=claude-sonnet-4-5 status=success status_code=200 latency_ms=412 \
+                 prompt_tokens=1200 completion_tokens=98",
+            ][..],
+        );
+        let (status, body) = send!(app, Method::POST, PATH, Some(&traffic));
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let (status, page) = send!(app, Method::GET, PATH);
+        assert_eq!(status, StatusCode::OK);
+        let rendered = page["logs"].to_string();
+        assert!(!rendered.contains("[redacted]"), "{rendered}");
+        for field in [
+            "/v1/chat/completions",
+            "anthropic",
+            "claude-sonnet-4-5",
+            "status_code=200",
+            "latency_ms=412",
+        ] {
+            assert!(rendered.contains(field), "{field} missing from {rendered}");
+        }
+        Ok(())
+    })
 }

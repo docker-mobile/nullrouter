@@ -213,7 +213,11 @@ fn claude_apply(document: &mut Value, payload: &Payload) {
     // falls back to the model's own window.
     match truthy_string(payload.max_context_tokens.as_ref()) {
         Some(tokens) => {
-            write::set_path(document, &["env", MAX_CONTEXT_TOKENS], Value::String(tokens));
+            write::set_path(
+                document,
+                &["env", MAX_CONTEXT_TOKENS],
+                Value::String(tokens),
+            );
         }
         None => write::remove_path(document, &["env", MAX_CONTEXT_TOKENS]),
     }
@@ -267,8 +271,16 @@ fn truthy_string(value: Option<&Value>) -> Option<String> {
 /// `wire_api: "responses"` is upstream's, and it is not a detail: Codex speaks the Responses API
 /// to this provider, so writing `chat` here would make every request 404.
 fn codex_config_apply(document: &mut Value, payload: &Payload) {
-    write::set_path(document, &["model"], Value::String(payload.model().to_owned()));
-    write::set_path(document, &["model_provider"], Value::String(PROVIDER.to_owned()));
+    write::set_path(
+        document,
+        &["model"],
+        Value::String(payload.model().to_owned()),
+    );
+    write::set_path(
+        document,
+        &["model_provider"],
+        Value::String(PROVIDER.to_owned()),
+    );
     write::set_path(
         document,
         &["model_providers", PROVIDER],
@@ -331,9 +343,21 @@ fn codex_auth_revoke(document: &mut Value) {
 /// one leaves half the editor pointed elsewhere.
 fn cline_state_apply(document: &mut Value, payload: &Payload) {
     let model = Value::String(payload.model().to_owned());
-    write::set_path(document, &["actModeApiProvider"], Value::String("openai".to_owned()));
-    write::set_path(document, &["planModeApiProvider"], Value::String("openai".to_owned()));
-    write::set_path(document, &["openAiBaseUrl"], Value::String(payload.base_bare()));
+    write::set_path(
+        document,
+        &["actModeApiProvider"],
+        Value::String("openai".to_owned()),
+    );
+    write::set_path(
+        document,
+        &["planModeApiProvider"],
+        Value::String("openai".to_owned()),
+    );
+    write::set_path(
+        document,
+        &["openAiBaseUrl"],
+        Value::String(payload.base_bare()),
+    );
     write::set_path(document, &["openAiModelId"], model.clone());
     write::set_path(document, &["planModeOpenAiModelId"], model);
 }
@@ -350,8 +374,16 @@ fn cline_state_revoke(document: &mut Value) {
     write::remove_path(document, &["openAiBaseUrl"]);
     write::remove_path(document, &["openAiModelId"]);
     write::remove_path(document, &["planModeOpenAiModelId"]);
-    write::set_path(document, &["actModeApiProvider"], Value::String("cline".to_owned()));
-    write::set_path(document, &["planModeApiProvider"], Value::String("cline".to_owned()));
+    write::set_path(
+        document,
+        &["actModeApiProvider"],
+        Value::String("cline".to_owned()),
+    );
+    write::set_path(
+        document,
+        &["planModeApiProvider"],
+        Value::String("cline".to_owned()),
+    );
 }
 
 fn cline_secrets_apply(document: &mut Value, payload: &Payload) {
@@ -508,11 +540,15 @@ fn opencode_apply(document: &mut Value, payload: &Payload) {
         .get("provider")
         .and_then(|providers| providers.get(PROVIDER))
         .cloned();
-    let mut provider = existing.unwrap_or_else(|| {
-        serde_json::json!({ "npm": "@ai-sdk/openai-compatible", "options": {}, "models": {} })
-    });
+    let mut provider = existing.unwrap_or_else(
+        || serde_json::json!({ "npm": "@ai-sdk/openai-compatible", "options": {}, "models": {} }),
+    );
 
-    write::set_path(&mut provider, &["options", "baseURL"], Value::String(payload.base_v1()));
+    write::set_path(
+        &mut provider,
+        &["options", "baseURL"],
+        Value::String(payload.base_v1()),
+    );
     write::set_path(
         &mut provider,
         &["options", "apiKey"],
@@ -567,7 +603,12 @@ fn opencode_revoke(document: &mut Value) {
     if is_qualified(document.get("model")) {
         write::remove_path(document, &["model"]);
     }
-    if is_qualified(document.get("agent").and_then(|agent| agent.get("explorer")).and_then(|explorer| explorer.get("model"))) {
+    if is_qualified(
+        document
+            .get("agent")
+            .and_then(|agent| agent.get("explorer"))
+            .and_then(|explorer| explorer.get("model")),
+    ) {
         write::remove_path(document, &["agent", "explorer"]);
     }
 }
@@ -650,9 +691,9 @@ fn droid_apply(document: &mut Value, payload: &Payload) {
     // default silently is not the one droid uses.
     let default_index = match payload.active_model.as_deref() {
         Some("") => None,
-        Some(active) => Some(
-            ours_begin + names.iter().position(|name| name == active).unwrap_or(0),
-        ),
+        Some(active) => {
+            Some(ours_begin + names.iter().position(|name| name == active).unwrap_or(0))
+        }
         None => Some(ours_begin),
     };
     if let Some(index) = default_index
@@ -671,7 +712,10 @@ fn droid_apply(document: &mut Value, payload: &Payload) {
 }
 
 fn droid_revoke(document: &mut Value) {
-    let Some(models) = document.get_mut("customModels").and_then(Value::as_array_mut) else {
+    let Some(models) = document
+        .get_mut("customModels")
+        .and_then(Value::as_array_mut)
+    else {
         return;
     };
     models.retain(|model| !has_droid_prefix(model));
@@ -691,9 +735,7 @@ fn prune_empty_array(document: &mut Value, key: &str) {
         .get(key)
         .and_then(Value::as_array)
         .is_some_and(Vec::is_empty);
-    if empty
-        && let Some(map) = document.as_object_mut()
-    {
+    if empty && let Some(map) = document.as_object_mut() {
         map.remove(key);
     }
 }
@@ -788,7 +830,11 @@ fn deepseek_apply(document: &mut Value, payload: &Payload) {
 /// Upstream cannot make this distinction because it replaces the whole file.
 fn deepseek_revoke(document: &mut Value) {
     if document.get("provider").and_then(Value::as_str) == Some("openai") {
-        write::set_path(document, &["provider"], Value::String("deepseek".to_owned()));
+        write::set_path(
+            document,
+            &["provider"],
+            Value::String("deepseek".to_owned()),
+        );
     }
     let ours = document
         .get("providers")
@@ -884,7 +930,11 @@ fn openclaw_apply(document: &mut Value, payload: &Payload) {
 
     // Every model this apply should allow: the default, plus any per-agent override.
     let mut all: Vec<String> = vec![primary.clone()];
-    for model in payload.agent_models.iter().flat_map(|models| models.values()) {
+    for model in payload
+        .agent_models
+        .iter()
+        .flat_map(|models| models.values())
+    {
         if let Some(model) = model.as_str().filter(|model| !model.is_empty())
             && !all.iter().any(|existing| existing == model)
         {
@@ -933,8 +983,15 @@ fn openclaw_apply(document: &mut Value, payload: &Payload) {
         .and_then(Value::as_array_mut)
     {
         for agent in agents.iter_mut() {
-            let id = agent.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
-            let selected = overrides.get(&id).and_then(Value::as_str).filter(|model| !model.is_empty());
+            let id = agent
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let selected = overrides
+                .get(&id)
+                .and_then(Value::as_str)
+                .filter(|model| !model.is_empty());
             match selected {
                 Some(model) => {
                     write::set_path(agent, &["model"], Value::String(qualified(model)));
@@ -1126,7 +1183,13 @@ fn grok_apply(document: &mut Value, payload: &Payload) {
     text = toml_text::upsert_section(
         &text,
         &grok_section(GROK_MAIN_SLOT),
-        &grok_section_fields(payload.model(), &base, &key, DISPLAY, payload.context_window.as_ref()),
+        &grok_section_fields(
+            payload.model(),
+            &base,
+            &key,
+            DISPLAY,
+            payload.context_window.as_ref(),
+        ),
     );
     text = toml_text::set_field(&text, GROK_MODELS_SECTION, "default", GROK_MAIN_SLOT);
 
@@ -1324,7 +1387,12 @@ const COWORK_DEFAULT_PLUGINS: &[CoworkPlugin] = &[
         url: "https://mcp.tavily.com/mcp",
         transport: "http",
         oauth: true,
-        tools: &["tavily_search", "tavily_extract", "tavily_crawl", "tavily_map"],
+        tools: &[
+            "tavily_search",
+            "tavily_extract",
+            "tavily_crawl",
+            "tavily_map",
+        ],
     },
 ];
 
@@ -1339,7 +1407,13 @@ pub(crate) struct CoworkPlugin {
 }
 
 /// A managed MCP server entry, in the shape Cowork's config takes.
-fn cowork_server_entry(name: &str, url: &str, transport: &str, oauth: bool, tools: &[&str]) -> Value {
+fn cowork_server_entry(
+    name: &str,
+    url: &str,
+    transport: &str,
+    oauth: bool,
+    tools: &[&str],
+) -> Value {
     let mut entry = serde_json::json!({
         "name": name,
         "url": url,
@@ -1423,9 +1497,12 @@ fn cowork_apply(document: &mut Value, payload: &Payload) {
         // Only set alongside a server list: this is the one relax-security key this port writes,
         // and it exists to make the localhost bridge entries acceptable. With no bridge entries
         // there is nothing for it to enable.
-        let bridged = servers
-            .iter()
-            .any(|server| server.get("url").and_then(Value::as_str).is_some_and(is_bridge_url));
+        let bridged = servers.iter().any(|server| {
+            server
+                .get("url")
+                .and_then(Value::as_str)
+                .is_some_and(is_bridge_url)
+        });
         if bridged {
             write::set_path(document, &["isLocalDevMcpEnabled"], Value::Bool(true));
         }
@@ -1443,11 +1520,7 @@ fn cowork_servers(payload: &Payload) -> Vec<Value> {
     let chosen: Vec<&CoworkPlugin> = match payload.plugins.as_ref() {
         Some(names) => COWORK_DEFAULT_PLUGINS
             .iter()
-            .filter(|plugin| {
-                names
-                    .iter()
-                    .any(|name| name.as_str() == Some(plugin.name))
-            })
+            .filter(|plugin| names.iter().any(|name| name.as_str() == Some(plugin.name)))
             .collect(),
         None => COWORK_DEFAULT_PLUGINS.iter().collect(),
     };
@@ -1491,8 +1564,14 @@ fn cowork_servers(payload: &Payload) -> Vec<Value> {
     // Custom entries are URL-only. Upstream filters on `p.url` for the same reason: a custom entry
     // carrying a command would be a request to spawn an arbitrary process.
     for plugin in payload.custom_plugins.iter().flatten() {
-        let name = plugin.get("name").and_then(Value::as_str).unwrap_or_default();
-        let url = plugin.get("url").and_then(Value::as_str).unwrap_or_default();
+        let name = plugin
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let url = plugin
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if name.is_empty() || url.is_empty() || seen.iter().any(|seen| seen == name) {
             continue;
         }
@@ -1551,8 +1630,7 @@ pub(crate) struct Writer {
 }
 
 /// Signature of the derived-write hook. See [`Writer::derived`].
-type DerivedWriter =
-    fn(&Value, &Payload, Direction, &mut Outcome) -> Result<(), write::WriteError>;
+type DerivedWriter = fn(&Value, &Payload, Direction, &mut Outcome) -> Result<(), write::WriteError>;
 
 /// What an apply or revoke did, for the response body.
 #[derive(Debug, Default)]
@@ -1955,8 +2033,7 @@ static COPILOT: Writer = Writer {
 
 static OPENCODE: Writer = Writer {
     validate: |payload| {
-        if payload.base_url.as_deref().is_none_or(str::is_empty)
-            || payload.model_names().is_empty()
+        if payload.base_url.as_deref().is_none_or(str::is_empty) || payload.model_names().is_empty()
         {
             return Err("baseUrl and at least one model are required");
         }
@@ -1974,8 +2051,7 @@ static OPENCODE: Writer = Writer {
 
 static DROID: Writer = Writer {
     validate: |payload| {
-        if payload.base_url.as_deref().is_none_or(str::is_empty)
-            || payload.model_names().is_empty()
+        if payload.base_url.as_deref().is_none_or(str::is_empty) || payload.model_names().is_empty()
         {
             return Err("baseUrl and at least one model are required");
         }

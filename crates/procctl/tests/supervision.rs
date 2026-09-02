@@ -228,7 +228,10 @@ async fn a_one_shot_child_is_ready_when_it_exits_zero() {
     let supervisor = Supervisor::spawn("one-shot-child", 50);
 
     let value = supervisor
-        .start(spec("echo configured; exit 0", ReadyRule::CompletesSuccessfully))
+        .start(spec(
+            "echo configured; exit 0",
+            ReadyRule::CompletesSuccessfully,
+        ))
         .await
         .expect("a zero exit is success for this rule");
 
@@ -390,7 +393,10 @@ async fn stop_terminates_the_child_gracefully() {
         ))
         .await
         .expect("must start");
-    let pid = supervisor.snapshot().pid.expect("a running child has a pid");
+    let pid = supervisor
+        .snapshot()
+        .pid
+        .expect("a running child has a pid");
 
     let outcome = supervisor.stop().await;
 
@@ -501,7 +507,11 @@ async fn only_one_child_runs_per_supervisor() {
         .copied()
         .filter(|pid| process_exists(*pid))
         .collect();
-    assert_eq!(live.len(), 1, "expected exactly one live child, got {live:?}");
+    assert_eq!(
+        live.len(),
+        1,
+        "expected exactly one live child, got {live:?}"
+    );
     assert_eq!(live.first().copied(), pids.last().copied());
     supervisor.stop().await;
 }
@@ -780,11 +790,10 @@ async fn a_snapshot_is_readable_while_a_start_is_pending() {
         "expected Starting"
     );
     for _ in 0..20_u32 {
-        let snapshot = tokio::time::timeout(Duration::from_millis(200), async {
-            supervisor.snapshot()
-        })
-        .await
-        .expect("a snapshot must never block");
+        let snapshot =
+            tokio::time::timeout(Duration::from_millis(200), async { supervisor.snapshot() })
+                .await
+                .expect("a snapshot must never block");
         assert_eq!(snapshot.state.as_str(), "starting");
     }
 

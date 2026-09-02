@@ -1,0 +1,88 @@
+name: Release
+
+# Separate from the pull-request gate on purpose. CI answers "may this land?" on every push; this answers
+# "what is this tag?" and produces artifacts, which is slower and should not sit between a change and its
+# review.
+on:
+  push:
+    tags: ['v*']
+  # Runnable by hand so a release build can be exercised before a tag exists.
+  workflow_dispatch:
+
+permissions:
+  # Needed only to attach artifacts to the release. Declared explicitly rather than inherited: a workflow
+  # that can write to the repository is a much larger thing to trust than one that can publish a build.
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  binaries:
+    name: Build and package the release binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Add the WASM target for the dashboard bundle
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          # Registry only, not `target`: a release build should not inherit object files from an unrelated
+          # run. The download cache is the part worth keeping.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build every service in release mode
+        run: cargo build --release --workspace --exclude nullrouter-dashboard-wasm
+
+      - name: Collect the binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Only the executables: `target/release` also holds `.d` dependency files and build scripts.
+          # `nullrouter-dashboard-wasm` is skipped for the same reason the build excludes it — it is a
+          # wasm-only library, and a host-target artifact of it is a leftover rather than a deliverable.
+          for binary in target/release/nullrouter-*; do
+            case "$binary" in
+              *.d | *dashboard-wasm) continue ;;
+            esac
+            if [ -f "$binary" ] && [ -x "$binary" ]; then
+              cp "$binary" dist/
+            fi
+          done
+          ls -lh dist/
+
+      - name: Record a checksum for each binary
+        # So a downloader can verify what they got, and so a release's contents are pinned in its own log.
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum nullrouter-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload the binaries as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nullrouter-binaries-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Attach the binaries to the release
+        # Only for a tag. A manual run produces the artifact above and stops there, because there is no
+        # release to attach to.
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/nullrouter-*
+            dist/SHA256SUMS
+          generate_release_notes: true

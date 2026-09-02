@@ -1,5 +1,7 @@
 use actix_web::{App, HttpServer, web};
-use nullrouter_api::{AppConfig, RuntimeClient, ShutdownHandle, StateClient, TunnelManager, configure};
+use nullrouter_api::{
+    AppConfig, RuntimeClient, ShutdownHandle, StateClient, TunnelManager, configure,
+};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 20129;

@@ -32,10 +32,18 @@ pub(crate) enum WriteError {
     /// The config path could not be worked out, and guessing one would mean writing a file into a
     /// directory some other program owns. Cowork is the case: its filename comes out of a
     /// `_meta.json` that only exists once the app has been set up.
-    NoConfigPath { detail: String },
+    NoConfigPath {
+        detail: String,
+    },
     /// The file exists but does not parse, so merging into it would mean discarding it.
-    Unparseable { path: PathBuf, detail: String },
-    Io { path: PathBuf, detail: String },
+    Unparseable {
+        path: PathBuf,
+        detail: String,
+    },
+    Io {
+        path: PathBuf,
+        detail: String,
+    },
     Serialise(String),
 }
 
@@ -70,12 +78,12 @@ fn io_error(path: &Path, error: &std::io::Error) -> WriteError {
 pub(crate) fn read_for_merge(path: &Path, format: Format) -> Result<Value, WriteError> {
     match std::fs::read_to_string(path) {
         Ok(text) if text.trim().is_empty() => Ok(default_for(format)),
-        Ok(text) => super::detect::parse_config(&text, format).map_err(|detail| {
-            WriteError::Unparseable {
+        Ok(text) => {
+            super::detect::parse_config(&text, format).map_err(|detail| WriteError::Unparseable {
                 path: path.to_owned(),
                 detail,
-            }
-        }),
+            })
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(default_for(format)),
         Err(error) => Err(io_error(path, &error)),
     }
@@ -149,11 +157,13 @@ pub(crate) fn write_atomically(path: &Path, text: &str) -> Result<(), WriteError
     // delete than a random one.
     let temporary = path.with_extension(format!(
         "{}.9router-tmp",
-        path.extension().and_then(std::ffi::OsStr::to_str).unwrap_or("")
+        path.extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or("")
     ));
     {
-        let mut file = std::fs::File::create(&temporary)
-            .map_err(|error| io_error(&temporary, &error))?;
+        let mut file =
+            std::fs::File::create(&temporary).map_err(|error| io_error(&temporary, &error))?;
         file.write_all(text.as_bytes())
             .map_err(|error| io_error(&temporary, &error))?;
         // Flushed and synced before the rename: the rename is atomic with respect to the
@@ -344,7 +354,11 @@ mod tests {
             "permissions": {"allow": ["Bash"]},
             "env": {"MY_OWN": "keep me"},
         });
-        set_path(&mut document, &["env", "ANTHROPIC_BASE_URL"], json!("http://x/v1"));
+        set_path(
+            &mut document,
+            &["env", "ANTHROPIC_BASE_URL"],
+            json!("http://x/v1"),
+        );
         assert_eq!(document["permissions"]["allow"][0], "Bash");
         assert_eq!(document["env"]["MY_OWN"], "keep me");
         assert_eq!(document["env"]["ANTHROPIC_BASE_URL"], "http://x/v1");
@@ -462,10 +476,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("new.json");
         write_atomically(&path, "X").expect("write");
-        assert!(
-            !backup_path(&path).exists(),
-            "there was nothing to back up"
-        );
+        assert!(!backup_path(&path).exists(), "there was nothing to back up");
     }
 
     #[test]
@@ -520,7 +531,10 @@ mod tests {
         let crate::cli_tools::spec::Marker::Text(check) = tool.marker else {
             panic!("codex has a text marker")
         };
-        assert!(check(&text), "the written file must satisfy the marker: {text}");
+        assert!(
+            check(&text),
+            "the written file must satisfy the marker: {text}"
+        );
     }
 
     #[test]
@@ -535,14 +549,35 @@ mod tests {
 
     #[test]
     fn the_v1_suffix_helpers_are_idempotent() {
-        assert_eq!(with_v1("http://127.0.0.1:20128"), "http://127.0.0.1:20128/v1");
-        assert_eq!(with_v1("http://127.0.0.1:20128/v1"), "http://127.0.0.1:20128/v1");
-        assert_eq!(with_v1("http://127.0.0.1:20128/"), "http://127.0.0.1:20128/v1");
-        assert_eq!(with_v1("http://127.0.0.1:20128/v1/"), "http://127.0.0.1:20128/v1");
+        assert_eq!(
+            with_v1("http://127.0.0.1:20128"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            with_v1("http://127.0.0.1:20128/v1"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            with_v1("http://127.0.0.1:20128/"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            with_v1("http://127.0.0.1:20128/v1/"),
+            "http://127.0.0.1:20128/v1"
+        );
 
-        assert_eq!(without_v1("http://127.0.0.1:20128/v1"), "http://127.0.0.1:20128");
-        assert_eq!(without_v1("http://127.0.0.1:20128"), "http://127.0.0.1:20128");
-        assert_eq!(without_v1("http://127.0.0.1:20128/v1/"), "http://127.0.0.1:20128");
+        assert_eq!(
+            without_v1("http://127.0.0.1:20128/v1"),
+            "http://127.0.0.1:20128"
+        );
+        assert_eq!(
+            without_v1("http://127.0.0.1:20128"),
+            "http://127.0.0.1:20128"
+        );
+        assert_eq!(
+            without_v1("http://127.0.0.1:20128/v1/"),
+            "http://127.0.0.1:20128"
+        );
     }
 
     #[test]

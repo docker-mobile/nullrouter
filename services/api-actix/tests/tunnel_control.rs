@@ -94,7 +94,10 @@ async fn the_operation_catalog_is_discoverable() -> TestResult {
     }
 
     // And both tools are reported, so a panel can explain unavailability once.
-    let tools = body.get("tools").and_then(Value::as_array).ok_or("no tools")?;
+    let tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .ok_or("no tools")?;
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|tool| tool.get("id").and_then(Value::as_str))
@@ -293,8 +296,11 @@ async fn a_named_tunnel_requires_a_token_and_never_echoes_it() -> TestResult {
 
     // When: it is called with no token, then with one.
     let (empty_status, empty) = post("/api/tunnel/named/enable", r#"{"token":""}"#).await?;
-    let (with_status, with) =
-        post("/api/tunnel/named/enable", r#"{"token":"SECRET-VALUE-12345"}"#).await?;
+    let (with_status, with) = post(
+        "/api/tunnel/named/enable",
+        r#"{"token":"SECRET-VALUE-12345"}"#,
+    )
+    .await?;
 
     // Then: an empty token is a bad request, and a supplied one is never reflected back —
     // not in the success path and not in the missing-binary failure.

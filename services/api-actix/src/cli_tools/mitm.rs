@@ -7,6 +7,7 @@ use actix_web::{
 };
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 
+use super::mitm_control;
 use crate::{json_body, responses};
 
 const MITM_UNSUPPORTED: &str = "Antigravity MITM control is not supported by nullrouter-api";
@@ -28,11 +29,35 @@ struct MitmStatus {
     needs_sudo_password: bool,
     is_admin: bool,
     mitm_router_base_url: &'static str,
+    /// The root CA a client must trust, its path, and the command that installs it.
+    ///
+    /// Beyond upstream's own status shape, and additive: the fields above keep their meanings. Upstream's
+    /// dashboard learns the certificate's location from its own filesystem access, which a browser talking
+    /// to a service does not have.
+    authority: mitm_control::AuthorityReport,
 }
 
+/// Every tool's mappings, which is the shape the alias file holds.
+///
+/// Upstream's GET returns one tool's map when asked for one and all of them otherwise; returning all of
+/// them unconditionally is simpler and is what the dashboard reads.
 #[derive(Debug, Clone, Serialize)]
-struct AliasStatus {
-    aliases: BTreeMap<String, String>,
+struct AliasStatusAll {
+    aliases: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+/// The answer to a `trust-cert` action.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrustCertResponse {
+    /// The CA exists after this call.
+    success: bool,
+    /// Whether it is installed in a system trust store. Never true from here: that needs root.
+    trusted: bool,
+    /// Its path, fingerprint, and the command that installs it.
+    authority: mitm_control::AuthorityReport,
+    /// Why installation was not performed.
+    message: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -70,15 +95,29 @@ struct AliasPutRequest {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum AliasMappings {
-    Object(BTreeMap<String, Option<IgnoredAny>>),
+    /// `{alias: model}`. A null value clears that alias, which is how upstream's UI deletes one.
+    Object(BTreeMap<String, Option<String>>),
     Other(IgnoredAny),
 }
 
 impl AliasMappings {
-    fn into_object_flag(self) -> bool {
+    /// The mappings, or `None` when the body was not an object of them.
+    ///
+    /// A null value drops the alias rather than writing an empty string: the interceptor reads this file
+    /// and an alias mapped to `""` would rewrite a model name to nothing.
+    fn into_mappings(self) -> Option<BTreeMap<String, String>> {
         match self {
-            Self::Object(_entries) => true,
-            Self::Other(_value) => false,
+            Self::Object(entries) => Some(
+                entries
+                    .into_iter()
+                    .filter_map(|(alias, model)| {
+                        model
+                            .filter(|model| !model.trim().is_empty())
+                            .map(|model| (alias, model))
+                    })
+                    .collect(),
+            ),
+            Self::Other(_value) => None,
         }
     }
 }
@@ -104,24 +143,32 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
 }
 
 async fn status() -> HttpResponse {
+    let paths = mitm_control::Paths::discover();
+    // Described rather than ensured: a GET must not have a side effect, and generating a key pair because
+    // someone opened the dashboard would be one.
+    let authority = mitm_control::describe_authority(&paths);
+    // Real state, not a placeholder. Writing the hosts file needs root; *reading* it does not, so the
+    // redirection markers the privileged helper leaves behind are visible from here.
+    let dns_status = mitm_control::dns_status(&mitm_control::hosts_path());
     responses::json(
         StatusCode::OK,
         &MitmStatus {
+            // No interceptor process exists to be running: the TLS listener is not ported. The CA and the
+            // alias map — the parts a proxy cannot bootstrap for itself — are.
             running: false,
             pid: None,
-            cert_exists: false,
+            cert_exists: authority.exists,
+            // Trust is a system store's state, which only the privileged helper can read.
             cert_trusted: false,
-            dns_status: BTreeMap::from([
-                ("antigravity".to_owned(), false),
-                ("copilot".to_owned(), false),
-                ("cursor".to_owned(), false),
-                ("kiro".to_owned(), false),
-            ]),
+            dns_status,
             has_cached_password: false,
             is_win: cfg!(windows),
+            // This service never asks for a password and never invokes sudo. The privileged step is a
+            // separate binary the operator runs themselves, which is why the command is reported instead.
             needs_sudo_password: false,
             is_admin: false,
             mitm_router_base_url: "http://localhost:20128",
+            authority,
         },
     )
 }
@@ -148,7 +195,27 @@ async fn start(body: web::Bytes) -> HttpResponse {
 }
 
 async fn stop(_body: web::Bytes) -> HttpResponse {
+    // There is no interceptor process to stop. Kept explicit rather than answering 200 for a no-op, which
+    // would tell a dashboard it had stopped something that never ran.
     unsupported()
+}
+
+/// Hosts-file redirection is refused here, not merely unimplemented.
+///
+/// Editing `/etc/hosts` needs root. This service runs unprivileged and must stay that way — a router that
+/// could rewrite the system's name resolution would be a far larger thing to trust than one that routes
+/// API calls. The privileged step is `nullrouter-mitm-helper enable-hosts`, which refuses to run unless it
+/// is already root and never invokes sudo itself.
+fn hosts_unsupported() -> HttpResponse {
+    responses::json(
+        StatusCode::NOT_IMPLEMENTED,
+        &OwnedError {
+            error: "Hosts-file redirection needs root, and this service runs unprivileged. Run \
+                    `sudo nullrouter-mitm-helper enable-hosts <tool>` instead; it refuses unless already \
+                    root and never invokes sudo itself."
+                .to_owned(),
+        },
+    )
 }
 
 async fn patch(body: web::Bytes) -> HttpResponse {
@@ -162,8 +229,33 @@ async fn patch(body: web::Bytes) -> HttpResponse {
         return bad_request("tool and action required");
     }
     match action {
-        Some("trust-cert") => unsupported(),
-        Some("enable" | "disable") if tool.is_some_and(|tool| !tool.is_empty()) => unsupported(),
+        // Generating the CA is the part this service can do; installing it into a system trust store needs
+        // root, so the response names the command rather than pretending to have run it.
+        Some("trust-cert") => {
+            let paths = mitm_control::Paths::discover();
+            match mitm_control::ensure_authority(&paths) {
+                Ok(authority) => responses::json(
+                    StatusCode::OK,
+                    &TrustCertResponse {
+                        success: true,
+                        trusted: false,
+                        authority,
+                        message: "The root CA exists. Installing it into a system trust store requires root, \
+                              so run the reported install command yourself: this service is unprivileged \
+                              and never invokes sudo.",
+                    },
+                ),
+                Err(error) => responses::json(
+                    StatusCode::CONFLICT,
+                    &OwnedError {
+                        error: error.message(),
+                    },
+                ),
+            }
+        }
+        Some("enable" | "disable") if tool.is_some_and(|tool| !tool.is_empty()) => {
+            hosts_unsupported()
+        }
         Some("enable" | "disable") | None => bad_request("tool and action required"),
         Some(_) if tool.is_none_or(str::is_empty) => bad_request("tool and action required"),
         Some(_) => bad_request("action must be enable, disable, or trust-cert"),
@@ -171,12 +263,23 @@ async fn patch(body: web::Bytes) -> HttpResponse {
 }
 
 async fn alias_status() -> HttpResponse {
-    responses::json(
-        StatusCode::OK,
-        &AliasStatus {
-            aliases: BTreeMap::new(),
-        },
-    )
+    let paths = mitm_control::Paths::discover();
+    match mitm_control::read_aliases(&paths) {
+        Ok(map) => responses::json(
+            StatusCode::OK,
+            &AliasStatusAll {
+                aliases: map.all().clone(),
+            },
+        ),
+        // A malformed file is reported rather than silently treated as empty: an operator whose mappings
+        // stopped applying needs to know the file is unreadable, not be shown a blank map.
+        Err(error) => responses::json(
+            StatusCode::CONFLICT,
+            &OwnedError {
+                error: error.message(),
+            },
+        ),
+    }
 }
 
 async fn update_alias(body: web::Bytes) -> HttpResponse {
@@ -188,18 +291,57 @@ async fn update_alias(body: web::Bytes) -> HttpResponse {
         Some(tool) if !tool.is_empty() => tool,
         Some(_) | None => return bad_request("tool and mappings required"),
     };
-    if request
-        .mappings
-        .is_none_or(|mappings| !mappings.into_object_flag())
-    {
+    let Some(mappings) = request.mappings.and_then(AliasMappings::into_mappings) else {
         return bad_request("tool and mappings required");
+    };
+
+    // Checked before the redirection guard below, so an unknown tool gets the error that names the
+    // problem rather than one about DNS it could never satisfy.
+    if !mitm_control::TOOLS.contains(&tool) {
+        return responses::json(
+            StatusCode::BAD_REQUEST,
+            &OwnedError {
+                error: mitm_control::ControlError::UnknownTool {
+                    tool: tool.to_owned(),
+                }
+                .message(),
+            },
+        );
     }
-    responses::json(
-        StatusCode::FORBIDDEN,
-        &OwnedError {
-            error: format!("DNS must be enabled for {tool} before editing model mappings"),
-        },
-    )
+
+    // Upstream's own guard, and worth keeping: an alias for a tool whose traffic is not being redirected
+    // configures a rewrite that nothing will perform, so saving it would look like it took effect. The
+    // check is a hosts-file read, which needs no privilege even though the write does.
+    if !mitm_control::tool_redirected(&mitm_control::hosts_path(), tool) {
+        return responses::json(
+            StatusCode::FORBIDDEN,
+            &OwnedError {
+                error: format!("DNS must be enabled for {tool} before editing model mappings"),
+            },
+        );
+    }
+
+    let paths = mitm_control::Paths::discover();
+    match mitm_control::write_aliases(&paths, tool, mappings) {
+        Ok(map) => responses::json(
+            StatusCode::OK,
+            &AliasStatusAll {
+                aliases: map.all().clone(),
+            },
+        ),
+        Err(error @ mitm_control::ControlError::UnknownTool { .. }) => responses::json(
+            StatusCode::BAD_REQUEST,
+            &OwnedError {
+                error: error.message(),
+            },
+        ),
+        Err(error) => responses::json(
+            StatusCode::CONFLICT,
+            &OwnedError {
+                error: error.message(),
+            },
+        ),
+    }
 }
 
 async fn mitm_options() -> HttpResponse {

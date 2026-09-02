@@ -279,7 +279,10 @@ fn a_changed_binary_stops_matching_its_pin() {
     let error = spec()
         .resolve(Some(&pinned))
         .expect_err("a replaced binary must be refused");
-    assert!(matches!(error, BinaryError::DigestMismatch { .. }), "{error:?}");
+    assert!(
+        matches!(error, BinaryError::DigestMismatch { .. }),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -304,10 +307,7 @@ fn nothing_installed_reports_how_many_places_were_tried() {
     }
     assert!(!spec.is_installed());
     // The message has to tell the operator this service will not fetch it for them.
-    assert!(
-        error.to_string().contains("never downloads"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("never downloads"), "{error}");
 }
 
 #[test]
@@ -328,7 +328,10 @@ fn an_empty_override_falls_through_to_the_normal_lookup() {
     // SAFETY: as above.
     unsafe { std::env::remove_var(OVERRIDE_VAR) };
 
-    assert!(matches!(error, BinaryError::NotFound { searched: 1, .. }), "{error:?}");
+    assert!(
+        matches!(error, BinaryError::NotFound { searched: 1, .. }),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -346,8 +349,8 @@ fn a_caller_discovered_path_gets_the_same_checks() {
 
     // World-writable is refused here too.
     let open = write_with_mode(dir.path(), "python3-open", b"#!/bin/sh\nexit 0\n", 0o777);
-    let error = nullrouter_procctl::binary::Executable::verified(open, "python3")
-        .expect_err("must refuse");
+    let error =
+        nullrouter_procctl::binary::Executable::verified(open, "python3").expect_err("must refuse");
     match error {
         BinaryError::Unusable { reason, .. } => {
             assert!(reason.contains("writable by group or others"), "{reason}");

@@ -179,7 +179,9 @@ pub(crate) fn next_frame(state: &mut StreamState, page: Option<&Page>) -> Option
     if cleared && page.logs.is_empty() {
         state.cursor = Some(page.cursor);
         state.idle_ticks = 0;
-        return Some(frame(&serde_json::json!({ "type": "clear", "liveCapture": true })));
+        return Some(frame(
+            &serde_json::json!({ "type": "clear", "liveCapture": true }),
+        ));
     }
 
     if page.logs.is_empty() {
@@ -295,8 +297,7 @@ mod tests {
         let mut state = StreamState::default();
         next_frame(&mut state, Some(&page(&["old"], 1, 0, false)));
 
-        let cleared =
-            next_frame(&mut state, Some(&page(&[], 1, 1, false))).expect("a clear frame");
+        let cleared = next_frame(&mut state, Some(&page(&[], 1, 1, false))).expect("a clear frame");
         assert_eq!(parsed(&cleared)["type"], "clear");
 
         // And a clear that already has new lines behind it replaces rather than appends.
@@ -332,7 +333,10 @@ mod tests {
                 .is_some_and(|line| line.contains("unreachable")),
             "{outage}"
         );
-        assert!(next_frame(&mut state, None).is_none(), "silent while still down");
+        assert!(
+            next_frame(&mut state, None).is_none(),
+            "silent while still down"
+        );
 
         // On recovery the client's contents are replaced, since lines may have been missed.
         let back = next_frame(&mut state, Some(&page(&["two"], 2, 0, false))).expect("a frame");

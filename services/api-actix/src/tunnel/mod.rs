@@ -269,7 +269,10 @@ async fn tunnel_status(manager: web::Data<Manager>) -> HttpResponse {
                 // the device is logged in, and showing it as the tunnel URL would advertise
                 // an address that answers nothing.
                 url: if funnel_active {
-                    status.as_ref().and_then(TailscaleStatus::funnel_url).unwrap_or_default()
+                    status
+                        .as_ref()
+                        .and_then(TailscaleStatus::funnel_url)
+                        .unwrap_or_default()
                 } else {
                     String::new()
                 },
@@ -334,10 +337,7 @@ async fn enable(manager: web::Data<Manager>, body: web::Bytes) -> HttpResponse {
 ///
 /// The token is taken from the body and placed in the child's environment. It is never
 /// logged, never echoed back, and never becomes an argument.
-async fn enable_named(
-    manager: web::Data<Manager>,
-    body: web::Json<TokenRequest>,
-) -> HttpResponse {
+async fn enable_named(manager: web::Data<Manager>, body: web::Json<TokenRequest>) -> HttpResponse {
     if body.token.trim().is_empty() {
         return failure(StatusCode::BAD_REQUEST, "a tunnel token is required");
     }
@@ -397,11 +397,15 @@ async fn tailscale_enable(manager: web::Data<Manager>, body: web::Bytes) -> Http
                     },
                 );
             }
-            failure_owned(StatusCode::BAD_GATEWAY, format!("tailscale funnel failed: {text}"))
+            failure_owned(
+                StatusCode::BAD_GATEWAY,
+                format!("tailscale funnel failed: {text}"),
+            )
         }
-        Ok(Outcome::Supervised(_value)) => {
-            failure(StatusCode::BAD_GATEWAY, "funnel returned an unexpected result")
-        }
+        Ok(Outcome::Supervised(_value)) => failure(
+            StatusCode::BAD_GATEWAY,
+            "funnel returned an unexpected result",
+        ),
         Err(error) => report(&error),
     }
 }
@@ -421,13 +425,17 @@ async fn begin_login(manager: &Manager, status: Option<&TailscaleStatus>) -> Htt
                 None if output.success() => finish_funnel(manager).await,
                 None => failure_owned(
                     StatusCode::BAD_GATEWAY,
-                    format!("tailscale up produced no login URL: {}", output.failure_text()),
+                    format!(
+                        "tailscale up produced no login URL: {}",
+                        output.failure_text()
+                    ),
                 ),
             }
         }
-        Ok(Outcome::Supervised(_value)) => {
-            failure(StatusCode::BAD_GATEWAY, "login returned an unexpected result")
-        }
+        Ok(Outcome::Supervised(_value)) => failure(
+            StatusCode::BAD_GATEWAY,
+            "login returned an unexpected result",
+        ),
         Err(error) => report(&error),
     }
 }
@@ -478,7 +486,10 @@ async fn finish_funnel(manager: &Manager) -> HttpResponse {
 /// The daemon stays up because it may be carrying tailnet traffic the operator wants; only
 /// the public exposure is withdrawn, which is what "disable" means here.
 async fn tailscale_disable(manager: web::Data<Manager>) -> HttpResponse {
-    match manager.run("tailscale.funnel.reset", &Args::default()).await {
+    match manager
+        .run("tailscale.funnel.reset", &Args::default())
+        .await
+    {
         Ok(Outcome::Finished(output)) if output.success() => responses::json(
             StatusCode::OK,
             &MutationResult::ok("funnel withdrawn; tailscaled left running"),
@@ -487,9 +498,10 @@ async fn tailscale_disable(manager: web::Data<Manager>) -> HttpResponse {
             StatusCode::BAD_GATEWAY,
             format!("funnel reset failed: {}", output.failure_text()),
         ),
-        Ok(Outcome::Supervised(_value)) => {
-            failure(StatusCode::BAD_GATEWAY, "reset returned an unexpected result")
-        }
+        Ok(Outcome::Supervised(_value)) => failure(
+            StatusCode::BAD_GATEWAY,
+            "reset returned an unexpected result",
+        ),
         Err(error) => report(&error),
     }
 }
@@ -808,8 +820,8 @@ async fn run_operation(
 
 #[cfg(test)]
 mod tests {
-    use super::{MutationResult, catalog};
     use super::catalog::Effect;
+    use super::{MutationResult, catalog};
 
     #[test]
     fn a_mutation_result_omits_the_fields_it_has_nothing_for() {
@@ -827,10 +839,9 @@ mod tests {
 
     #[test]
     fn a_url_result_carries_it_in_both_places_a_panel_looks() {
-        let rendered = serde_json::to_value(MutationResult::with_url(
-            "https://a-b-c.trycloudflare.com",
-        ))
-        .expect("serialises");
+        let rendered =
+            serde_json::to_value(MutationResult::with_url("https://a-b-c.trycloudflare.com"))
+                .expect("serialises");
 
         assert_eq!(
             rendered.get("tunnelUrl"),
@@ -857,4 +868,3 @@ mod tests {
         }
     }
 }
-

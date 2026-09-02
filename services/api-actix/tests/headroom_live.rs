@@ -209,7 +209,12 @@ async fn an_externally_managed_interpreter_is_reported_as_such() -> TestResult {
     fixture.python(PYTHON_EXTERNALLY_MANAGED);
 
     // When: an install is requested.
-    let (status, body) = call(Method::POST, "/api/headroom/extras", r#"{"extras":["code"]}"#).await?;
+    let (status, body) = call(
+        Method::POST,
+        "/api/headroom/extras",
+        r#"{"extras":["code"]}"#,
+    )
+    .await?;
 
     // Then: 409, not a 502 retryable failure, with a code a panel can branch on.
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -220,7 +225,10 @@ async fn an_externally_managed_interpreter_is_reported_as_such() -> TestResult {
         "{body}"
     );
     // And the message names the way out, plus what pip actually said.
-    let error = body.get("error").and_then(Value::as_str).ok_or("no error")?;
+    let error = body
+        .get("error")
+        .and_then(Value::as_str)
+        .ok_or("no error")?;
     assert!(error.contains("virtual environment"), "{error}");
     assert!(error.contains("NULLROUTER_PYTHON"), "{error}");
     assert!(error.contains("externally-managed-environment"), "{error}");
@@ -284,7 +292,10 @@ async fn an_ordinary_pip_failure_is_not_mistaken_for_pep_668() -> TestResult {
         Some("PIP_FAILED"),
         "{body}"
     );
-    let error = body.get("error").and_then(Value::as_str).ok_or("no error")?;
+    let error = body
+        .get("error")
+        .and_then(Value::as_str)
+        .ok_or("no error")?;
     assert!(error.contains("Could not find a version"), "{error}");
     assert!(
         !error.contains("virtual environment"),
@@ -450,8 +461,16 @@ async fn starting_the_proxy_reports_the_pid_this_service_owns() -> TestResult {
 
     // And status agrees while it runs.
     assert_eq!(status_status, StatusCode::OK);
-    assert_eq!(status_body.get("running"), Some(&Value::Bool(true)), "{status_body}");
-    assert_eq!(status_body.get("healthy"), Some(&Value::Bool(true)), "{status_body}");
+    assert_eq!(
+        status_body.get("running"),
+        Some(&Value::Bool(true)),
+        "{status_body}"
+    );
+    assert_eq!(
+        status_body.get("healthy"),
+        Some(&Value::Bool(true)),
+        "{status_body}"
+    );
     assert_eq!(status_body.get("managedPid").and_then(Value::as_u64), pid);
 
     // And the stop reports it down.
@@ -524,7 +543,9 @@ async fn a_proxy_that_never_announces_itself_still_starts() -> TestResult {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body.get("success"), Some(&Value::Bool(true)), "{body}");
     assert!(
-        body.get("pid").and_then(Value::as_u64).is_some_and(|pid| pid > 1),
+        body.get("pid")
+            .and_then(Value::as_u64)
+            .is_some_and(|pid| pid > 1),
         "{body}"
     );
 

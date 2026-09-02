@@ -1,0 +1,144 @@
+name: CI
+
+# Every gate that must hold before a change lands. Each job is named for what it proves, so a red X on a
+# pull request says which property broke without opening the log.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Manual runs, for re-checking a branch after a dependency update rather than pushing an empty commit.
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run's answer irrelevant. Cancelling it frees a runner
+# instead of spending ten minutes proving something about code nobody will merge. `main` is exempt: its
+# runs are the record of what was released.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Deliberately no `RUSTFLAGS: -D warnings`. The workspace already declares its lint policy in
+  # `Cargo.toml` — `clippy::all` denied, plus `unwrap_used`, `expect_used`, `panic`, `indexing_slicing` —
+  # and the `lint` job enforces exactly that. Adding a blanket `-D warnings` would hold CI to a stricter
+  # standard than the project chose and than a developer sees locally, so the first red build would be
+  # about `dead_code` in a work-in-progress module rather than about the change under review.
+  # This workspace's debug info is the difference between a build that fits a runner's disk and one that
+  # does not: 123 test binaries at full `debuginfo=2` reach roughly 27 GB, and a GitHub runner has 14 GB
+  # free. `line-tables-only` keeps panic locations — which is all a CI failure needs — and lands near 12 GB.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  # Incremental artifacts are useless across runners and cost gigabytes.
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  format:
+    name: Formatting is clean (cargo fmt --all --check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        # No toolchain arguments: `rust-toolchain.toml` pins the channel and components, and naming them
+        # again here would let the two disagree silently.
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  lint:
+    name: Lints pass (cargo clippy --workspace --all-targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Add the WASM target for the dashboard crate
+        # `--all-targets` includes `apps/dashboard-leptos`, which only builds for wasm32.
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Cache cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          # Keyed on the lockfile so a dependency change invalidates it, and on the job so clippy's
+          # artifacts do not fight the test job's for one entry.
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-
+      - name: Run clippy
+        # The workspace denies `clippy::all` plus `unwrap_used`, `expect_used`, `panic`, and
+        # `indexing_slicing`; `--all-targets` is what makes it cover tests and benches too.
+        run: cargo clippy --workspace --all-targets
+
+  test:
+    name: Tests pass (cargo test --workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Add the WASM target for the dashboard crate
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Install Node, which two suites require rather than skip
+        # `crates/pxpipe/tests/worker.rs` drives a real worker process and
+        # `services/runtime-actix/tests/pxpipe_request_path.rs` asserts what the provider receives. Both
+        # fail rather than skip without `node`, deliberately: a suite that passed quietly would report the
+        # PXPIPE transform as covered when nothing had run.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Cache cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+      - name: Report free disk before the build
+        # Printed rather than gated: a full disk on this workspace shows up as a linker `Bus error` or a
+        # `rustc-LLVM ERROR: IO failure on output stream`, neither of which names the cause. Having the
+        # number in the log turns a confusing failure into an obvious one.
+        run: df -h /
+      - name: Run the workspace suite
+        run: cargo test --workspace
+      - name: Report free disk after the build
+        if: always()
+        run: df -h /
+
+  build:
+    name: Release binaries build (cargo build --release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Cache cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+      - name: Build every service in release mode
+        # A separate gate from `test`, because release compiles code the debug profile does not: an
+        # optimisation-only failure or an overflow check that changes behaviour between profiles would
+        # otherwise reach a tag unnoticed. The dashboard crate is excluded here; it is wasm-only and
+        # covered by the `lint` and `test` jobs.
+        run: cargo build --release --workspace --exclude nullrouter-dashboard-wasm
+      - name: Confirm the binaries exist and report their sizes
+        run: ls -lh target/release/nullrouter-* | grep -v '\.d$'

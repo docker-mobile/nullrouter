@@ -17,7 +17,6 @@
     clippy::panic,
     reason = "test assertions read clearer with direct expect than with error plumbing"
 )]
-
 #![allow(
     clippy::indexing_slicing,
     reason = "indexing a serde_json::Value is the assertion: a shape that does not match \

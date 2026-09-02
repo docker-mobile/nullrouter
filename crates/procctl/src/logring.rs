@@ -164,7 +164,11 @@ mod tests {
         ring.push(&"é".repeat(100));
 
         let stored = ring.lines();
-        assert!(stored.first().is_some_and(|line| line.ends_with(TRUNCATION_MARK)));
+        assert!(
+            stored
+                .first()
+                .is_some_and(|line| line.ends_with(TRUNCATION_MARK))
+        );
     }
 
     #[test]
@@ -210,6 +214,10 @@ mod tests {
 
         ring.push("something");
 
-        assert_eq!(ring.len(), 1, "a zero-capacity ring would silently eat everything");
+        assert_eq!(
+            ring.len(),
+            1,
+            "a zero-capacity ring would silently eat everything"
+        );
     }
 }

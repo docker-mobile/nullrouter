@@ -1,5 +1,4 @@
 #![allow(clippy::future_not_send)]
-
 #![allow(
     clippy::indexing_slicing,
     reason = "indexing a serde_json::Value is the assertion: a shape that does not match \

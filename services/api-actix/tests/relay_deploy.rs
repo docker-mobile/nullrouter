@@ -51,7 +51,9 @@ struct Stub {
 }
 
 async fn stub(replies: Vec<Reply>) -> Stub {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
     let addr = listener.local_addr().expect("addr").to_string();
     let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let auth: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -143,7 +145,9 @@ fn reply(matches: &'static str, status: u16, body: Value) -> Reply {
 
 /// A stub state service that accepts the pool record.
 async fn stub_state() -> (String, Arc<Mutex<Vec<String>>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
     let addr = listener.local_addr().expect("addr").to_string();
     let bodies: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&bodies);
@@ -245,8 +249,16 @@ impl Drop for ApiOverride {
 async fn a_cloudflare_deploy_uploads_enables_and_records_the_pool() -> TestResult {
     // Given: a Cloudflare account that accepts the upload and has a workers.dev subdomain.
     let platform = stub(vec![
-        reply("PUT /accounts/abc123/workers/scripts/relay-test", 200, json!({"success": true})),
-        reply("POST /accounts/abc123/workers/scripts/relay-test/subdomain", 200, json!({"success": true})),
+        reply(
+            "PUT /accounts/abc123/workers/scripts/relay-test",
+            200,
+            json!({"success": true}),
+        ),
+        reply(
+            "POST /accounts/abc123/workers/scripts/relay-test/subdomain",
+            200,
+            json!({"success": true}),
+        ),
         reply(
             "GET /accounts/abc123/workers/subdomain",
             200,
@@ -255,7 +267,10 @@ async fn a_cloudflare_deploy_uploads_enables_and_records_the_pool() -> TestResul
     ])
     .await;
     let (state_addr, pool_bodies) = stub_state().await;
-    let _api = ApiOverride::new("NULLROUTER_CLOUDFLARE_API", &format!("http://{}", platform.addr));
+    let _api = ApiOverride::new(
+        "NULLROUTER_CLOUDFLARE_API",
+        &format!("http://{}", platform.addr),
+    );
 
     // When: the dashboard deploys a relay.
     let (status, body) = deploy(
@@ -273,7 +288,10 @@ async fn a_cloudflare_deploy_uploads_enables_and_records_the_pool() -> TestResul
 
     // And all three calls happened, in the order each depends on.
     let requests = platform.requests();
-    assert!(platform.saw("PUT /accounts/abc123/workers/scripts/relay-test"), "{requests:?}");
+    assert!(
+        platform.saw("PUT /accounts/abc123/workers/scripts/relay-test"),
+        "{requests:?}"
+    );
     assert!(platform.saw("/subdomain"), "{requests:?}");
 
     // The token was sent to Cloudflare as a bearer credential...
@@ -287,12 +305,19 @@ async fn a_cloudflare_deploy_uploads_enables_and_records_the_pool() -> TestResul
     );
     // ...and does not come back in the response, nor reach the stored pool record.
     let serialised = serde_json::to_string(&body)?;
-    assert!(!serialised.contains("cf-secret"), "the token leaked into the response: {serialised}");
+    assert!(
+        !serialised.contains("cf-secret"),
+        "the token leaked into the response: {serialised}"
+    );
     let pools = pool_bodies
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert_eq!(pools.len(), 1, "{pools:?}");
-    assert!(!pools[0].contains("cf-secret"), "the token was stored: {}", pools[0]);
+    assert!(
+        !pools[0].contains("cf-secret"),
+        "the token was stored: {}",
+        pools[0]
+    );
     assert!(pools[0].contains("\"type\":\"cloudflare\""), "{}", pools[0]);
     assert!(
         pools[0].contains("relay-test.my-team.workers.dev"),
@@ -306,12 +331,23 @@ async fn a_cloudflare_deploy_uploads_enables_and_records_the_pool() -> TestResul
 async fn a_cloudflare_account_without_a_subdomain_is_told_what_to_fix() -> TestResult {
     // Given: an account with no workers.dev subdomain, so a deployed worker has no hostname.
     let platform = stub(vec![
-        reply("PUT /accounts/abc123/workers/scripts/relay-test", 200, json!({"success": true})),
-        reply("GET /accounts/abc123/workers/subdomain", 200, json!({"result": {}})),
+        reply(
+            "PUT /accounts/abc123/workers/scripts/relay-test",
+            200,
+            json!({"success": true}),
+        ),
+        reply(
+            "GET /accounts/abc123/workers/subdomain",
+            200,
+            json!({"result": {}}),
+        ),
     ])
     .await;
     let (state_addr, pool_bodies) = stub_state().await;
-    let _api = ApiOverride::new("NULLROUTER_CLOUDFLARE_API", &format!("http://{}", platform.addr));
+    let _api = ApiOverride::new(
+        "NULLROUTER_CLOUDFLARE_API",
+        &format!("http://{}", platform.addr),
+    );
 
     // When: a deploy runs.
     let (status, body) = deploy(
@@ -346,7 +382,10 @@ async fn a_cloudflare_rejection_reports_cloudflares_own_message() -> TestResult 
     )])
     .await;
     let (state_addr, _pools) = stub_state().await;
-    let _api = ApiOverride::new("NULLROUTER_CLOUDFLARE_API", &format!("http://{}", platform.addr));
+    let _api = ApiOverride::new(
+        "NULLROUTER_CLOUDFLARE_API",
+        &format!("http://{}", platform.addr),
+    );
 
     // When: a deploy runs.
     let (status, body) = deploy(
@@ -368,7 +407,11 @@ async fn a_deno_deploy_waits_for_the_build_and_records_the_pool() -> TestResult 
     // Given: an app that is created, deployed, and reports success immediately.
     let platform = stub(vec![
         reply("POST /apps", 200, json!({"id": "app_1"})),
-        reply("POST /apps/app_1/deploy", 200, json!({"id": "rev_1", "status": "succeeded"})),
+        reply(
+            "POST /apps/app_1/deploy",
+            200,
+            json!({"id": "rev_1", "status": "succeeded"}),
+        ),
     ])
     .await;
     let (state_addr, pool_bodies) = stub_state().await;
@@ -389,7 +432,11 @@ async fn a_deno_deploy_waits_for_the_build_and_records_the_pool() -> TestResult 
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(pools[0].contains("\"type\":\"deno\""), "{}", pools[0]);
-    assert!(!pools[0].contains("dn-secret"), "the token was stored: {}", pools[0]);
+    assert!(
+        !pools[0].contains("dn-secret"),
+        "the token was stored: {}",
+        pools[0]
+    );
     Ok(())
 }
 
@@ -397,7 +444,11 @@ async fn a_deno_deploy_waits_for_the_build_and_records_the_pool() -> TestResult 
 async fn a_failed_deno_deploy_deletes_the_app_it_created() -> TestResult {
     // Given: an app that is created but whose deploy is rejected.
     let platform = stub(vec![
-        reply("POST /apps/app_1/deploy", 400, json!({"error": "bad asset"})),
+        reply(
+            "POST /apps/app_1/deploy",
+            400,
+            json!({"error": "bad asset"}),
+        ),
         reply("POST /apps", 200, json!({"id": "app_1"})),
         reply("DELETE /apps/app_1", 200, json!({"ok": true})),
     ])
@@ -416,7 +467,11 @@ async fn a_failed_deno_deploy_deletes_the_app_it_created() -> TestResult {
     // Then: the app is cleaned up. Without this the failed attempt keeps the name, so the obvious
     // next step — try again — fails with "already exists".
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
-    assert!(platform.saw("DELETE /apps/app_1"), "{:?}", platform.requests());
+    assert!(
+        platform.saw("DELETE /apps/app_1"),
+        "{:?}",
+        platform.requests()
+    );
     assert!(
         pool_bodies
             .lock()
@@ -465,7 +520,10 @@ async fn a_vercel_deploy_disables_protection_before_reporting_ready() -> TestRes
     ])
     .await;
     let (state_addr, pool_bodies) = stub_state().await;
-    let _api = ApiOverride::new("NULLROUTER_VERCEL_API", &format!("http://{}", platform.addr));
+    let _api = ApiOverride::new(
+        "NULLROUTER_VERCEL_API",
+        &format!("http://{}", platform.addr),
+    );
 
     // When: the dashboard deploys.
     let (status, body) = deploy(
@@ -481,25 +539,44 @@ async fn a_vercel_deploy_disables_protection_before_reporting_ready() -> TestRes
     // Then: protection was turned off. Vercel puts SSO in front of new deployments by default, so
     // skipping this leaves a relay that answers every request with a login page while the pool
     // looks configured.
-    assert!(platform.saw("PATCH /v9/projects/prj_1"), "{:?}", platform.requests());
+    assert!(
+        platform.saw("PATCH /v9/projects/prj_1"),
+        "{:?}",
+        platform.requests()
+    );
     let pools = pool_bodies
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(pools[0].contains("\"type\":\"vercel\""), "{}", pools[0]);
-    assert!(!pools[0].contains("vc-secret"), "the token was stored: {}", pools[0]);
+    assert!(
+        !pools[0].contains("vc-secret"),
+        "the token was stored: {}",
+        pools[0]
+    );
     Ok(())
 }
 
 #[actix_web::test]
 async fn a_vercel_deployment_that_errors_is_reported_rather_than_waited_on() -> TestResult {
     let platform = stub(vec![
-        reply("POST /v13/deployments", 200, json!({"id": "dpl_1", "projectId": "prj_1"})),
+        reply(
+            "POST /v13/deployments",
+            200,
+            json!({"id": "dpl_1", "projectId": "prj_1"}),
+        ),
         reply("PATCH /v9/projects/prj_1", 200, json!({"ok": true})),
-        reply("GET /v13/deployments/dpl_1", 200, json!({"readyState": "ERROR"})),
+        reply(
+            "GET /v13/deployments/dpl_1",
+            200,
+            json!({"readyState": "ERROR"}),
+        ),
     ])
     .await;
     let (state_addr, pool_bodies) = stub_state().await;
-    let _api = ApiOverride::new("NULLROUTER_VERCEL_API", &format!("http://{}", platform.addr));
+    let _api = ApiOverride::new(
+        "NULLROUTER_VERCEL_API",
+        &format!("http://{}", platform.addr),
+    );
 
     let (status, body) = deploy(
         &state_addr,
@@ -511,7 +588,9 @@ async fn a_vercel_deployment_that_errors_is_reported_rather_than_waited_on() -> 
     // A terminal failure ends the wait rather than polling until the timeout.
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
     assert!(
-        body["error"].as_str().is_some_and(|error| error.contains("ERROR")),
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("ERROR")),
         "{body}"
     );
     assert!(
@@ -525,7 +604,8 @@ async fn a_vercel_deployment_that_errors_is_reported_rather_than_waited_on() -> 
 }
 
 #[actix_web::test]
-async fn a_deploy_is_refused_before_any_platform_call_when_the_request_is_incomplete() -> TestResult {
+async fn a_deploy_is_refused_before_any_platform_call_when_the_request_is_incomplete() -> TestResult
+{
     // Deploying creates something billable and publicly reachable in someone's account, so a
     // malformed request must not reach the platform at all.
     let platform = stub(Vec::new()).await;
@@ -559,7 +639,11 @@ async fn a_deploy_is_refused_before_any_platform_call_when_the_request_is_incomp
         ),
     ] {
         let (status, response) = deploy(&state_addr, uri, &body).await?;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri} {body} -> {response}");
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{uri} {body} -> {response}"
+        );
         assert_eq!(response["error"], expected, "{uri} {body}");
     }
 
@@ -577,7 +661,10 @@ async fn a_project_name_that_could_address_another_resource_is_refused() -> Test
     // the user's account than the one the dashboard named.
     let platform = stub(Vec::new()).await;
     let (state_addr, _pools) = stub_state().await;
-    let _api = ApiOverride::new("NULLROUTER_CLOUDFLARE_API", &format!("http://{}", platform.addr));
+    let _api = ApiOverride::new(
+        "NULLROUTER_CLOUDFLARE_API",
+        &format!("http://{}", platform.addr),
+    );
 
     for name in ["../other", "a/b", "UPPER", "-leading", "has space"] {
         let (status, body) = deploy(
