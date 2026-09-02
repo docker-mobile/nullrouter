@@ -801,9 +801,11 @@ async fn a_combo_whose_every_model_is_unexecutable_reports_the_last_real_error()
     // Given: a combo where no model can be executed. The client should still get
     // a real refusal naming a provider, not a synthesised placeholder.
     let provider = FakeServer::start(vec![("/chat/completions", Reply::json("{}"))]).await;
+    // `kiro` is the last format without a ported executor, so it is the one that still refuses. `cursor`
+    // used to stand here and now dispatches on its own protobuf protocol.
     let state = fake_state_with_combo(
         &provider.base_url(),
-        &["ollama/llama3", "cursor/gpt-5"],
+        &["ollama/llama3", "kiro/claude-sonnet-4"],
         "fallback",
     )
     .await;
@@ -819,7 +821,7 @@ async fn a_combo_whose_every_model_is_unexecutable_reports_the_last_real_error()
     // Then: the last model's own 501 is reported.
     assert_eq!(response.status, StatusCode::NOT_IMPLEMENTED);
     assert!(
-        response.body.contains("cursor"),
+        response.body.contains("kiro"),
         "the last model's refusal should be the reported one: {}",
         response.body
     );

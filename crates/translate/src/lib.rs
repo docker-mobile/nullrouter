@@ -261,21 +261,29 @@ pub fn finalize_upstream(target: Format, source: Format, state: &mut StreamState
         Format::PerplexityWeb => vec![response::perplexity_web_to_openai::finish(state)],
         _ => Vec::new(),
     };
-    if synthesized.is_empty() || formats_equivalent(source, Format::OpenAi) {
-        return synthesized;
+    to_client(&synthesized, source, state)
+}
+
+/// Carry already-OpenAI-shaped chunks on to the client's format.
+///
+/// The second step of [`translate_response`], exposed for callers that produced OpenAI chunks themselves
+/// and must not have the upstream translator run over them. Cursor's decoder is one: its protobuf frames
+/// are decoded to OpenAI directly, because a byte protocol has no chunk for `translate_response` to take.
+pub fn to_client(chunks: &[Value], source: Format, state: &mut StreamState) -> Vec<Value> {
+    if chunks.is_empty() || formats_equivalent(source, Format::OpenAi) {
+        return chunks.to_vec();
     }
-    // OpenAI -> client, the same second step `translate_response` applies.
     match source {
-        Format::Claude => synthesized
+        Format::Claude => chunks
             .iter()
             .flat_map(|chunk| response::openai_to_claude::translate(chunk, state))
             .collect(),
-        Format::OpenAiResponses => synthesized
+        Format::OpenAiResponses => chunks
             .iter()
             .flat_map(|chunk| response::openai_to_responses::translate(Some(chunk), state))
             .map(|event| event.data)
             .collect(),
-        _ => synthesized,
+        _ => chunks.to_vec(),
     }
 }
 

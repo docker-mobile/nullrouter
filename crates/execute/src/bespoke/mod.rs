@@ -17,12 +17,46 @@ use crate::credentials::Credentials;
 
 pub(crate) mod antigravity;
 pub(crate) mod codex;
+pub mod cursor;
 pub(crate) mod grok_web;
 pub(crate) mod perplexity_web;
 pub(crate) mod session;
 
 /// The `x-session-id` header `CommandCode` expects on every request.
 const SESSION_HEADER: &str = "x-session-id";
+
+/// The bytes a provider sends instead of a serialised JSON body.
+///
+/// Returns `None` for every provider whose wire format is JSON, which is all of them but one. Cursor's API
+/// is Connect-RPC carrying protobuf, so its request cannot be expressed as a `Value` at all — hence a
+/// separate hook rather than another arm of [`envelope`].
+pub(crate) fn binary_body(
+    provider: &str,
+    body: &Value,
+    _credentials: &Credentials,
+) -> Option<Vec<u8>> {
+    if target_format(provider) != Format::Cursor {
+        return None;
+    }
+    let message_count = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let ids = cursor::request::Ids::generate(message_count, now_millis());
+    Some(cursor::body(body, &ids))
+}
+
+/// Whether this provider's response is a binary protocol rather than SSE or NDJSON.
+pub(crate) fn is_binary_protocol(provider: &str) -> bool {
+    target_format(provider) == Format::Cursor
+}
+
+/// Milliseconds since the Unix epoch.
+fn now_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis())
+}
 
 /// Wrap a request body in the envelope its provider requires.
 ///
@@ -207,6 +241,12 @@ pub(crate) fn credential_headers(
     provider: &str,
     credentials: &Credentials,
 ) -> Vec<(String, String)> {
+    // Cursor's whole header set is derived from the credential: the bearer token, a device id, and a
+    // checksum over both. `auth_override` cannot serve because these do not replace the auth header — the
+    // bearer is one of them.
+    if target_format(provider) == Format::Cursor {
+        return cursor::request_headers(credentials, &cursor::Nonces::generate(), now_millis());
+    }
     if provider != "codex" {
         return Vec::new();
     }
@@ -304,8 +344,21 @@ pub(crate) fn url_suffix(provider: &str, model: &str, stream: bool) -> Option<&'
         // Antigravity's method lives under `/v1internal`, so it carries its own leading path rather
         // than appending to a version the registry already declared.
         Format::Antigravity => Some(antigravity::url_suffix(model, stream)),
+        // Cursor's endpoint is an RPC method named in the registry's `chatPath`. Returned as `None` here
+        // because this hook hands back a `&'static str` and that value is owned; `chat_path` supplies it
+        // at the dispatch site instead.
         _other => None,
     }
+}
+
+/// The RPC path a provider's request posts to, replacing the base URL's own path.
+///
+/// Separate from [`url_suffix`] because it is owned rather than static: it comes from the registry.
+pub(crate) fn chat_path(provider: &str) -> Option<String> {
+    if target_format(provider) != Format::Cursor {
+        return None;
+    }
+    registry::transport(provider).and_then(|transport| transport.chat_path.clone())
 }
 
 /// A random v4 UUID.

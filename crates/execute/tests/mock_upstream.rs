@@ -25,7 +25,8 @@ use tokio::net::{TcpListener, TcpStream};
 pub struct MockResponse {
     pub status: u16,
     pub content_type: String,
-    pub body: String,
+    /// The response body as bytes, so a binary protocol can be served as well as text.
+    pub body: Vec<u8>,
 }
 
 impl MockResponse {
@@ -33,7 +34,7 @@ impl MockResponse {
         Self {
             status,
             content_type: "application/json".to_owned(),
-            body: body.to_owned(),
+            body: body.as_bytes().to_vec(),
         }
     }
 
@@ -41,7 +42,17 @@ impl MockResponse {
         Self {
             status: 200,
             content_type: "text/event-stream".to_owned(),
-            body: body.to_owned(),
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    /// A response whose body is not text. Cursor's Connect-RPC frames carry protobuf, and routing them
+    /// through a `String` would mangle every byte that is not valid UTF-8.
+    pub fn bytes(content_type: &str, body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            content_type: content_type.to_owned(),
+            body,
         }
     }
 }
@@ -172,14 +183,15 @@ async fn handle_connection(
         });
     }
 
-    let payload = format!(
-        "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+    let head = format!(
+        "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         response.status,
         response.content_type,
         response.body.len(),
-        response.body
     );
-    stream.write_all(payload.as_bytes()).await?;
+    let mut payload = head.into_bytes();
+    payload.extend_from_slice(&response.body);
+    stream.write_all(&payload).await?;
     stream.flush().await?;
     Ok(())
 }

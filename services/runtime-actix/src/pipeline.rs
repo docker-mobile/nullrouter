@@ -1524,15 +1524,54 @@ impl Runtime {
         let thread_provider = target.provider.clone();
         let thread_body = outcome.sent_body.clone();
 
+        // Cursor's response is Connect-RPC carrying protobuf, and `pipe_stream` reads its input as lossy
+        // UTF-8 split on newlines — which corrupts binary frames and finds boundaries that are not there.
+        let binary_upstream = target_format == nullrouter_providers::Format::Cursor;
+        let stream_model = target.model.clone();
+        // Cursor retired `ChatService` for plain-text turns and routes those to `AgentService`, which needs
+        // HTTP/2 duplex and is not ported. Saying so in the log is the difference between a diagnosable
+        // rejection and an obscure one.
+        if binary_upstream
+            && nullrouter_execute::bespoke::cursor::prefers_agent_service(&outcome.sent_body)
+        {
+            tracing::warn!(
+                provider = %target.provider,
+                "cursor: a plain-text turn belongs to AgentService, which needs HTTP/2 duplex and is not \
+                 ported; sending it to the retired ChatService endpoint, which may refuse it"
+            );
+        }
+
         actix_web::rt::spawn(async move {
-            let summary = pipe_stream(
-                outcome.response,
-                target_format,
-                source_format,
-                &mut state,
-                ChannelSink { sender },
-            )
-            .await;
+            let summary = if binary_upstream {
+                nullrouter_execute::pipe_binary_stream(
+                    outcome.response,
+                    source_format,
+                    &stream_model,
+                    &mut state,
+                    ChannelSink { sender },
+                )
+                .await
+            } else {
+                pipe_stream(
+                    outcome.response,
+                    target_format,
+                    source_format,
+                    &mut state,
+                    ChannelSink { sender },
+                )
+                .await
+            };
+
+            // An upstream that reports a rejection inside its stream body, after the headers already said
+            // 200, is the one case where a failure cannot become a status code. Recording it keeps the
+            // request log honest about what happened.
+            if let Some(message) = summary.error.as_deref() {
+                tracing::warn!(
+                    provider = %thread_provider,
+                    error = %message,
+                    "upstream reported an error inside the response stream"
+                );
+            }
 
             // A provider that keeps the conversation itself — perplexity — returns a thread id. Storing
             // it against this exchange is what lets the next request continue server-side instead of

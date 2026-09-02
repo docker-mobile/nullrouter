@@ -508,10 +508,38 @@ that Zed's Claude system prompt draws an immediate 429, so that one sentence is 
 instruction. That is avoiding a block triggered by naming another vendor's agent, not evading a rate
 limit.
 
-The remaining protocols need genuine request signing or a binary protocol and still return an explicit
-**501 naming the provider and its protocol**, rather than a plausible wrong answer:
+`cursor` is the fifth, and the only one that is not JSON on the wire: its API is Connect-RPC carrying
+protobuf, so the request is bytes and the response is a frame stream. That needed a protobuf codec, a
+Connect framer, and a second dispatch path — a hook returning a JSON value cannot express any of it.
+Cursor's schema is unpublished; every field number was established by observing the IDE, and several
+fields carry no known meaning and are named for their number rather than guessed at. Because a Cursor
+release can add a field at any time, the decoder tolerates unknown ones instead of refusing them. Three
+details are load-bearing: frames arrive gzip-, zlib-, **or** raw-deflate-compressed under a flag that
+always claims gzip, so all three are tried and an undecodable payload is kept rather than dropped (an
+error frame arrives uncompressed with the compression flag set); a tool call's arguments arrive across
+several frames under one id, so each fragment must carry the index that id was first assigned; and a
+`composer` model puts its answer *inside* the thinking stream after a `</think>` marker and never repeats
+it as text, so treating that as reasoning returns an empty reply. The `x-cursor-checksum` header reads
+like a signature and is not one — it is a coarse timestamp put through a rolling XOR with the machine id
+appended in the clear, and it authenticates nothing. Reproducing it required reproducing a JavaScript
+quirk: upstream computes its bytes with shift operators that coerce to int32, so `>> 40` shifts by 8, and
+the mathematically correct bytes would produce a checksum unlike any real client's.
 
-`kiro` · `cursor`
+Two narrowings are deliberate. The metadata block sends a fixed working directory rather than the
+router's own, which upstream discloses; and `x-cursor-timezone` is fixed to UTC rather than read from the
+host clock, since the operator's location is not the user's to disclose. Ghost mode — Cursor's switch
+against retaining a conversation — stays **on** unless a connection explicitly turns it off.
+
+Only Cursor's `ChatService` endpoint is ported. Upstream sends plain-text turns to `AgentService`, which
+is HTTP/2 duplex: the server asks for IDE file context mid-stream and the client must answer on the same
+open stream before the response continues. This executor's request/response shape has no room for that,
+so a plain-text turn is logged as belonging to the unported endpoint rather than failing obscurely.
+
+One protocol is left. `kiro` signs its requests against AWS and speaks an event-stream protocol, and it
+still returns an explicit **501 naming the provider and its protocol** rather than a plausible wrong
+answer:
+
+`kiro`
 
 A test asserts that more than 75% of registry entries with a transport remain executable.
 
@@ -764,10 +792,11 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **Two of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
-  `grok-web`, `perplexity-web`, `codex` and `antigravity` are now ported from the reference; `kiro` and
-  `cursor` are being ported the same way. Their protocols are undocumented, so what a loopback test can
-  establish is that the request matches the reference — not that the provider accepts it. That
+- **One of the six bespoke provider executors, plus one endpoint of another** — Listed
+  [above](#what-executes-and-what-refuses). `grok-web`, `perplexity-web`, `codex`, `antigravity` and
+  `cursor` are now ported from the reference; `kiro` is not, and Cursor's `AgentService` endpoint needs
+  HTTP/2 duplex that this executor cannot express. Their protocols are undocumented, so what a loopback
+  test can establish is that the request matches the reference — not that the provider accepts it. That
   distinction is stated rather than papered over: verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP
   bridge that starts it is implemented and tested (see below), and it will spawn the server on

@@ -12,6 +12,7 @@ name = "nullrouter_execute"
 path = "src/lib.rs"
 
 [dependencies]
+flate2.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 nullrouter-providers.workspace = true
@@ -19,6 +20,7 @@ nullrouter-translate.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha1.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

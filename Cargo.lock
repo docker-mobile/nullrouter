@@ -2606,6 +2606,7 @@ name = "nullrouter-execute"
 version = "0.5.20"
 dependencies = [
  "actix-rt",
+ "flate2",
  "futures-util",
  "getrandom 0.3.4",
  "nullrouter-providers",
@@ -2613,6 +2614,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "thiserror 2.0.18",
  "tokio",

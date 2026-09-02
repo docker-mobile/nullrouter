@@ -1050,3 +1050,418 @@ fn a_gemini_cli_request_is_not_given_the_antigravity_envelope() {
     assert!(prepared.body.get("userAgent").is_none());
     assert!(prepared.body.get("requestType").is_none());
 }
+
+fn cursor_credentials() -> Credentials {
+    let mut credentials = Credentials {
+        access_token: Some("user_01ABC::cursor-token".to_owned()),
+        connection_id: "conn_cursor".to_owned(),
+        connection_name: "cursor".to_owned(),
+        ..Credentials::default()
+    };
+    credentials
+        .provider_specific_data
+        .insert("machineId".to_owned(), json!("m".repeat(64)));
+    credentials
+}
+
+#[test]
+fn cursor_sends_protobuf_bytes_rather_than_json() {
+    // Cursor is the only provider here that is not JSON on the wire. A serialised JSON body reaches its
+    // Connect-RPC endpoint as a parse failure.
+    let prepared = prepare(&ExecuteRequest {
+        provider: "cursor",
+        body: &json!({
+            "model": "claude-4.5-sonnet",
+            "messages": [{ "role": "user", "content": "hi" }],
+        }),
+        stream: true,
+        credentials: &cursor_credentials(),
+    });
+
+    let bytes = prepared.binary_body.as_deref().expect("a binary body");
+    // A Connect frame: an uncompressed flag byte then a big-endian length that matches the remainder.
+    assert_eq!(bytes.first(), Some(&0x00));
+    let length = bytes
+        .get(1..5)
+        .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
+        .map(u32::from_be_bytes)
+        .expect("a length");
+    assert_eq!(
+        usize::try_from(length).expect("fits"),
+        bytes.len().saturating_sub(5),
+        "the frame length must match its payload"
+    );
+    // `payload()` is what dispatch sends, and it must be the bytes rather than the JSON.
+    assert_eq!(prepared.payload().expect("a payload"), bytes);
+    // The readable body is kept for logging, so a request is still auditable.
+    assert_eq!(
+        prepared.body.pointer("/messages/0/content"),
+        Some(&json!("hi"))
+    );
+}
+
+#[test]
+fn cursor_posts_to_the_rpc_method_named_in_the_registry() {
+    let credentials = cursor_credentials();
+    let prepared = prepare(&ExecuteRequest {
+        provider: "cursor",
+        body: &json!({ "model": "m", "messages": [] }),
+        stream: true,
+        credentials: &credentials,
+    });
+    let base = build_url("cursor", &credentials, 0).expect("a base url");
+    assert_eq!(base, "https://api2.cursor.sh");
+    // An RPC path replaces the base's path rather than appending to a version, so the suffix stays empty.
+    assert_eq!(prepared.url_suffix, "");
+    assert_eq!(
+        format!(
+            "{base}{}",
+            prepared.chat_path.as_deref().expect("a chat path")
+        ),
+        "https://api2.cursor.sh/aiserver.v1.ChatService/StreamUnifiedChatWithTools"
+    );
+}
+
+#[test]
+fn cursor_carries_its_checksum_and_the_connect_content_type() {
+    let prepared = prepare(&ExecuteRequest {
+        provider: "cursor",
+        body: &json!({ "model": "m", "messages": [] }),
+        stream: true,
+        credentials: &cursor_credentials(),
+    });
+    let read = |name: &str| {
+        prepared
+            .headers
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or_default()
+    };
+
+    // The generic JSON content type would be rejected; the protobuf one has to win.
+    assert_eq!(read("content-type"), "application/connect+proto");
+    assert!(
+        !prepared.headers.contains_key("Content-Type"),
+        "the generic JSON header must be removed, not merely shadowed: {:?}",
+        prepared.headers
+    );
+    assert_eq!(read("connect-protocol-version"), "1");
+    // The prefix is stripped from the token, or every derived value disagrees with it.
+    assert_eq!(read("authorization"), "Bearer cursor-token");
+    // The checksum ends with the machine id in the clear — it is obfuscation, not a signature.
+    let checksum = read("x-cursor-checksum");
+    assert!(checksum.ends_with(&"m".repeat(64)), "got {checksum}");
+    // Ghost mode defaults on: with it off Cursor may retain the conversation.
+    assert_eq!(read("x-ghost-mode"), "true");
+    // The timezone is a fingerprint, so it is fixed rather than read from the host clock.
+    assert_eq!(read("x-cursor-timezone"), "UTC");
+    assert_eq!(read("x-session-id").len(), 36, "a v5 uuid of the token");
+}
+
+#[test]
+fn a_json_provider_gets_no_binary_body_and_no_rpc_path() {
+    let prepared = prepare(&ExecuteRequest {
+        provider: "openai",
+        body: &json!({ "model": "gpt-5", "messages": [] }),
+        stream: true,
+        credentials: &Credentials {
+            api_key: Some("sk-test".to_owned()),
+            ..Credentials::default()
+        },
+    });
+    assert!(prepared.binary_body.is_none());
+    assert!(prepared.chat_path.is_none());
+    // And its payload is still the serialised JSON.
+    let payload = prepared.payload().expect("a payload");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&payload).expect("json"),
+        prepared.body
+    );
+}
+
+/// A Connect-RPC frame: a flag byte, a big-endian length, then the payload.
+///
+/// Built by hand rather than with the encoder under test — a fixture produced by the same code it is
+/// checking would pass even if both were wrong.
+fn connect_frame(payload: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x00];
+    // Saturating rather than fallible: a fixture longer than `u32::MAX` cannot occur here, and an
+    // unwrap in a helper outside a `#[test]` fn is denied by the workspace lints.
+    let length = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+    out.extend_from_slice(&length.to_be_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+/// A protobuf length-delimited field, by hand.
+fn len_field(field: u8, payload: &[u8]) -> Vec<u8> {
+    let mut out = vec![(field << 3) | 2];
+    // Every fixture here is well under 128 bytes, so the length is a single-byte varint. The assertion
+    // states that rather than encoding a multi-byte one the fixtures never need.
+    let length = u8::try_from(payload.len()).unwrap_or(u8::MAX);
+    assert!(
+        length < 0x80 && usize::from(length) == payload.len(),
+        "the fixture must fit a one-byte varint"
+    );
+    out.push(length);
+    out.extend_from_slice(payload);
+    out
+}
+
+/// `StreamUnifiedChatResponse.text` wrapped in `StreamUnifiedChatResponseWithTools.response`.
+fn cursor_text_frame(text: &str) -> Vec<u8> {
+    connect_frame(&len_field(2, &len_field(1, text.as_bytes())))
+}
+
+#[tokio::test]
+async fn cursor_protobuf_frames_reach_the_client_as_openai_chunks() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // Three frames carrying deltas, then a trailer. Cursor streams deltas rather than whole answers, so
+    // each frame's text is new and none of it is a repeat.
+    let mut body = Vec::new();
+    body.extend_from_slice(&cursor_text_frame("Rust 1.0 "));
+    body.extend_from_slice(&cursor_text_frame("shipped in "));
+    body.extend_from_slice(&cursor_text_frame("May 2015."));
+    // A trailer frame, which must contribute nothing.
+    let mut trailer = vec![0x02];
+    let grpc_status = b"grpc-status: 0\r\n";
+    trailer.extend_from_slice(
+        &u32::try_from(grpc_status.len())
+            .expect("fits")
+            .to_be_bytes(),
+    );
+    trailer.extend_from_slice(grpc_status);
+    body.extend_from_slice(&trailer);
+
+    let upstream =
+        MockUpstream::start(vec![MockResponse::bytes("application/connect+proto", body)]).await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let frames = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let collected = std::sync::Arc::clone(&frames);
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::OpenAi,
+        "claude-4.5-sonnet",
+        &mut state,
+        move |frame: String| {
+            collected.lock().expect("the lock").push(frame);
+            Ok(())
+        },
+    )
+    .await;
+
+    // The three deltas arrive concatenated, which is what a client reassembles.
+    assert_eq!(summary.text, "Rust 1.0 shipped in May 2015.");
+    assert!(summary.error.is_none());
+
+    let sent = frames.lock().expect("the lock").clone();
+    // Three content frames, a terminal chunk, and `[DONE]`.
+    assert_eq!(sent.len(), 5, "{sent:?}");
+    // The first delta announces the role; the rest do not repeat it.
+    assert!(
+        sent.first()
+            .is_some_and(|frame| frame.contains("\"role\":\"assistant\"")),
+        "{sent:?}"
+    );
+    assert!(
+        sent.get(1).is_some_and(|frame| !frame.contains("\"role\"")),
+        "{sent:?}"
+    );
+    assert!(
+        sent.get(3)
+            .is_some_and(|frame| frame.contains("\"finish_reason\":\"stop\"")),
+        "{sent:?}"
+    );
+    assert_eq!(sent.last().map(String::as_str), Some("data: [DONE]\n\n"));
+}
+
+#[tokio::test]
+async fn a_cursor_error_frame_before_any_content_is_reported_rather_than_swallowed() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // Cursor reports a rejection as a JSON frame inside a protobuf stream, after the headers have already
+    // said 200. A stream that simply stops looks to a client like a truncated answer.
+    let error = br#"{"error":{"code":"resource_exhausted","message":"quota","details":[{"debug":{"details":{"title":"You have reached your usage limit"}}}]}}"#;
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/connect+proto",
+        connect_frame(error),
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::OpenAi,
+        "claude-4.5-sonnet",
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+
+    // The useful sentence is in `details[0].debug.details.title`, not `error.message`.
+    assert_eq!(
+        summary.error.as_deref(),
+        Some("You have reached your usage limit")
+    );
+    assert!(summary.text.is_empty());
+}
+
+#[tokio::test]
+async fn a_cursor_error_after_content_keeps_the_answer_already_streamed() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // The text already delivered is real. Turning a truncated answer into an error would discard it.
+    let mut body = cursor_text_frame("Here is what I found.");
+    body.extend_from_slice(&connect_frame(br#"{"error":{"message":"quota"}}"#));
+
+    let upstream =
+        MockUpstream::start(vec![MockResponse::bytes("application/connect+proto", body)]).await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::OpenAi,
+        "claude-4.5-sonnet",
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+
+    assert_eq!(summary.text, "Here is what I found.");
+    assert!(
+        summary.error.is_none(),
+        "an error after content must not discard the answer"
+    );
+}
+
+#[tokio::test]
+async fn cursor_frames_split_across_reads_are_reassembled() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // A frame does not arrive whole. Splitting on read boundaries — which is what treating the body as
+    // lines would do — would lose every frame that straddles one.
+    let body = cursor_text_frame("a frame that spans two reads");
+    let split = body.len() / 2;
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/connect+proto",
+        body.clone(),
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+    assert!(split > 5, "the split must fall inside the payload");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::OpenAi,
+        "claude-4.5-sonnet",
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+    assert_eq!(summary.text, "a frame that spans two reads");
+}
+
+#[tokio::test]
+async fn a_non_streaming_cursor_request_collapses_to_one_json_response() {
+    use nullrouter_execute::collapse_stream_to_json;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // A client that asked for no stream still gets one from Cursor, so the frames are collapsed into a
+    // single chat-completion. The frames are protobuf, so the line-oriented path cannot read them.
+    let mut body = cursor_text_frame("Rust 1.0 ");
+    body.extend_from_slice(&cursor_text_frame("shipped in May 2015."));
+
+    let upstream =
+        MockUpstream::start(vec![MockResponse::bytes("application/connect+proto", body)]).await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let collapsed =
+        collapse_stream_to_json(response, Format::Cursor, "claude-4.5-sonnet", &mut state).await;
+
+    assert_eq!(collapsed.get("object"), Some(&json!("chat.completion")));
+    assert_eq!(
+        collapsed.pointer("/choices/0/message/content"),
+        Some(&json!("Rust 1.0 shipped in May 2015."))
+    );
+    assert_eq!(
+        collapsed.pointer("/choices/0/finish_reason"),
+        Some(&json!("stop"))
+    );
+}
+
+#[tokio::test]
+async fn cursor_chunks_are_carried_on_to_a_claude_client() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // The decoder produces OpenAI chunks, and the second translation step carries them to whatever the
+    // client asked for. Nothing in the cursor decoder knows about Claude.
+    let upstream = MockUpstream::start(vec![MockResponse::bytes(
+        "application/connect+proto",
+        cursor_text_frame("hello"),
+    )])
+    .await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let frames = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let collected = std::sync::Arc::clone(&frames);
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let _summary = pipe_binary_stream(
+        response,
+        Format::Claude,
+        "claude-4.5-sonnet",
+        &mut state,
+        move |frame: String| {
+            collected.lock().expect("the lock").push(frame);
+            Ok(())
+        },
+    )
+    .await;
+
+    let sent = frames.lock().expect("the lock").join("");
+    // Claude's own event names, not OpenAI's chunk shape.
+    assert!(sent.contains("content_block_delta"), "{sent}");
+    assert!(sent.contains("hello"), "{sent}");
+    assert!(!sent.contains("chat.completion.chunk"), "{sent}");
+}

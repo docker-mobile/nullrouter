@@ -123,9 +123,32 @@ pub struct PreparedRequest {
     /// Headers to send, provider-specific ones applied last.
     pub headers: BTreeMap<String, String>,
     /// The body as it will go out, envelope included.
+    ///
+    /// For a provider whose wire format is not JSON this is the body as the client sent it, and
+    /// [`Self::binary_body`] holds what actually goes on the wire. Keeping the JSON here means logging and
+    /// usage accounting still see a readable request.
     pub body: Value,
     /// Appended to the resolved URL. Empty for most providers.
     pub url_suffix: &'static str,
+    /// The exact bytes to send, for a provider that is not JSON on the wire.
+    ///
+    /// `None` for every provider but `cursor`, whose API is Connect-RPC carrying protobuf.
+    pub binary_body: Option<Vec<u8>>,
+    /// An RPC path that replaces the base URL's own path, from the registry's `chatPath`.
+    pub chat_path: Option<String>,
+}
+
+impl PreparedRequest {
+    /// The bytes this request will send.
+    ///
+    /// The binary body when the provider has one, and the serialised JSON otherwise.
+    pub fn payload(&self) -> Result<Vec<u8>, ExecuteError> {
+        match self.binary_body.as_ref() {
+            Some(bytes) => Ok(bytes.clone()),
+            None => serde_json::to_vec(&self.body)
+                .map_err(|error| ExecuteError::Serialize(error.to_string())),
+        }
+    }
 }
 
 /// Build the request a dispatch will send, without sending it.
@@ -142,6 +165,15 @@ pub fn prepare(request: &ExecuteRequest<'_>) -> PreparedRequest {
     for (key, value) in bespoke::extra_headers(provider, model, request.stream) {
         headers.insert(key, value);
     }
+    // One provider is not JSON on the wire at all, so its bytes are built here and the JSON body is kept
+    // only for logging.
+    let binary_body = bespoke::binary_body(provider, request.body, request.credentials);
+    if binary_body.is_some() {
+        // The generic `Content-Type: application/json` would be rejected. The provider's own hook already
+        // set the right one, but the generic header is inserted first and would win on case alone.
+        headers.remove("Content-Type");
+        headers.remove("Accept");
+    }
     PreparedRequest {
         headers,
         // A few providers wrap the body in an envelope the registry cannot describe.
@@ -149,6 +181,8 @@ pub fn prepare(request: &ExecuteRequest<'_>) -> PreparedRequest {
             .unwrap_or_else(|| request.body.clone()),
         // Some providers select the method in the URL rather than the body.
         url_suffix: bespoke::url_suffix(provider, model, request.stream).unwrap_or_default(),
+        binary_body,
+        chat_path: bespoke::chat_path(provider),
     }
 }
 
@@ -469,9 +503,10 @@ impl Executor {
             headers,
             body: outgoing,
             url_suffix: suffix,
+            chat_path,
+            binary_body: _binary,
         } = &prepared;
-        let payload = serde_json::to_vec(outgoing)
-            .map_err(|error| ExecuteError::Serialize(error.to_string()))?;
+        let payload = prepared.payload()?;
 
         let total_urls = fallback_count(provider);
         let mut attempts_by_url: BTreeMap<usize, u32> = BTreeMap::new();
@@ -479,9 +514,13 @@ impl Executor {
         let mut url_index = 0;
 
         while url_index < total_urls {
-            let Some(url) = build_url(provider, request.credentials, url_index)
-                .map(|url| format!("{url}{suffix}"))
-            else {
+            // An RPC path replaces the base URL's path; a suffix appends to it. Only one applies.
+            let Some(url) = build_url(provider, request.credentials, url_index).map(|url| {
+                chat_path.as_ref().map_or_else(
+                    || format!("{url}{suffix}"),
+                    |path| format!("{}{path}", url.trim_end_matches('/')),
+                )
+            }) else {
                 return Err(ExecuteError::NoEndpoint {
                     provider: provider.to_owned(),
                 });

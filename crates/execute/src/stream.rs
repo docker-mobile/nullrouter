@@ -79,6 +79,12 @@ pub struct StreamSummary {
     pub upstream_thread: Option<String>,
     /// The finished answer as the upstream reported it, for the same reason.
     pub upstream_answer: Option<String>,
+    /// An upstream error that arrived before any content, stated rather than swallowed.
+    ///
+    /// Only the binary path sets this. Cursor reports a rejection as a JSON frame inside a protobuf
+    /// stream, so the failure is discovered after the response headers have already said 200 — too late to
+    /// answer with a status code, and a stream that simply stops looks to a client like a truncated answer.
+    pub error: Option<String>,
 }
 
 /// Where translated frames are delivered.
@@ -218,6 +224,154 @@ where
     summary
 }
 
+/// Translate a binary upstream response into client frames.
+///
+/// Cursor's API is Connect-RPC carrying protobuf, so [`pipe_stream`] cannot serve it: that function
+/// decodes each chunk as lossy UTF-8 and splits on newlines, which corrupts binary frames and finds
+/// boundaries that are not there. This accumulates bytes, splits Connect frames as they complete, decodes
+/// each to OpenAI chunks, and carries those on to the client's format.
+///
+/// Frames still reach the sink as they arrive rather than after the body is buffered, so a client sees
+/// output at the provider's own latency — which upstream does not do: it buffers the whole response before
+/// converting it.
+pub async fn pipe_binary_stream<S>(
+    response: Response,
+    source: Format,
+    model: &str,
+    state: &mut StreamState,
+    mut sink: S,
+) -> StreamSummary
+where
+    S: FrameSink,
+{
+    use crate::bespoke::cursor::{protobuf, response as cursor_response};
+
+    let framing = ClientFraming::for_format(source);
+    let mut summary = StreamSummary::default();
+    let mut pending: Vec<u8> = Vec::new();
+    let mut body = response.bytes_stream();
+    let mut client_gone = false;
+    // Identity is fixed once so every chunk of one response shares it, the same way the translators do.
+    let response_id = state
+        .message_id
+        .clone()
+        .unwrap_or_else(|| format!("chatcmpl-cursor-{}", state.clock.now_millis()));
+    state.message_id = Some(response_id.clone());
+    let mut decoder =
+        cursor_response::Stream::new(response_id, state.clock.now_seconds(), model.to_owned());
+
+    'outer: while let Some(chunk) = body.next().await {
+        let Ok(bytes) = chunk else {
+            // A mid-stream transport error ends the stream; frames already delivered stay valid.
+            break;
+        };
+        pending.extend_from_slice(&bytes);
+        let (frames, consumed) = protobuf::frames(&pending);
+        // Whatever was not consumed is an incomplete frame: keep it for the next read rather than
+        // discarding a partial one.
+        pending.drain(..consumed);
+
+        for frame in &frames {
+            if frame.is_trailer() {
+                continue;
+            }
+            if let Some(error) = cursor_response::error_frame(&frame.payload) {
+                // An error after content is a truncation of a real answer, so the answer is kept and the
+                // stream ends. An error before any content is the whole response.
+                let (message, _rate_limited) = cursor_response::error_detail(&error);
+                if !decoder.has_content() {
+                    summary.error = Some(message);
+                }
+                break 'outer;
+            }
+            let decoded = cursor_response::decode_frame(&frame.payload);
+            if decoded == cursor_response::Decoded::default() {
+                continue;
+            }
+            for chunk in nullrouter_translate::to_client(&decoder.push(&decoded), source, state) {
+                collect_text(&chunk, &mut summary);
+                if sink.send(frame_for(&chunk, framing, source)).await.is_err() {
+                    client_gone = true;
+                    break 'outer;
+                }
+            }
+        }
+    }
+
+    if !client_gone {
+        for chunk in nullrouter_translate::to_client(&decoder.finish(), source, state) {
+            collect_text(&chunk, &mut summary);
+            if sink.send(frame_for(&chunk, framing, source)).await.is_err() {
+                client_gone = true;
+                break;
+            }
+        }
+    }
+
+    if !client_gone {
+        for chunk in nullrouter_translate::finalize_response(source, state) {
+            if sink.send(frame_for(&chunk, framing, source)).await.is_err() {
+                client_gone = true;
+                break;
+            }
+        }
+    }
+
+    if !client_gone {
+        let _ = sink.send(done_frame()).await;
+    }
+
+    summary.finish_reason = state
+        .finish_reason
+        .clone()
+        .or_else(|| summary.finish_reason.clone());
+    summary
+}
+
+/// Drain a binary upstream body, handing decoded OpenAI chunks to `take`.
+///
+/// Shared with the streaming path in spirit but not in code: this one has no sink and no client format,
+/// because the caller is assembling a single JSON response rather than relaying frames.
+async fn collapse_binary_body<B, C, F>(
+    body: &mut B,
+    model: &str,
+    state: &mut StreamState,
+    take: &mut F,
+) where
+    B: futures_util::Stream<Item = reqwest::Result<C>> + Unpin,
+    C: AsRef<[u8]>,
+    F: FnMut(Vec<Value>),
+{
+    use crate::bespoke::cursor::{protobuf, response as cursor_response};
+
+    let response_id = state
+        .message_id
+        .clone()
+        .unwrap_or_else(|| format!("chatcmpl-cursor-{}", state.clock.now_millis()));
+    state.message_id = Some(response_id.clone());
+    let mut decoder =
+        cursor_response::Stream::new(response_id, state.clock.now_seconds(), model.to_owned());
+    let mut pending: Vec<u8> = Vec::new();
+
+    while let Some(chunk) = body.next().await {
+        let Ok(bytes) = chunk else { break };
+        pending.extend_from_slice(bytes.as_ref());
+        let (frames, consumed) = protobuf::frames(&pending);
+        pending.drain(..consumed);
+        for frame in &frames {
+            if frame.is_trailer() || cursor_response::error_frame(&frame.payload).is_some() {
+                continue;
+            }
+            let decoded = cursor_response::decode_frame(&frame.payload);
+            if decoded == cursor_response::Decoded::default() {
+                continue;
+            }
+            take(decoder.push(&decoded));
+        }
+    }
+    take(decoder.finish());
+}
+
 /// Whether stream consumption should continue.
 enum Flow {
     Continue,
@@ -337,9 +491,8 @@ pub async fn collapse_stream_to_json(
     // Scraped from the chunks so the pass-through path still reports usage.
     let mut scraped_usage: Option<nullrouter_translate::Usage> = None;
 
-    let mut absorb = |payload: &Value, state: &mut StreamState| {
-        // Always pivot to OpenAI: the JSON envelope below is OpenAI-shaped.
-        for chunk in translate_response(target, Format::OpenAi, payload, state) {
+    let mut take = |chunks: Vec<Value>| {
+        for chunk in chunks {
             let delta = chunk.pointer("/choices/0/delta");
             if let Some(content) = delta
                 .and_then(|delta| delta.get("content"))
@@ -371,21 +524,29 @@ pub async fn collapse_stream_to_json(
         }
     };
 
-    while let Some(chunk) = body.next().await {
-        let Ok(bytes) = chunk else { break };
-        let decoded = String::from_utf8_lossy(&bytes).into_owned();
-        for line in buffer.push(&decoded) {
-            if let Some(Frame::Data(payload)) =
-                nullrouter_translate::sse::parse_line(&line, encoding)
-            {
-                absorb(&payload, state);
+    if target == Format::Cursor {
+        // A binary upstream has no lines to parse. Its frames are decoded to OpenAI chunks directly, so
+        // they are taken as they are rather than run through a translator that has no arm for this format.
+        collapse_binary_body(&mut body, model, state, &mut take).await;
+    } else {
+        while let Some(chunk) = body.next().await {
+            let Ok(bytes) = chunk else { break };
+            let decoded = String::from_utf8_lossy(&bytes).into_owned();
+            for line in buffer.push(&decoded) {
+                if let Some(Frame::Data(payload)) =
+                    nullrouter_translate::sse::parse_line(&line, encoding)
+                {
+                    // Always pivot to OpenAI: the JSON envelope below is OpenAI-shaped.
+                    take(translate_response(target, Format::OpenAi, &payload, state));
+                }
             }
         }
-    }
-    if let Some(line) = buffer.flush()
-        && let Some(Frame::Data(payload)) = nullrouter_translate::sse::parse_line(&line, encoding)
-    {
-        absorb(&payload, state);
+        if let Some(line) = buffer.flush()
+            && let Some(Frame::Data(payload)) =
+                nullrouter_translate::sse::parse_line(&line, encoding)
+        {
+            take(translate_response(target, Format::OpenAi, &payload, state));
+        }
     }
 
     let mut message = json!({ "role": "assistant", "content": text });

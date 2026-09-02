@@ -211,6 +211,13 @@ pub struct Transport {
     /// `X-Goog-Api-Client` value for the Cloud Code Assist endpoints.
     #[serde(default)]
     pub api_client: Option<String>,
+    /// RPC path for a provider whose endpoint is a method rather than a REST route.
+    ///
+    /// Cursor's Connect-RPC service: `/aiserver.v1.ChatService/StreamUnifiedChatWithTools`. Kept distinct
+    /// from `url_suffix` because that is appended to a versioned base, while this replaces the path
+    /// outright.
+    #[serde(default)]
+    pub chat_path: Option<String>,
 }
 
 impl Transport {

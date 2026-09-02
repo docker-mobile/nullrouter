@@ -78,6 +78,10 @@ libc = "0.2"
 # Optional pinning of a supervised binary to a known-good digest.
 sha2 = "0.10"
 hex = "0.4"
+# Cursor's Connect-RPC frames arrive gzip-, zlib-, or raw-deflate-compressed depending on the frame.
+flate2 = "1"
+# UUID v5 is SHA-1 based, and Cursor's `x-session-id` is one. Not used for anything security-bearing.
+sha1 = "0.10"
 nullrouter-providers = { path = "crates/providers" }
 nullrouter-pxpipe = { path = "crates/pxpipe" }
 nullrouter-translate = { path = "crates/translate" }

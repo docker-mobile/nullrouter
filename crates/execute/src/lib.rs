@@ -32,12 +32,13 @@ pub use executor::{
 };
 pub use probe::{ProbeCache, ProbeError, ProbedModel, probe_models};
 pub use refresh::{RefreshCache, RefreshError, Refreshed};
-pub use stream::{ClientFraming, StreamSummary, collapse_stream_to_json, pipe_stream};
+pub use stream::{
+    ClientFraming, StreamSummary, collapse_stream_to_json, pipe_binary_stream, pipe_stream,
+};
 
 /// Provider formats this port can actually execute.
 ///
-/// The excluded formats need provider-specific request signing or binary protocols
-/// (`kiro`, `cursor`).
+/// The excluded format needs a binary protocol this executor cannot express (`kiro`).
 ///
 /// `ollama`, `gemini-cli`, and `commandcode` are included. None of them needs a
 /// distinct executor: what they need is an envelope, a per-request header, or a URL
@@ -56,6 +57,7 @@ pub const fn is_format_supported(format: Format) -> bool {
             | Format::GrokWeb
             | Format::PerplexityWeb
             | Format::Antigravity
+            | Format::Cursor
     )
 }
 
@@ -102,9 +104,12 @@ mod tests {
     fn bespoke_formats_are_refused() {
         // Each of these needs provider-specific request signing or a binary
         // protocol, which no hook on the shared path can supply.
-        for format in [Format::Kiro, Format::Cursor] {
-            assert!(!is_format_supported(format), "{format:?} must be refused");
-        }
+        // One format is left. `kiro` signs its requests against AWS and speaks an event-stream protocol,
+        // neither of which a hook on the shared path can supply.
+        assert!(
+            !is_format_supported(Format::Kiro),
+            "kiro must still be refused"
+        );
     }
 
     #[test]
@@ -132,6 +137,15 @@ mod tests {
         // groups are merged into one, and thinking fields are stripped at both levels.
         assert!(is_format_supported(Format::Antigravity));
         assert!(is_executor_supported("antigravity"));
+    }
+
+    #[test]
+    fn cursor_dispatches_on_its_own_binary_protocol() {
+        // Ported from `open-sse/executors/cursor.js`: Connect-RPC carrying protobuf, so the request is
+        // bytes rather than JSON. Only the `ChatService` endpoint is ported — `AgentService` needs HTTP/2
+        // duplex, which this executor's request/response shape has no room for.
+        assert!(is_format_supported(Format::Cursor));
+        assert!(is_executor_supported("cursor"));
     }
 
     #[test]
