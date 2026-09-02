@@ -221,6 +221,7 @@ pub fn translate_response(
         }
         Format::Ollama => response::ollama_to_openai::translate(chunk, state),
         Format::GrokWeb => response::grok_web_to_openai::translate(chunk, state),
+        Format::PerplexityWeb => response::perplexity_web_to_openai::translate(chunk, state),
         Format::CommandCode => response::commandcode_to_openai::translate(chunk, state),
         // Unported upstream format: forward as-is.
         _ => vec![chunk.clone()],
@@ -257,6 +258,7 @@ pub fn translate_response(
 pub fn finalize_upstream(target: Format, source: Format, state: &mut StreamState) -> Vec<Value> {
     let synthesized = match target {
         Format::GrokWeb => vec![response::grok_web_to_openai::finish(state)],
+        Format::PerplexityWeb => vec![response::perplexity_web_to_openai::finish(state)],
         _ => Vec::new(),
     };
     if synthesized.is_empty() || formats_equivalent(source, Format::OpenAi) {

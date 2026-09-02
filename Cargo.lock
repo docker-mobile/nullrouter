@@ -2605,6 +2605,7 @@ dependencies = [
 name = "nullrouter-execute"
 version = "0.5.20"
 dependencies = [
+ "actix-rt",
  "futures-util",
  "getrandom 0.3.4",
  "nullrouter-providers",

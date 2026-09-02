@@ -464,10 +464,21 @@ instead of appending to them. grok.com reports no token counts, so **no usage is
 divides character length by four and calls that a token count, which a caller cannot tell from a real
 one and would be billed against.
 
+`perplexity-web` is the second, and it is stateful in a way none of the others are. Perplexity has no
+message array and no system prompt: the whole conversation is encoded as a **JSON document inside one
+string field**. It also keeps the thread itself and returns a `backend_uuid`, so a follow-up sends only
+the new question plus that id — which means this port keeps a bounded, age-limited cache mapping a
+conversation onto the thread perplexity opened for it. Without that cache every turn would restart the
+thread and re-send the whole history. Its answer arrives as **whole-answer SSE blocks** rather than
+deltas, so a high-water mark turns them into a delta stream; relaying each block as-is would repeat the
+entire reply once per event. Citation markers (`[1]`) are stripped because they refer to a citation list
+this surface never returns, while a markdown link is left intact. Declared tools cannot be called, so
+they are described in the instructions instead of dropped silently.
+
 The remaining protocols need genuine request signing or a binary protocol and still return an explicit
 **501 naming the provider and its protocol**, rather than a plausible wrong answer:
 
-`kiro` · `cursor` · `codex` · `antigravity` · `perplexity-web`
+`kiro` · `cursor` · `codex` · `antigravity`
 
 A test asserts that more than 75% of registry entries with a transport remain executable.
 
@@ -720,9 +731,9 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **Five of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
-  `grok-web` is now ported from the reference and executes; the other five are being ported the same
-  way. Their protocols are undocumented, so what a loopback test can establish is that the request
+- **Four of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
+  `grok-web` and `perplexity-web` are now ported from the reference and execute; the other four are
+  being ported the same way. Their protocols are undocumented, so what a loopback test can establish is that the request
   matches the reference — not that the provider accepts it. That distinction is stated rather than
   papered over: verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP

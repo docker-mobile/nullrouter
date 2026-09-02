@@ -15,7 +15,7 @@
 //! reports which, so callers can return an explicit error instead of a wrong
 //! answer.
 
-mod bespoke;
+pub mod bespoke;
 pub mod credentials;
 pub mod errors;
 pub mod executor;
@@ -54,6 +54,7 @@ pub const fn is_format_supported(format: Format) -> bool {
             | Format::GeminiCli
             | Format::CommandCode
             | Format::GrokWeb
+            | Format::PerplexityWeb
     )
 }
 
@@ -103,7 +104,6 @@ mod tests {
         for format in [
             Format::Kiro,
             Format::Cursor,
-            Format::PerplexityWeb,
             Format::Codex,
             Format::Antigravity,
         ] {
@@ -118,6 +118,15 @@ mod tests {
         // expressed as hooks on the shared path rather than as a separate executor.
         assert!(is_format_supported(Format::GrokWeb));
         assert!(is_executor_supported("grok-web"));
+    }
+
+    #[test]
+    fn perplexity_web_dispatches_on_its_own_protocol() {
+        // Ported from `open-sse/executors/perplexity-web.js`: the query is a JSON document in one
+        // string field, follow-ups are continued server-side by thread id, and the answer arrives as
+        // whole-answer SSE blocks rather than deltas.
+        assert!(is_format_supported(Format::PerplexityWeb));
+        assert!(is_executor_supported("perplexity-web"));
     }
 
     #[test]

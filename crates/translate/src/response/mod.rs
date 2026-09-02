@@ -11,3 +11,4 @@ pub mod grok_web_to_openai;
 pub mod ollama_to_openai;
 pub mod openai_to_claude;
 pub mod openai_to_responses;
+pub mod perplexity_web_to_openai;

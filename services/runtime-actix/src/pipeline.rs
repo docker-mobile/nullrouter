@@ -1520,6 +1520,9 @@ impl Runtime {
         let state_client = self.state.clone();
         let usage_target = target.clone();
         let connection_id = credentials.connection_id.clone();
+        // The body as it was sent, needed to key a provider-side conversation once the stream ends.
+        let thread_provider = target.provider.clone();
+        let thread_body = outcome.sent_body.clone();
 
         actix_web::rt::spawn(async move {
             let summary = pipe_stream(
@@ -1530,6 +1533,21 @@ impl Runtime {
                 ChannelSink { sender },
             )
             .await;
+
+            // A provider that keeps the conversation itself — perplexity — returns a thread id. Storing
+            // it against this exchange is what lets the next request continue server-side instead of
+            // resending the whole history.
+            if let (Some(thread), Some(answer)) = (
+                summary.upstream_thread.as_deref(),
+                summary.upstream_answer.as_deref(),
+            ) {
+                nullrouter_execute::bespoke::remember_thread(
+                    &thread_provider,
+                    &thread_body,
+                    thread,
+                    answer,
+                );
+            }
 
             let usage = summary.usage.unwrap_or_default();
             let report = UsageReport {

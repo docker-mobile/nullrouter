@@ -164,6 +164,19 @@ pub struct StreamState {
     pub grok_saw_model_response: bool,
     /// The build that answered, reported as `system_fingerprint`.
     pub grok_fingerprint: Option<String>,
+
+    // ── perplexity-web -> OpenAI ──
+    /// `created` fixed on the first event.
+    pub pplx_created: Option<u64>,
+    /// Answer length already sent. Perplexity re-sends the whole answer per event, so this
+    /// high-water mark is what turns that into a delta stream.
+    pub pplx_seen: usize,
+    /// The answer as it stands, kept so the executor can remember the finished thread.
+    pub pplx_answer: String,
+    /// Reasoning lines already shown, so a repeated search step is not displayed twice.
+    pub pplx_seen_reasoning: Vec<String>,
+    /// Perplexity's own thread id, needed to continue the conversation server-side.
+    pub pplx_backend_uuid: Option<String>,
     /// Whether this turn emitted any tool call.
     ///
     /// Ollama reports `done_reason: "stop"` even on a turn that called a tool, so
@@ -229,6 +242,11 @@ impl StreamState {
             grok_emitted: String::new(),
             grok_saw_model_response: false,
             grok_fingerprint: None,
+            pplx_created: None,
+            pplx_seen: 0,
+            pplx_answer: String::new(),
+            pplx_seen_reasoning: Vec::new(),
+            pplx_backend_uuid: None,
             ollama_had_tool_calls: false,
         }
     }

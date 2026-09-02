@@ -57,6 +57,7 @@ pub const fn upstream_encoding(target: Format) -> Encoding {
         // Both send bare JSON objects, one per line, with no `data:` prefix.
         // grok.com streams bare JSON objects one per line, like these two.
         Format::Ollama | Format::CommandCode | Format::GrokWeb => Encoding::Ndjson,
+        // Perplexity streams SSE, so it needs no entry here — listed for the reader who looks.
         _ => Encoding::Sse,
     }
 }
@@ -70,6 +71,14 @@ pub struct StreamSummary {
     pub finish_reason: Option<String>,
     /// Concatenated assistant text, for request logging.
     pub text: String,
+    /// An upstream-side conversation id, when the provider keeps the thread itself.
+    ///
+    /// Only perplexity sets this. It is surfaced on the summary rather than persisted inside the
+    /// translator because remembering it is a decision about *this* request's conversation, which the
+    /// translator has no view of.
+    pub upstream_thread: Option<String>,
+    /// The finished answer as the upstream reported it, for the same reason.
+    pub upstream_answer: Option<String>,
 }
 
 /// Where translated frames are delivered.
@@ -195,6 +204,17 @@ where
         .finish_reason
         .clone()
         .or_else(|| summary.finish_reason.clone());
+    // Perplexity's thread id and its finished answer, for a caller that wants to continue the
+    // conversation on the next request.
+    summary.upstream_thread = state.pplx_backend_uuid.clone();
+    if !state.pplx_answer.is_empty() {
+        summary.upstream_answer = Some(
+            nullrouter_translate::response::perplexity_web_to_openai::clean(
+                &state.pplx_answer,
+                true,
+            ),
+        );
+    }
     summary
 }
 

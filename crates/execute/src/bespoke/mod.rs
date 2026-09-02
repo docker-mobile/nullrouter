@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::credentials::Credentials;
 
 pub(crate) mod grok_web;
+pub(crate) mod perplexity_web;
 
 /// The `x-session-id` header `CommandCode` expects on every request.
 const SESSION_HEADER: &str = "x-session-id";
@@ -41,6 +42,31 @@ pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) 
             &grok_web::flatten_messages(messages),
         ));
     }
+    // Perplexity takes a query document in one string field plus a params block, so its body is also
+    // replaced rather than wrapped. The conversation is split, the thread cache consulted for a
+    // server-side follow-up, and the whole thing encoded.
+    if target_format(provider) == Format::PerplexityWeb {
+        let messages = body
+            .get("messages")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        let model = body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let (mode, preference) =
+            perplexity_web::resolve_model(model, perplexity_web::wants_thinking(body));
+        let conversation = perplexity_web::parse_messages(messages);
+        let follow_up = perplexity_web::session_lookup(&conversation.history);
+        let query =
+            perplexity_web::build_query(&conversation, follow_up.as_deref(), body.get("tools"));
+        return Some(perplexity_web::payload(
+            &query,
+            &mode,
+            &preference,
+            follow_up.as_deref(),
+        ));
+    }
     if target_format(provider) != Format::GeminiCli {
         return None;
     }
@@ -58,6 +84,32 @@ pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) 
     Some(json!({ "project": project, "model": model, "request": body }))
 }
 
+/// Remember a finished perplexity thread, so the next request continues it server-side.
+///
+/// Called once a stream is drained, because the thread id and the answer are both only known then.
+/// Without this every request starts a new thread: perplexity would re-read the whole conversation from
+/// the query document each time, which is slower and loses the context it was already holding.
+///
+/// The request body is re-parsed rather than threaded through the executor: `pipe_stream` does not carry
+/// it, and parsing a body that was already parsed once is cheaper than widening that signature for one
+/// provider.
+pub fn remember_thread(provider: &str, request_body: &Value, backend_uuid: &str, answer: &str) {
+    if target_format(provider) != Format::PerplexityWeb || backend_uuid.is_empty() {
+        return;
+    }
+    let messages = request_body
+        .get("messages")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    let conversation = perplexity_web::parse_messages(messages);
+    perplexity_web::session_store(
+        &conversation.history,
+        &conversation.current,
+        answer,
+        backend_uuid,
+    );
+}
+
 /// Headers that replace the registry's auth for providers whose credential is not a header token.
 ///
 /// Returns `None` for every provider whose auth a descriptor can express, which is nearly all of them.
@@ -67,16 +119,43 @@ pub(crate) fn auth_override(
     provider: &str,
     credentials: &Credentials,
 ) -> Option<Vec<(String, String)>> {
-    if target_format(provider) != Format::GrokWeb {
-        return None;
+    match target_format(provider) {
+        // grok.com authenticates with the `sso` cookie from a signed-in browser session. The user
+        // pastes it as an API key because that is the field a panel offers, but it is a cookie on the
+        // wire.
+        Format::GrokWeb => {
+            let token = credentials
+                .api_key
+                .as_deref()
+                .or(credentials.access_token.as_deref())?;
+            Some(vec![("Cookie".to_owned(), grok_web::cookie_header(token))])
+        }
+        // Perplexity accepts either shape. The access token is preferred, as upstream does: it is what
+        // the site's own API layer expects, and the cookie is the fallback for a user who could only
+        // copy that out of a browser. Note this is the opposite preference to grok's, where the panel's
+        // "API key" field is the cookie.
+        Format::PerplexityWeb => {
+            if let Some(token) = credentials
+                .access_token
+                .as_deref()
+                .filter(|token| !token.trim().is_empty())
+            {
+                return Some(vec![(
+                    "Authorization".to_owned(),
+                    format!("Bearer {token}"),
+                )]);
+            }
+            let cookie = credentials
+                .api_key
+                .as_deref()
+                .filter(|cookie| !cookie.trim().is_empty())?;
+            Some(vec![(
+                "Cookie".to_owned(),
+                perplexity_web::cookie_header(cookie),
+            )])
+        }
+        _other => None,
     }
-    // grok.com authenticates with the `sso` cookie from a signed-in browser session. The user pastes
-    // it as an API key because that is the field a panel offers, but it is a cookie on the wire.
-    let token = credentials
-        .api_key
-        .as_deref()
-        .or(credentials.access_token.as_deref())?;
-    Some(vec![("Cookie".to_owned(), grok_web::cookie_header(token))])
 }
 
 /// Headers this provider needs beyond the registry's own.
@@ -121,6 +200,9 @@ pub(crate) fn extra_headers(provider: &str, model: &str, stream: bool) -> Vec<(S
         // cookie rather than a bearer token, so it is added by `auth_override` instead of here — this
         // hook has no access to credentials.
         Format::GrokWeb => grok_web::headers(None),
+        // Perplexity's front-end headers. Its credential is applied by `auth_override`, which can be
+        // either a bearer token or a session cookie.
+        Format::PerplexityWeb => perplexity_web::headers(),
         _ => Vec::new(),
     }
 }

@@ -421,3 +421,295 @@ fn an_unmapped_grok_model_still_dispatches() {
         "an unknown name falls back to the default mode"
     );
 }
+
+// ── perplexity-web ────────────────────────────────────────────────────────────
+//
+// Second of the six. Its request is stranger than grok's: the whole conversation is encoded as a JSON
+// document inside one string field, because perplexity has no message array and no system prompt.
+
+fn perplexity_credentials(token: Option<&str>, cookie: Option<&str>) -> Credentials {
+    Credentials {
+        access_token: token.map(str::to_owned),
+        api_key: cookie.map(str::to_owned),
+        connection_id: "conn_pplx".to_owned(),
+        connection_name: "perplexity web".to_owned(),
+        ..Credentials::default()
+    }
+}
+
+fn perplexity_body(model: &str) -> Value {
+    json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": "Be terse." },
+            { "role": "user", "content": "When did Rust 1.0 ship?" },
+        ],
+    })
+}
+
+#[test]
+fn perplexity_web_encodes_the_conversation_into_one_query_field() {
+    let prepared = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &perplexity_body("pplx-sonnet"),
+        stream: true,
+        credentials: &perplexity_credentials(Some("tok"), None),
+    });
+
+    // Not a chat-completions body: perplexity takes `query_str` plus a params block.
+    assert!(prepared.body.get("messages").is_none());
+    let query = prepared
+        .body
+        .get("query_str")
+        .and_then(Value::as_str)
+        .expect("a query string");
+    // The query is itself a JSON document, which is where the system prompt goes — perplexity has no
+    // field for one, so a bare question would silently drop it.
+    let document: Value = serde_json::from_str(query).expect("the query is a JSON document");
+    assert_eq!(
+        document.pointer("/instructions/0"),
+        Some(&json!("Be terse."))
+    );
+    assert_eq!(
+        document.get("query"),
+        Some(&json!("When did Rust 1.0 ship?"))
+    );
+
+    // The mode and preference are the model mapping, and the params carry the same query again.
+    assert_eq!(
+        prepared.body.pointer("/params/mode"),
+        Some(&json!("copilot"))
+    );
+    assert_eq!(
+        prepared.body.pointer("/params/model_preference"),
+        Some(&json!("claude46sonnet"))
+    );
+    assert_eq!(
+        prepared.body.pointer("/params/query_str"),
+        Some(&json!(query))
+    );
+    // Routed traffic stays out of the account's saved threads.
+    assert_eq!(
+        prepared.body.pointer("/params/is_incognito"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn a_thinking_request_reaches_perplexity_as_its_reasoning_preference() {
+    let mut body = perplexity_body("pplx-opus");
+    if let Some(object) = body.as_object_mut() {
+        object.insert("reasoning_effort".to_owned(), json!("high"));
+    }
+    let prepared = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &body,
+        stream: true,
+        credentials: &perplexity_credentials(Some("tok"), None),
+    });
+
+    // The mode stays `copilot`; the preference is what carries the request.
+    assert_eq!(
+        prepared.body.pointer("/params/model_preference"),
+        Some(&json!("claude46opusthinking"))
+    );
+}
+
+#[test]
+fn perplexity_web_prefers_a_bearer_token_and_falls_back_to_the_cookie() {
+    // Both shapes exist because a user may only be able to copy one of them out of a browser.
+    let with_token = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &perplexity_body("pplx-gpt"),
+        stream: true,
+        credentials: &perplexity_credentials(Some("access-tok"), Some("cookie-val")),
+    });
+    assert_eq!(
+        with_token.headers.get("Authorization").map(String::as_str),
+        Some("Bearer access-tok")
+    );
+    assert!(
+        !with_token.headers.contains_key("Cookie"),
+        "the token wins; sending both would be two credentials"
+    );
+
+    let cookie_only = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &perplexity_body("pplx-gpt"),
+        stream: true,
+        credentials: &perplexity_credentials(None, Some("cookie-val")),
+    });
+    assert_eq!(
+        cookie_only.headers.get("Cookie").map(String::as_str),
+        Some("__Secure-next-auth.session-token=cookie-val")
+    );
+    assert!(!cookie_only.headers.contains_key("Authorization"));
+}
+
+#[test]
+fn perplexity_web_sends_the_front_end_headers_and_its_api_version() {
+    let prepared = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &perplexity_body("pplx-auto"),
+        stream: true,
+        credentials: &perplexity_credentials(Some("tok"), None),
+    });
+
+    for (header, value) in [
+        ("Origin", "https://www.perplexity.ai"),
+        ("Referer", "https://www.perplexity.ai/"),
+        ("X-App-ApiClient", "default"),
+    ] {
+        assert_eq!(
+            prepared.headers.get(header).map(String::as_str),
+            Some(value),
+            "{header} is part of looking like the front end"
+        );
+    }
+    // The API version is sent as a header and inside the params; a mismatch between them is how a
+    // request gets refused for being inconsistent.
+    let version = prepared
+        .headers
+        .get("X-App-ApiVersion")
+        .map(String::as_str)
+        .expect("a version header");
+    assert_eq!(
+        prepared.body.pointer("/params/version"),
+        Some(&json!(version))
+    );
+}
+
+#[test]
+fn perplexity_web_posts_to_the_sse_endpoint() {
+    let credentials = perplexity_credentials(Some("tok"), None);
+    assert_eq!(
+        build_url("perplexity-web", &credentials, 0).expect("a base url"),
+        "https://www.perplexity.ai/rest/sse/perplexity_ask"
+    );
+}
+
+#[test]
+fn declared_tools_reach_perplexity_as_a_hint_rather_than_a_capability() {
+    // Perplexity cannot call a tool. Dropping the declaration silently would leave a model describing
+    // a call it has no way to make.
+    let mut body = perplexity_body("pplx-sonar");
+    if let Some(object) = body.as_object_mut() {
+        object.insert(
+            "tools".to_owned(),
+            json!([{ "function": { "name": "get_weather", "description": "Current weather" } }]),
+        );
+    }
+    let prepared = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &body,
+        stream: true,
+        credentials: &perplexity_credentials(Some("tok"), None),
+    });
+
+    let query = prepared
+        .body
+        .get("query_str")
+        .and_then(Value::as_str)
+        .expect("a query");
+    let document: Value = serde_json::from_str(query).expect("a JSON document");
+    let instructions = document
+        .get("instructions")
+        .and_then(Value::as_array)
+        .expect("instructions")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(instructions.contains("cannot invoke"), "{instructions}");
+    assert!(instructions.contains("get_weather"), "{instructions}");
+}
+
+#[actix_rt::test]
+async fn a_perplexity_thread_is_remembered_and_continued_on_the_next_request() {
+    // The loop that makes a multi-turn perplexity conversation work at all, end to end: the answer
+    // stream carries a thread id, the executor stores it against this exchange, and the next request —
+    // whose `messages` now include the answer — sends only the new question plus that id.
+    //
+    // Without it every turn re-sends the whole conversation as a fresh query document, so perplexity
+    // re-reads context it was already holding and the thread it kept is abandoned.
+    use nullrouter_execute::{ClientFraming, StreamSummary, pipe_stream};
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    let first_body = json!({
+        "model": "pplx-sonnet",
+        "messages": [{ "role": "user", "content": "When did Rust 1.0 ship?" }],
+    });
+
+    // A first turn: no thread is known, so the whole document goes out.
+    let opening = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &first_body,
+        stream: true,
+        credentials: &perplexity_credentials(Some("tok"), None),
+    });
+    assert_eq!(
+        opening.body.pointer("/params/last_backend_uuid"),
+        Some(&json!(null)),
+        "a first turn has no thread to continue"
+    );
+
+    // Perplexity answers, naming the thread it opened.
+    let events = concat!(
+        "data: {\"backend_uuid\":\"thread-abc\",\"blocks\":[{\"intended_usage\":\"ask_text_markdown\",",
+        "\"markdown_block\":{\"progress\":\"DONE\",\"chunks\":[\"May 2015.\"]}}]}\n\n",
+    );
+    let upstream = MockUpstream::start(vec![MockResponse::sse(events)]).await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary: StreamSummary = pipe_stream(
+        response,
+        Format::PerplexityWeb,
+        Format::OpenAi,
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+
+    // The thread id and the finished answer both reach the caller.
+    assert_eq!(summary.upstream_thread.as_deref(), Some("thread-abc"));
+    assert_eq!(summary.upstream_answer.as_deref(), Some("May 2015."));
+    assert_eq!(summary.text, "May 2015.");
+
+    nullrouter_execute::bespoke::remember_thread(
+        "perplexity-web",
+        &first_body,
+        summary.upstream_thread.as_deref().expect("a thread id"),
+        summary.upstream_answer.as_deref().expect("an answer"),
+    );
+
+    // The second turn carries what a client would actually send back: the question, the answer, and the
+    // new question.
+    let second_body = json!({
+        "model": "pplx-sonnet",
+        "messages": [
+            { "role": "user", "content": "When did Rust 1.0 ship?" },
+            { "role": "assistant", "content": "May 2015." },
+            { "role": "user", "content": "And 2.0?" },
+        ],
+    });
+    let continued = prepare(&ExecuteRequest {
+        provider: "perplexity-web",
+        body: &second_body,
+        stream: true,
+        credentials: &perplexity_credentials(Some("tok"), None),
+    });
+
+    assert_eq!(
+        continued.body.pointer("/params/last_backend_uuid"),
+        Some(&json!("thread-abc")),
+        "the remembered thread must be continued rather than restarted"
+    );
+    // And the query is just the new question, because perplexity still holds the rest.
+    assert_eq!(continued.body.get("query_str"), Some(&json!("And 2.0?")));
+}
