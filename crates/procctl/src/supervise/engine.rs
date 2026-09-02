@@ -185,9 +185,7 @@ async fn run(
                 }
             }
             Event::Deadline => on_deadline(program, current, &shared).await,
-            Event::Exited(status) => {
-                on_exit(program, current, status, &shared).await
-            }
+            Event::Exited(status) => on_exit(program, current, status, &shared).await,
             Event::RestartDue => {
                 let Slot::Backoff { spec, attempt, .. } = current else {
                     continue;
@@ -527,7 +525,14 @@ fn begin(
         // Clamped below the startup deadline, so a grace longer than the timeout cannot make
         // survival unreachable — the rule would then be strictly harsher than the one it mirrors.
         ReadyRule::SurvivesOr { grace, .. } => {
-            Some(Instant::now() + (*grace).min(spec.startup_timeout))
+            // Clamped strictly *below* the startup timeout, not merely to it. A grace equal to the
+            // deadline puts two timers on the same instant, and `select!` between two ready branches
+            // picks arbitrarily — so a clamped grace would fail or succeed at random. Survival is a
+            // floor on how long the child must last, so when the two would coincide the floor is what
+            // should fire.
+            let margin = Duration::from_millis(1);
+            let clamped = (*grace).min(spec.startup_timeout.saturating_sub(margin));
+            Some(Instant::now() + clamped)
         }
         _other => None,
     };
@@ -703,10 +708,9 @@ fn render_status(status: Option<std::process::ExitStatus>) -> String {
     status.map_or_else(
         || "an unreadable status".to_owned(),
         |status| {
-            status.code().map_or_else(
-                || "a signal".to_owned(),
-                |code| format!("exit code {code}"),
-            )
+            status
+                .code()
+                .map_or_else(|| "a signal".to_owned(), |code| format!("exit code {code}"))
         },
     )
 }

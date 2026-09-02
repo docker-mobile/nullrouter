@@ -220,6 +220,7 @@ pub fn translate_response(
             response::gemini_to_openai::translate(chunk, state)
         }
         Format::Ollama => response::ollama_to_openai::translate(chunk, state),
+        Format::GrokWeb => response::grok_web_to_openai::translate(chunk, state),
         Format::CommandCode => response::commandcode_to_openai::translate(chunk, state),
         // Unported upstream format: forward as-is.
         _ => vec![chunk.clone()],
@@ -240,6 +241,39 @@ pub fn translate_response(
             .map(|event| event.data)
             .collect(),
         _ => intermediate,
+    }
+}
+
+/// Terminal chunks an *upstream* format needs synthesized once its body is exhausted.
+///
+/// Distinct from [`finalize_response`], which serves the *client* format. This one exists because some
+/// upstreams never state that they finished: grok.com closes the connection with no finish reason, and
+/// a client waiting for one hangs on a reply that has fully arrived.
+///
+/// The returned chunks are already in `source` shape, so the caller sends them as-is. Translating here
+/// rather than at the call site keeps the OpenAI-intermediate step internal: the synthesized chunk is
+/// created OpenAI-shaped, and running the upstream translator over it again would read it as an
+/// upstream event and yield nothing.
+pub fn finalize_upstream(target: Format, source: Format, state: &mut StreamState) -> Vec<Value> {
+    let synthesized = match target {
+        Format::GrokWeb => vec![response::grok_web_to_openai::finish(state)],
+        _ => Vec::new(),
+    };
+    if synthesized.is_empty() || formats_equivalent(source, Format::OpenAi) {
+        return synthesized;
+    }
+    // OpenAI -> client, the same second step `translate_response` applies.
+    match source {
+        Format::Claude => synthesized
+            .iter()
+            .flat_map(|chunk| response::openai_to_claude::translate(chunk, state))
+            .collect(),
+        Format::OpenAiResponses => synthesized
+            .iter()
+            .flat_map(|chunk| response::openai_to_responses::translate(Some(chunk), state))
+            .map(|event| event.data)
+            .collect(),
+        _ => synthesized,
     }
 }
 

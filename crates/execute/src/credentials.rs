@@ -270,6 +270,18 @@ pub fn build_headers(
     if stream {
         headers.insert("Accept".to_owned(), "text/event-stream".to_owned());
     }
+
+    // A few providers authenticate in a way no descriptor can express — a session cookie rather than a
+    // header, for one. Applied last so it can remove what `apply_auth` inserted: leaving an
+    // `Authorization` header on a cookie-authenticated web endpoint is how a request gets rejected for
+    // carrying two conflicting credentials.
+    if let Some(override_headers) = crate::bespoke::auth_override(provider, credentials) {
+        headers.remove("Authorization");
+        headers.remove("x-api-key");
+        for (key, value) in override_headers {
+            headers.insert(key, value);
+        }
+    }
     headers
 }
 

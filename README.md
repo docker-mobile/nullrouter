@@ -451,12 +451,29 @@ large majority of the registry, including `openai`, `anthropic`, `gemini`, `groq
 envelope, a per-request header, or a URL suffix, and those are hooks on the shared path rather than
 three more code paths.
 
-Providers whose wire protocol needs genuine request signing or a binary protocol return an explicit
+`grok-web` executes as well, and it is the first of the six bespoke protocols to be ported from the
+9Router reference rather than refused. It stays on the shared path for the same reason the three above
+do — what differs is expressible as hooks — but the hooks it needs are larger: the chat-completions body
+is **replaced** by grok.com's own payload rather than wrapped, the credential is a **session cookie**
+rather than a header token, and the response is **NDJSON** whose events nest under `result.response`.
+Three details in it are load-bearing and pinned by tests: the model *mode* rather than the model name
+carries the request's meaning (`grok-3-mini` and `grok-3` share a `modelName`); a multi-turn
+conversation is flattened into one string with role prefixes on every turn but the final user one; and
+the terminal whole-message event repeats the entire answer, so it must supersede the accumulated tokens
+instead of appending to them. grok.com reports no token counts, so **no usage is reported** — upstream
+divides character length by four and calls that a token count, which a caller cannot tell from a real
+one and would be billed against.
+
+The remaining protocols need genuine request signing or a binary protocol and still return an explicit
 **501 naming the provider and its protocol**, rather than a plausible wrong answer:
 
-`kiro` · `cursor` · `codex` · `antigravity` · `grok-web` · `perplexity-web`
+`kiro` · `cursor` · `codex` · `antigravity` · `perplexity-web`
 
 A test asserts that more than 75% of registry entries with a transport remain executable.
+
+None of this has been verified against a live provider account. The request shapes match the reference
+and are asserted against loopback fixtures; whether grok.com accepts them is not something a stub can
+establish.
 
 ## Security model
 
@@ -703,9 +720,11 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **The six bespoke provider executors** — *provider accounts to test against*. Listed
-  [above](#what-executes-and-what-refuses). Their protocols are undocumented and cannot be
-  implemented blind; each needs a real account to verify against.
+- **Five of the six bespoke provider executors** — Listed [above](#what-executes-and-what-refuses).
+  `grok-web` is now ported from the reference and executes; the other five are being ported the same
+  way. Their protocols are undocumented, so what a loopback test can establish is that the request
+  matches the reference — not that the provider accepts it. That distinction is stated rather than
+  papered over: verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP
   bridge that starts it is implemented and tested (see below), and it will spawn the server on
   request. What this port cannot supply is the browser it drives: without Chrome and the Browser MCP

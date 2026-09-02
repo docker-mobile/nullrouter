@@ -55,7 +55,8 @@ fn frame_for(chunk: &Value, framing: ClientFraming, source: Format) -> String {
 pub const fn upstream_encoding(target: Format) -> Encoding {
     match target {
         // Both send bare JSON objects, one per line, with no `data:` prefix.
-        Format::Ollama | Format::CommandCode => Encoding::Ndjson,
+        // grok.com streams bare JSON objects one per line, like these two.
+        Format::Ollama | Format::CommandCode | Format::GrokWeb => Encoding::Ndjson,
         _ => Encoding::Sse,
     }
 }
@@ -153,6 +154,22 @@ where
             &mut sink,
         )
         .await;
+    }
+
+    if !client_gone {
+        // Some upstreams end their stream without ever saying it finished. grok.com just closes the
+        // connection, so the finish reason a client waits for has to be synthesized here — after the
+        // body is drained, and before the client format's own terminal frames.
+        // The chunk comes back already converted into the client's shape: it is synthesized
+        // OpenAI-side, so re-running the upstream translator over it would read an OpenAI chunk as a
+        // grok event and produce nothing.
+        for chunk in nullrouter_translate::finalize_upstream(target, source, state) {
+            collect_text(&chunk, &mut summary);
+            if sink.send(frame_for(&chunk, framing, source)).await.is_err() {
+                client_gone = true;
+                break;
+            }
+        }
     }
 
     if !client_gone {

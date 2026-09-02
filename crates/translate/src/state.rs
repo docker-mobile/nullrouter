@@ -149,6 +149,21 @@ pub struct StreamState {
     // ── Ollama -> OpenAI ──
     /// `created`, fixed at the first NDJSON line so every chunk agrees.
     pub ollama_created: Option<u64>,
+
+    // ── grok-web -> OpenAI ──
+    /// `created` fixed on the first event so one response shares it.
+    pub grok_created: Option<u64>,
+    /// Whether the requested mode streams reasoning before its answer.
+    ///
+    /// Not derivable from the response: grok.com's events look identical either way, so the executor
+    /// records what it asked for. Without it, reasoning would be emitted as answer text.
+    pub grok_thinking: bool,
+    /// Answer text already sent, so a final whole-message event does not resend it.
+    pub grok_emitted: String,
+    /// Whether the terminal whole-message event has arrived.
+    pub grok_saw_model_response: bool,
+    /// The build that answered, reported as `system_fingerprint`.
+    pub grok_fingerprint: Option<String>,
     /// Whether this turn emitted any tool call.
     ///
     /// Ollama reports `done_reason: "stop"` even on a turn that called a tool, so
@@ -209,6 +224,11 @@ impl StreamState {
             command_code_tools: 0,
             command_code_tool_index: BTreeMap::new(),
             ollama_created: None,
+            grok_created: None,
+            grok_thinking: false,
+            grok_emitted: String::new(),
+            grok_saw_model_response: false,
+            grok_fingerprint: None,
             ollama_had_tool_calls: false,
         }
     }

@@ -15,6 +15,8 @@ use serde_json::{Value, json};
 
 use crate::credentials::Credentials;
 
+pub(crate) mod grok_web;
+
 /// The `x-session-id` header `CommandCode` expects on every request.
 const SESSION_HEADER: &str = "x-session-id";
 
@@ -22,6 +24,23 @@ const SESSION_HEADER: &str = "x-session-id";
 ///
 /// Returns `None` when the body goes out as-is, which is the common case.
 pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) -> Option<Value> {
+    // grok.com takes a payload of its own rather than a chat-completions body, so it replaces the
+    // body outright instead of wrapping it.
+    if target_format(provider) == Format::GrokWeb {
+        let messages = body
+            .get("messages")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        let model = body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let mapping = grok_web::model_for(model);
+        return Some(grok_web::payload(
+            &mapping,
+            &grok_web::flatten_messages(messages),
+        ));
+    }
     if target_format(provider) != Format::GeminiCli {
         return None;
     }
@@ -37,6 +56,27 @@ pub(crate) fn envelope(provider: &str, body: &Value, credentials: &Credentials) 
         .or_else(|| body.get("project").cloned())
         .unwrap_or(Value::Null);
     Some(json!({ "project": project, "model": model, "request": body }))
+}
+
+/// Headers that replace the registry's auth for providers whose credential is not a header token.
+///
+/// Returns `None` for every provider whose auth a descriptor can express, which is nearly all of them.
+/// A `Some` result causes the caller to strip `Authorization` and `x-api-key` first: a web endpoint
+/// authenticated by cookie rejects a request that also carries a bearer token.
+pub(crate) fn auth_override(
+    provider: &str,
+    credentials: &Credentials,
+) -> Option<Vec<(String, String)>> {
+    if target_format(provider) != Format::GrokWeb {
+        return None;
+    }
+    // grok.com authenticates with the `sso` cookie from a signed-in browser session. The user pastes
+    // it as an API key because that is the field a panel offers, but it is a cookie on the wire.
+    let token = credentials
+        .api_key
+        .as_deref()
+        .or(credentials.access_token.as_deref())?;
+    Some(vec![("Cookie".to_owned(), grok_web::cookie_header(token))])
 }
 
 /// Headers this provider needs beyond the registry's own.
@@ -77,6 +117,10 @@ pub(crate) fn extra_headers(provider: &str, model: &str, stream: bool) -> Vec<(S
         // A correlation id per request. Upstream sends a fresh UUID on every call,
         // so one is minted rather than reused across a connection.
         Format::CommandCode => vec![(SESSION_HEADER.to_owned(), session_id())],
+        // grok.com needs the browser headers its own front end sends. The credential is a session
+        // cookie rather than a bearer token, so it is added by `auth_override` instead of here — this
+        // hook has no access to credentials.
+        Format::GrokWeb => grok_web::headers(None),
         _ => Vec::new(),
     }
 }

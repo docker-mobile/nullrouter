@@ -7,6 +7,7 @@
 pub mod claude_to_openai;
 pub mod commandcode_to_openai;
 pub mod gemini_to_openai;
+pub mod grok_web_to_openai;
 pub mod ollama_to_openai;
 pub mod openai_to_claude;
 pub mod openai_to_responses;

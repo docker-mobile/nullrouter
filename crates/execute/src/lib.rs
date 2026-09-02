@@ -53,6 +53,7 @@ pub const fn is_format_supported(format: Format) -> bool {
             | Format::Ollama
             | Format::GeminiCli
             | Format::CommandCode
+            | Format::GrokWeb
     )
 }
 
@@ -102,13 +103,21 @@ mod tests {
         for format in [
             Format::Kiro,
             Format::Cursor,
-            Format::GrokWeb,
             Format::PerplexityWeb,
             Format::Codex,
             Format::Antigravity,
         ] {
             assert!(!is_format_supported(format), "{format:?} must be refused");
         }
+    }
+
+    #[test]
+    fn grok_web_dispatches_on_its_own_protocol() {
+        // Ported from `open-sse/executors/grok-web.js`: the request is grok.com's own payload, the
+        // credential is a session cookie, and the response is NDJSON rather than SSE. All three are
+        // expressed as hooks on the shared path rather than as a separate executor.
+        assert!(is_format_supported(Format::GrokWeb));
+        assert!(is_executor_supported("grok-web"));
     }
 
     #[test]

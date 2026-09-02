@@ -335,6 +335,25 @@ struct KiroBase {
 }
 
 impl KiroBase {
+    /// Hold the lock with the override *removed*, so the default host is what the code resolves.
+    ///
+    /// The lock alone is not enough for a case that only reads: it serialises writers, but a reader
+    /// that takes no guard still sees the last value a writer left. Clearing is what makes the default
+    /// path testable while other cases in this binary point the base at their own stubs.
+    fn cleared() -> Self {
+        let lock = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let previous = std::env::var_os("NULLROUTER_KIRO_Q_BASE");
+        // SAFETY: the lock above is held, so no other case in this binary reads or writes this
+        // variable while it is being removed.
+        unsafe { std::env::remove_var("NULLROUTER_KIRO_Q_BASE") };
+        Self {
+            _lock: lock,
+            previous,
+        }
+    }
+
     fn pointing_at(addr: &str) -> Self {
         let lock = env_lock()
             .lock()
@@ -498,6 +517,11 @@ async fn a_key_amazon_rejects_is_not_recorded_and_its_body_is_not_reflected() ->
 async fn a_region_that_would_choose_the_host_is_refused_before_the_key_is_sent() -> TestResult {
     // Given: the region becomes the first label of `q.<region>.amazonaws.com`, so an unchecked value
     // is a way to pick which host receives the caller's bearer token.
+    //
+    // The guard holds `env_lock` and clears the Amazon Q base for the duration. Without it this case
+    // reads whatever base another test in this binary happens to have set — the empty-region path then
+    // reaches that stub and succeeds, which looks like a validation failure and is not one.
+    let _cleared = KiroBase::cleared();
     let (state, state_seen) = stub(200, json!({ "id": "conn" }).to_string()).await;
 
     for hostile in [
@@ -523,10 +547,16 @@ async fn a_region_that_would_choose_the_host_is_refused_before_the_key_is_sent()
         )
         .await?;
 
-        // Then: an empty region falls back to the default and gets as far as the network; every
-        // other shape is refused outright.
+        // Then: an empty region is not a hostile one — it falls back to the default and proceeds. What
+        // matters here is that it is never refused *as a bad region*, so the refusal message is the
+        // assertion rather than the status: whether the call then reaches a network or a stub depends
+        // on the environment, and asserting on that made this case fail once a stub existed.
         if hostile.is_empty() {
-            assert_ne!(status, StatusCode::OK, "{body}");
+            assert_ne!(
+                body.get("error").and_then(Value::as_str),
+                Some("Invalid region"),
+                "an absent region is a default, not a rejection: {body}"
+            );
             continue;
         }
         assert_eq!(status, StatusCode::BAD_REQUEST, "{hostile:?}: {body}");
