@@ -135,14 +135,12 @@ fn Placeholder(section: &'static str) -> impl IntoView {
     }
 }
 
-#[component]
-pub fn Overview() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    view! {
-        <PageHeader title=locale.get("nav.dashboard").to_owned() />
-        <Placeholder section="Overview" />
-    }
-}
+// Public rather than private-with-re-export: `unreachable_pub` does not model `pub use`, so a
+// private module holding `pub` components warns on every one of them, and narrowing the components
+// instead makes the re-export fail with E0364.
+pub mod overview;
+
+pub use overview::Overview;
 
 #[component]
 pub fn Routing() -> impl IntoView {
