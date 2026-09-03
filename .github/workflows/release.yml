@@ -23,9 +23,7 @@ jobs:
     name: Build and package the release binaries (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     # The two architectures GitHub hosts natively, which are also the two whose tests actually execute in
-    # CI. Every other Linux triple is cross-compiled in `ci.yml` as coverage: a binary nobody has run a
-    # test suite against is not something to hand someone as a release artifact, so those stay out of here
-    # deliberately rather than by omission.
+    # CI.
     strategy:
       fail-fast: false
       matrix:

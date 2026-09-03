@@ -1424,41 +1424,12 @@ cargo fmt --all --check
 
 ### What CI covers
 
-[`ci.yml`](.github/workflows/ci.yml) runs formatting, clippy, the workspace suite, and a release build.
-Tests execute on the two architectures GitHub hosts natively — **x86_64** and **aarch64 Linux**. Every
-other architecture is a **cross-compile only**; no test suite runs there.
+[`ci.yml`](.github/workflows/ci.yml) runs formatting, clippy, the workspace suite, and a release build
+on the two architectures GitHub hosts natively — **x86_64** and **aarch64 Linux**. Both run the full
+test suite; there is no cross-compile matrix and no BSD job.
 
-The 29-cell cross matrix is split by evidence, not by guess. Together with the two native jobs that
-is 31 of the 35 Linux triples rustc ships; the four left out are not architectures (three sanitizer
-variants of x86_64, plus the `gnux32` ILP32 ABI). The first version of this matrix predicted which
-cells would work from `rustup target list` and was 8 cells off. After run `33741863314`:
-
-| Tier | Count | Meaning |
-|---|---|---|
-| Gating | 14 | Built green. A failure here now blocks the build. |
-| Probe | 15 | Failed, for one of two named reasons, and `continue-on-error`. |
-
-The 14 that gate are x86/i686/ARM/aarch64 (gnu and musl) plus `s390x-unknown-linux-gnu` — the last
-because it is the one **big-endian** architecture that actually links, so it is the only cell that
-would catch an endianness assumption in Cursor's Connect-RPC frames or Kiro's event stream.
-
-The 15 probes failed for one of two reasons, both in a dependency rather than in this tree:
-
-- **BoringSSL has no support for the architecture** (`powerpc*`, `riscv64gc`, `loongarch64`, `sparc64`)
-- **`cross` publishes no image for the target** (`armv5te*`, `i586*`, remaining musl/RISC-V variants)
-
-**A red probe is information, not a defect.** The response is to leave it red, not to patch product
-code or fork a dependency for a platform nobody deploys to. A probe is promoted to gating only after
-it has actually passed on `main`.
-
-**BSD is a compile check only**, and also `continue-on-error`: `cargo check` for `x86_64-unknown-freebsd`,
-`aarch64-unknown-freebsd`, and `x86_64-unknown-netbsd`. GitHub hosts no BSD runner, so nothing is ever
-executed there, and **this port makes no claim to run on BSD**. Pingora carries its own
-`cfg(target_os = "freebsd")` arms, which is why the check is worth having at all.
-
-[`release.yml`](.github/workflows/release.yml) attaches **x86_64 and aarch64 Linux binaries only** — the
-two whose tests actually run. A binary from a triple no suite has ever executed on is not something to
-hand someone as a release artifact.
+[`release.yml`](.github/workflows/release.yml) attaches **x86_64 and aarch64 Linux binaries**, with the
+triple in each filename so the two jobs cannot overwrite each other on one release.
 
 Tests by area:
 
