@@ -57,8 +57,13 @@ impl Selection {
         match self {
             Self::Light => Theme::Light,
             Self::Dark => Theme::Dark,
-            Self::System if os_prefers_dark => Theme::Dark,
-            Self::System => Theme::Light,
+            Self::System => {
+                if os_prefers_dark {
+                    Theme::Dark
+                } else {
+                    Theme::Light
+                }
+            }
         }
     }
 
@@ -149,7 +154,7 @@ pub fn use_theme() -> ThemeState {
 fn stored_selection() -> Selection {
     storage()
         .and_then(|storage| storage.get_item(STORAGE_KEY).ok().flatten())
-        .map_or(Selection::default(), |raw| Selection::parse(&raw))
+        .map_or_else(Selection::default, |raw| Selection::parse(&raw))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

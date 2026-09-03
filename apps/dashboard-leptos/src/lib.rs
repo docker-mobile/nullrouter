@@ -5,6 +5,13 @@
 //! the calls that need a `Window` sit behind `#[cfg(target_arch = "wasm32")]`, and each has a
 //! native counterpart that reports the absence rather than faking a result.
 
+// Every async fn that touches the DOM awaits a `JsFuture`, which holds an `Rc` and is therefore
+// `!Send`. That is a property of the platform -- wasm32 is single-threaded and there is no other
+// thread to send a future to -- not something callers here could fix, so the nursery lint asking
+// for `Send` futures cannot be satisfied in a browser crate.
+#![allow(clippy::future_not_send, reason = "wasm32 is single-threaded; JsFuture is !Send")]
+
+pub mod api;
 pub mod theme;
 
 /// Mount the dashboard into the document body.
