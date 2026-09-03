@@ -13,6 +13,8 @@
 
 pub mod api;
 pub mod i18n;
+pub mod routes;
+pub mod shell;
 pub mod theme;
 
 /// Mount the dashboard into the document body.
@@ -20,30 +22,57 @@ pub mod theme;
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
-    leptos::mount::mount_to_body(|| leptos::prelude::view! { <Root /> });
+    leptos::mount::mount_to_body(App);
 }
 
 /// Native builds have no document to mount into.
 #[cfg(not(target_arch = "wasm32"))]
 pub const fn main() {}
 
-/// The application root.
+/// The application root: providers, then the router.
+///
+/// Theme is installed before anything renders so the first painted frame is already in the right
+/// scheme. The locale load is awaited in a `Suspense` rather than blocking the mount, so a slow or
+/// missing locale file degrades to a brief loading state instead of a blank page.
 #[cfg(target_arch = "wasm32")]
 #[leptos::component]
-fn Root() -> impl leptos::IntoView {
+pub fn App() -> impl leptos::IntoView {
     use leptos::prelude::*;
+    use leptos_router::components::{Route, Router, Routes};
+    use leptos_router::path;
 
-    let theme = theme::provide_theme();
+    theme::provide_theme();
+
+    let locale = LocalResource::new(i18n::provide_locale);
 
     view! {
-        <main class="min-h-dvh bg-background text-foreground grid place-items-center">
-            <div class="space-y-4 text-center">
-                <h1 class="text-2xl font-semibold tracking-tight">"nullrouter"</h1>
-                <p class="text-sm text-muted-foreground">
-                    "Theme resolves to "
-                    <code class="font-mono">{move || theme.resolved.get().as_str()}</code>
-                </p>
-            </div>
-        </main>
+        <Suspense fallback=|| {
+            view! {
+                <div class="min-h-dvh bg-background grid place-items-center">
+                    <div class="size-6 rounded-full border-2 border-muted border-t-foreground animate-spin" />
+                </div>
+            }
+        }>
+            // Read the resource so Suspense actually waits on it; the locale itself reaches
+            // components through context rather than as a prop.
+            {move || {
+                locale.get().map(|_| {
+                    view! {
+                        <Router>
+                            <shell::Shell>
+                                <Routes fallback=routes::NotFound>
+                                    <Route path=path!("/dashboard") view=routes::Overview />
+                                    <Route path=path!("/dashboard/routing") view=routes::Routing />
+                                    <Route path=path!("/dashboard/keys") view=routes::Keys />
+                                    <Route path=path!("/dashboard/usage") view=routes::Usage />
+                                    <Route path=path!("/dashboard/logs") view=routes::Logs />
+                                    <Route path=path!("/dashboard/settings") view=routes::Settings />
+                                </Routes>
+                            </shell::Shell>
+                        </Router>
+                    }
+                })
+            }}
+        </Suspense>
     }
 }

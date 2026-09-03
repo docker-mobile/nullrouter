@@ -41,7 +41,12 @@ impl Locale {
     }
 
     /// Deserialize a fetched locale file.
-    #[cfg_attr(not(test), expect(dead_code, reason = "only called from the wasm cfg block in load_locale"))]
+    // Called from `load_locale`, which only exists on wasm32, and from the tests. On a native
+    // non-test build it therefore has no callers.
+    #[cfg_attr(
+        all(not(test), not(target_arch = "wasm32")),
+        expect(dead_code, reason = "load_locale, its only caller, is wasm32-only")
+    )]
     fn parse(tag: String, json: &str) -> Result<Self, String> {
         let messages: HashMap<String, String> =
             serde_json::from_str(json).map_err(|error| format!("locale parse failed: {error}"))?;
@@ -91,17 +96,19 @@ pub fn use_locale() -> Locale {
 /// Read the user's locale preference from the cookie or the browser.
 #[cfg(target_arch = "wasm32")]
 fn detect_locale() -> Option<String> {
+    use wasm_bindgen::JsCast;
+
     let window = web_sys::window()?;
     let document = window.document()?;
 
-    // Explicit cookie wins.
-    if let Some(cookies) = document.cookie().ok() {
+    // `cookie()` lives on `HtmlDocument`, not `Document`, so reading it needs the cast.
+    if let Some(cookies) = document
+        .dyn_ref::<web_sys::HtmlDocument>()
+        .and_then(|html| html.cookie().ok())
+    {
         for pair in cookies.split(';') {
-            let pair = pair.trim();
-            if let Some(value) = pair.strip_prefix("locale=") {
-                if !value.is_empty() {
-                    return Some(value.to_owned());
-                }
+            if let Some(value) = pair.trim().strip_prefix("locale=").filter(|v| !v.is_empty()) {
+                return Some(value.to_owned());
             }
         }
     }
