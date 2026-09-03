@@ -3349,6 +3349,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullrouter-i18n-gen"
+version = "0.5.20"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "nullrouter-logship"
 version = "0.5.20"
 dependencies = [

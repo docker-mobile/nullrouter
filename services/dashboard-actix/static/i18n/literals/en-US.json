@@ -4,9 +4,9 @@
   "nav.keys": "API Keys",
   "nav.logs": "Logs",
   "nav.routing": "Routing",
-  "nav.settings": "Einstellungen",
-  "nav.usage": "Statistiken",
-  "theme.dark": "Dunkel",
-  "theme.light": "Hell",
+  "nav.settings": "Settings",
+  "nav.usage": "Usage",
+  "theme.dark": "Dark",
+  "theme.light": "Light",
   "theme.system": "System"
 }

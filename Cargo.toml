@@ -20,6 +20,7 @@ members = [
     "services/gateway-pingora",
     "services/runtime-actix",
     "services/state-actix",
+    "tools/i18n-gen",
 ]
 default-members = [
     "apps/dashboard-leptos",
