@@ -28,10 +28,15 @@ use crate::credentials::Credentials;
 ///
 /// True for a plain-text conversation. Cursor retired `ChatService`, and it rejects a request carrying tool
 /// schemas — which many clients attach even to a plain turn — so those go to the newer endpoint.
+///
+/// An **empty** message list is not a plain-text turn: there is no turn at all. Upstream's own predicate
+/// says otherwise only because `Array.prototype.every` is vacuously true on an empty array, which is a
+/// property of the loop rather than a decision about routing. Sending an empty conversation to the newer
+/// endpoint would build a run frame whose only content is the `"Continue."` placeholder.
 pub fn prefers_agent_service(body: &Value) -> bool {
     body.get("messages")
         .and_then(Value::as_array)
-        .is_some_and(|messages| request::is_plain_text(messages))
+        .is_some_and(|messages| !messages.is_empty() && request::is_plain_text(messages))
 }
 
 /// The framed protobuf body for a Cursor request.

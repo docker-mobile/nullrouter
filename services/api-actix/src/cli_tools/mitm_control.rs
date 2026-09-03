@@ -304,6 +304,22 @@ pub(crate) fn read_aliases(paths: &Paths) -> Result<AliasMap, ControlError> {
     })
 }
 
+/// Serialises the read-modify-write in [`write_aliases`].
+///
+/// The whole file is rewritten to change one tool, so two concurrent writers both read the old map and
+/// the second `rename` discards the first's tool entirely. `atomic_write` cannot help: it makes each
+/// write all-or-nothing, which is a different property from making read-then-write one step.
+///
+/// Process-wide rather than per-`Paths` because there is one alias file per data directory and one data
+/// directory per process. A second process writing the same file is still a race this cannot see — the
+/// file would need an advisory lock for that, which upstream does not take either.
+fn alias_write_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Write one tool's mappings into the alias map.
 pub(crate) fn write_aliases(
     paths: &Paths,
@@ -315,6 +331,9 @@ pub(crate) fn write_aliases(
             tool: tool.to_owned(),
         });
     }
+    // Held until the rename lands, so a concurrent write cannot read the map this one is about to
+    // replace. Nothing here awaits, so the guard cannot be held across a suspension point.
+    let _serialised = alias_write_lock();
     let mut map = read_aliases(paths)?;
     map.set_tool(tool, mappings);
 

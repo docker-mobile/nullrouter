@@ -31,6 +31,47 @@ struct SseFrame {
 /// frame — which is exactly the default shape these contract tests assert.
 const UNREACHABLE_STATE_ADDR: &str = "127.0.0.1:1";
 
+/// Point the console-log stream at a closed port for one test.
+///
+/// The test used to rely on no process happening to own :20134. The full workspace suite starts
+/// services in other integration-test binaries, and processes can overlap, so that was a race: an
+/// unrelated state service turned the expected outage into a valid empty buffer and eventually a
+/// keepalive. The address is read when Actix configures [`nullrouter_events::LogReader`], so the
+/// guard surrounds app construction as well as reading the stream.
+struct ConsoleLogStateAddr {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl ConsoleLogStateAddr {
+    fn unreachable() -> Self {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let lock = LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let previous = std::env::var_os("NULLROUTER_STATE_ADDR");
+        // SAFETY: `lock` serialises every mutation in this test binary, and the guard restores the
+        // inherited value before releasing it.
+        unsafe { std::env::set_var("NULLROUTER_STATE_ADDR", UNREACHABLE_STATE_ADDR) };
+        Self {
+            _lock: lock,
+            previous,
+        }
+    }
+}
+
+impl Drop for ConsoleLogStateAddr {
+    fn drop(&mut self) {
+        match &self.previous {
+            // SAFETY: the mutex is held until this guard finishes dropping.
+            Some(previous) => unsafe { std::env::set_var("NULLROUTER_STATE_ADDR", previous) },
+            // SAFETY: as above.
+            None => unsafe { std::env::remove_var("NULLROUTER_STATE_ADDR") },
+        }
+    }
+}
+
 fn test_app_data() -> web::Data<nullrouter_events::UsageReader> {
     web::Data::new(nullrouter_events::UsageReader::new(UNREACHABLE_STATE_ADDR))
 }
@@ -260,6 +301,7 @@ async fn usage_stream_returns_parseable_default_sse_when_requested() -> TestResu
 #[actix_web::test]
 async fn console_logs_stream_returns_parseable_default_sse_when_requested() -> TestResult {
     // Given: no state service to hold the buffer, so nothing can be captured.
+    let _addr = ConsoleLogStateAddr::unreachable();
 
     // When: the opening frames are read. This stream is now live and never ends — it polls the
     // buffer in the state service — so only a bounded prefix is consumed. Reading to completion
@@ -288,6 +330,7 @@ async fn console_logs_stream_returns_parseable_default_sse_when_requested() -> T
 async fn the_console_log_stream_reports_an_unreachable_buffer_rather_than_going_quiet() -> TestResult
 {
     // Given: no state service listening, which is what these tests run against.
+    let _addr = ConsoleLogStateAddr::unreachable();
 
     // When: enough of the stream is read to get past the opening frames. Those are three —
     // `connected`, the named `console_logs` init, and its unnamed duplicate for `onmessage` — and

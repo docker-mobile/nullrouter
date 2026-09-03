@@ -379,51 +379,53 @@ impl BinaryDecoder {
                             stop_after: true,
                         };
                     }
-                    let agent_events =
-                        crate::bespoke::cursor::agent::decode_payload(&frame.payload);
-                    if !agent_events.is_empty() {
-                        for event in agent_events {
-                            match event {
-                                crate::bespoke::cursor::agent::Event::Text(text) => {
-                                    let decoded = cursor::Decoded {
-                                        text: Some(text),
-                                        ..cursor::Decoded::default()
-                                    };
-                                    chunks.extend(stream.push(&decoded));
-                                }
-                                crate::bespoke::cursor::agent::Event::Done => {
-                                    chunks.extend(stream.finish());
-                                    return BinaryStep {
-                                        chunks,
-                                        fatal: None,
-                                        stop_after: true,
-                                    };
-                                }
-                                crate::bespoke::cursor::agent::Event::RequestContext => {
-                                    tracing::debug!(
-                                        "cursor AgentService asked for RequestContext on a \
-                                         request/response stream; the empty ack cannot be written back"
-                                    );
-                                }
-                                crate::bespoke::cursor::agent::Event::UnsupportedExec => {
-                                    return BinaryStep {
-                                        chunks,
-                                        fatal: Some(
-                                            "Cursor AgentService requested an unsupported IDE tool"
-                                                .to_owned(),
-                                        ),
-                                        stop_after: true,
-                                    };
-                                }
+                    // ChatService first, and the order is load-bearing. The two schemas collide on
+                    // field 2: it is `StreamUnifiedChatResponse` here and `exec_request` on
+                    // AgentService. Reading an AgentService schema over a ChatService frame turns
+                    // every text delta into an "unsupported IDE tool" refusal, which is exactly the
+                    // regression this ordering exists to prevent. ChatService decode of an
+                    // AgentService frame is the safe direction: field 1 there is a tool call that
+                    // fails to parse, so it yields the default and falls through.
+                    let decoded = cursor::decode_frame(&frame.payload);
+                    if decoded != cursor::Decoded::default() {
+                        chunks.extend(stream.push(&decoded));
+                        continue;
+                    }
+                    for event in crate::bespoke::cursor::agent::decode_payload(&frame.payload) {
+                        match event {
+                            crate::bespoke::cursor::agent::Event::Text(text) => {
+                                let decoded = cursor::Decoded {
+                                    text: Some(text),
+                                    ..cursor::Decoded::default()
+                                };
+                                chunks.extend(stream.push(&decoded));
+                            }
+                            crate::bespoke::cursor::agent::Event::Done => {
+                                chunks.extend(stream.finish());
+                                return BinaryStep {
+                                    chunks,
+                                    fatal: None,
+                                    stop_after: true,
+                                };
+                            }
+                            crate::bespoke::cursor::agent::Event::RequestContext => {
+                                tracing::debug!(
+                                    "cursor AgentService asked for RequestContext on a \
+                                     request/response stream; the empty ack cannot be written back"
+                                );
+                            }
+                            crate::bespoke::cursor::agent::Event::UnsupportedExec => {
+                                return BinaryStep {
+                                    chunks,
+                                    fatal: Some(
+                                        "Cursor AgentService requested an unsupported IDE tool"
+                                            .to_owned(),
+                                    ),
+                                    stop_after: true,
+                                };
                             }
                         }
-                        continue;
                     }
-                    let decoded = cursor::decode_frame(&frame.payload);
-                    if decoded == cursor::Decoded::default() {
-                        continue;
-                    }
-                    chunks.extend(stream.push(&decoded));
                 }
                 BinaryStep {
                     chunks,

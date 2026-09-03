@@ -1213,6 +1213,57 @@ fn cursor_text_frame(text: &str) -> Vec<u8> {
     connect_frame(&len_field(2, &len_field(1, text.as_bytes())))
 }
 
+/// `AgentServerMessage.interaction_update.text_delta.text`, the newer endpoint's shape.
+///
+/// Field 1 at the top, where `ChatService` puts a tool call — which is why the two schemas cannot be
+/// told apart by inspection and the decoder has to try one and fall through.
+fn cursor_agent_text_frame(text: &str) -> Vec<u8> {
+    connect_frame(&len_field(1, &len_field(1, &len_field(1, text.as_bytes()))))
+}
+
+/// `AgentServerMessage.exec_request.request_context`, the mid-stream ask for IDE context.
+fn cursor_agent_context_ask() -> Vec<u8> {
+    connect_frame(&len_field(2, &len_field(10, &[])))
+}
+
+#[tokio::test]
+async fn cursor_agentservice_frames_also_reach_the_client_as_openai_chunks() {
+    use nullrouter_execute::pipe_binary_stream;
+    use nullrouter_providers::Format;
+    use nullrouter_translate::state::{Clock, StreamState};
+
+    // The regression this pins: `ChatService`'s `response` and `AgentService`'s `exec_request` are both
+    // field 2, so a decoder that reads the AgentService schema first turns every ChatService delta into
+    // an "unsupported IDE tool" refusal. Both fixtures therefore have to pass through one decoder.
+    let mut body = cursor_agent_context_ask();
+    body.extend_from_slice(&cursor_agent_text_frame("Cursor "));
+    body.extend_from_slice(&cursor_agent_text_frame("agent answered."));
+
+    let upstream =
+        MockUpstream::start(vec![MockResponse::bytes("application/connect+proto", body)]).await;
+    let response = reqwest::Client::new()
+        .post(upstream.url())
+        .send()
+        .await
+        .expect("the stub answers");
+
+    let mut state = StreamState::new(Clock::Fixed(1_700_000_000_000));
+    let summary = pipe_binary_stream(
+        response,
+        Format::Cursor,
+        Format::OpenAi,
+        "claude-4.5-sonnet",
+        &mut state,
+        |_frame: String| Ok(()),
+    )
+    .await;
+
+    // The context ask contributes no text and is not an error: this executor answers it with an empty
+    // context on a duplex stream, and cannot answer it at all on a request/response one.
+    assert_eq!(summary.text, "Cursor agent answered.");
+    assert!(summary.error.is_none(), "{:?}", summary.error);
+}
+
 #[tokio::test]
 async fn cursor_protobuf_frames_reach_the_client_as_openai_chunks() {
     use nullrouter_execute::pipe_binary_stream;
