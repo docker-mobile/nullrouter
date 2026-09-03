@@ -86,3 +86,6 @@ flamegraph.svg
 # oh-my-claudecode operational state (agent tooling, not project files)
 .omc/
 **/.omc/
+
+# Stylesheet toolchain. The generated app.css IS committed so the Rust build needs no Node.
+/apps/dashboard-leptos/node_modules/

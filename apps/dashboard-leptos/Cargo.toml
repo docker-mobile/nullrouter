@@ -11,31 +11,83 @@ repository.workspace = true
 name = "nullrouter_dashboard_wasm"
 crate-type = ["cdylib", "rlib"]
 
-[features]
-# Tests that read the upstream 9Router tree directly. `inspire/` is a read-only reference checkout that is
-# gitignored and absent from a fresh clone, so a test which `include_str!`s out of it cannot compile in CI
-# or for anyone who has not cloned it — and `include_str!` fails at compile time, which takes the whole
-# test binary down rather than skipping one case.
-#
-# Off by default so the default build is the one that works everywhere. Run the parity checks with:
-#   cargo test -p nullrouter-dashboard-wasm --features parity
-parity = []
-
-[[test]]
-name = "mitm_upstream_parity"
-required-features = ["parity"]
-
 [dependencies]
 console_error_panic_hook.workspace = true
+js-sys.workspace = true
 leptos.workspace = true
+leptos_router.workspace = true
 nullrouter-contracts.workspace = true
 nullrouter-providers.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["BroadcastChannel", "EventSource", "MessageEvent", "Clipboard", "Document", "HtmlDocument", "Element", "HtmlElement", "KeyboardEvent", "Location", "Navigator", "Request", "RequestCache", "RequestCredentials", "RequestInit", "Response", "Storage", "UrlSearchParams", "Window"] }
-js-sys = "0.3"
+
+# Enabled one at a time rather than through `all-components`, which does not compile. See the
+# note on `leptos-shadcn-ui` in the workspace manifest.
+[dependencies.leptos-shadcn-ui]
+workspace = true
+features = [
+    "accordion",
+    "alert",
+    "avatar",
+    "badge",
+    "breadcrumb",
+    "button",
+    "card",
+    "checkbox",
+    "collapsible",
+    "combobox",
+    "command",
+    "dialog",
+    "dropdown-menu",
+    "input",
+    "label",
+    "pagination",
+    "popover",
+    "progress",
+    "radio-group",
+    "scroll-area",
+    "select",
+    "separator",
+    "sheet",
+    "skeleton",
+    "slider",
+    "switch",
+    "table",
+    "tabs",
+    "textarea",
+    "toast",
+    "toggle",
+    "tooltip",
+]
+
+[dependencies.web-sys]
+workspace = true
+features = [
+    "BroadcastChannel",
+    "Clipboard",
+    "Document",
+    "Element",
+    "EventSource",
+    "HtmlDocument",
+    "HtmlElement",
+    "KeyboardEvent",
+    "Location",
+    "MediaQueryList",
+    "MediaQueryListEvent",
+    "MessageEvent",
+    "Navigator",
+    "Request",
+    "RequestCache",
+    "RequestCredentials",
+    "RequestInit",
+    "Response",
+    "Storage",
+    "UrlSearchParams",
+    "Window",
+]
 
 [lints]
 workspace = true

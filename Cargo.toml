@@ -45,10 +45,9 @@ version = "0.5.20"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-description = "Microservice Rust port of 9Router"
+description = "Self-hosted AI model router and gateway"
 repository = "https://github.com/docker-mobile/nullrouter"
-readme = "README.md"
-keywords = ["9router", "ai", "router", "gateway"]
+keywords = ["ai", "llm", "router", "gateway", "proxy"]
 categories = ["command-line-utilities", "web-programming::http-server"]
 
 [workspace.dependencies]
@@ -66,6 +65,12 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 console_error_panic_hook = "0.1"
 http = "1"
 leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
+leptos_router = { version = "=0.8.10", default-features = false }
+# The dashboard's component layer. `default-features = false` is load-bearing: the default
+# `all-components` feature pulls in `performance-audit`, whose `statistical` -> `num 0.1` ->
+# `rustc-serialize` chain does not compile on any current rustc (E0046). Components are enabled
+# one by one in the dashboard manifest instead.
+leptos-shadcn-ui = { version = "0.9", default-features = false }
 mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
 nullrouter-logship = { path = "crates/logship" }
@@ -115,6 +120,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
+js-sys = "0.3"
+# A transitive dependency of the component layer. On wasm32 `uuid` hard-errors at compile time
+# unless it is told where randomness comes from, and the component crates do not select a source
+# themselves, so the choice lands here.
+uuid = { version = "1", features = ["js", "v4"] }
 tempfile = "3"
 
 [profile.bench]
