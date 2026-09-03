@@ -10,6 +10,10 @@
 //! than value assertions: whether this machine has Python 3.10+, or
 //! `headroom-ai`, is a property of the machine. Asserting either way would make
 //! the suite pass or fail on the developer's environment instead of on the code.
+//!
+//! Two POSTs (`restart`, `start`) assume the binary is absent. GitHub's Ubuntu image has it, so
+//! those tests skip on a host that would find one — spawning a real proxy is not the contract they
+//! pin, and `headroom_live.rs` covers the installed path with stand-ins.
 
 #![allow(
     clippy::future_not_send,
@@ -82,6 +86,31 @@ fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
 
 fn test_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
     Box::new(std::io::Error::other(message.into()))
+}
+
+/// Whether this host has a `headroom` binary the production search would find.
+///
+/// Two tests below pin the *not-installed* contract. GitHub's Ubuntu image has the binary, so those
+/// tests would otherwise spawn a real proxy on :8787 and fail. Skipping them on a host that has the
+/// binary is the honest answer: the contract cannot be exercised there. The installed path is covered
+/// by `headroom_live.rs` with stand-in executables.
+fn host_has_headroom() -> bool {
+    let path_dirs = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut extras = vec![
+        std::path::PathBuf::from("/usr/local/bin"),
+        std::path::PathBuf::from("/opt/homebrew/bin"),
+        std::path::PathBuf::from("/usr/bin"),
+        std::path::PathBuf::from("/bin"),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        extras.push(std::path::Path::new(&home).join(".local").join("bin"));
+    }
+    path_dirs
+        .into_iter()
+        .chain(extras)
+        .any(|dir| dir.join("headroom").is_file())
 }
 
 #[actix_rt::test]
@@ -327,6 +356,10 @@ async fn install_tolerates_a_body_with_no_extras_field() -> TestResult {
 
 #[actix_rt::test]
 async fn restart_names_the_url_it_judged_and_the_dependency_it_lacks() -> TestResult {
+    if host_has_headroom() {
+        // The not-installed contract cannot be exercised on a host that has the binary.
+        return Ok(());
+    }
     // Given: no HEADROOM_URL override, so the default loopback URL applies and upstream's
     // external-proxy check passes. The headroom binary is not installed on this machine.
 
@@ -353,6 +386,9 @@ async fn restart_names_the_url_it_judged_and_the_dependency_it_lacks() -> TestRe
 
 #[actix_rt::test]
 async fn no_route_claims_a_running_proxy_when_none_is_running() -> TestResult {
+    if host_has_headroom() {
+        return Ok(());
+    }
     // Given: headroom is not installed here, so nothing can be started. The invariant that
     // matters is unchanged from when these routes were refusals: nothing may report a live
     // proxy, because a user who believes compression is on is billed for full-size requests.
