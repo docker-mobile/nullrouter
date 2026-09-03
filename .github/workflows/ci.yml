@@ -238,15 +238,16 @@ jobs:
   cross-linux:
     name: Cross-build ${{ matrix.target }}${{ matrix.optional && ' (informational)' || '' }}
     runs-on: ubuntu-latest
-    # Two tiers, and the split is about evidence rather than importance.
+    # Two tiers of 14 and 15, and both lists are measured rather than predicted. The first version of this
+    # matrix guessed which cells would work from `rustup target list` alone — which only proves rustc ships
+    # a `std`, not that this dependency graph links — and got 8 of the 29 wrong.
     #
-    # A cell without `optional` gates the build: `cross` publishes an official image for it, and the
-    # dependency graph is expected to link. A cell with `optional: true` is a compile *probe* — nobody has
-    # yet shown this workspace builds for it, and Pingora documents only Linux x86_64/aarch64, so a red
-    # cell there is information about a dependency's platform reach, not a defect in this tree.
+    # A cell without `optional` has built green on `main`. A cell with `optional: true` has not, for one of
+    # two reasons named beside it below: BoringSSL does not support the architecture, or `cross` publishes
+    # no image for it. A red probe is information about a dependency's platform reach, not a defect here.
     #
-    # Promote a probe to gating once it has passed on `main`. Do not patch product code to turn one green:
-    # if Pingora or a `-sys` crate has no support for an architecture, that is the finding.
+    # Promote a probe once it passes. Do not patch product code to turn one green: if Pingora or a `-sys`
+    # crate has no support for an architecture, that is the finding.
     continue-on-error: ${{ matrix.optional || false }}
     # One architecture failing must not cancel the rest: the point of the matrix is to learn which ones
     # work, and fail-fast would hide every cell after the first red one.
@@ -254,48 +255,56 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── Gating: `cross` ships an official image for each of these ──────────────────────────────
+          # ── Gating: every one of these built green in run 33741863314 ───────────────────────────────
           - target: x86_64-unknown-linux-musl
           - target: aarch64-unknown-linux-musl
           - target: i686-unknown-linux-gnu
           - target: i686-unknown-linux-musl
-          - target: armv7-unknown-linux-gnueabihf
-          - target: armv7-unknown-linux-musleabihf
+          - target: arm-unknown-linux-gnueabi
           - target: arm-unknown-linux-gnueabihf
+          - target: arm-unknown-linux-musleabi
           - target: arm-unknown-linux-musleabihf
-          - target: riscv64gc-unknown-linux-gnu
-          - target: powerpc64le-unknown-linux-gnu
-          # Big-endian, and the only two cells that would catch an endianness assumption in the binary
-          # provider protocols: Cursor's Connect-RPC length prefixes and Kiro's CRC-framed event stream
-          # both read multi-byte integers straight off the wire. Gating because `cross` images exist —
-          # if either turns out not to link, it moves to a probe rather than being patched around.
+          - target: armv7-unknown-linux-gnueabi
+          - target: armv7-unknown-linux-gnueabihf
+          - target: armv7-unknown-linux-musleabi
+          - target: armv7-unknown-linux-musleabihf
+          - target: thumbv7neon-unknown-linux-gnueabihf
+          # The one big-endian architecture that links, which is worth having: both binary provider
+          # protocols read multi-byte integers straight off the wire (Cursor's Connect-RPC length
+          # prefixes, Kiro's CRC-framed event stream), and this is the only cell that would catch an
+          # endianness assumption in either.
+          #
+          # Endianness is *not* what separates the tiers, and an earlier version of this comment had it
+          # backwards. `powerpc64` is big-endian too and fails, while this one passes — the difference is
+          # BoringSSL's per-architecture support, not byte order.
           - target: s390x-unknown-linux-gnu
-          - target: powerpc64-unknown-linux-gnu
 
-          # ── Probes: no evidence this workspace builds for them yet ─────────────────────────────────
-          # Soft-float ARM: a different float ABI from the `eabihf` cells above, not a spelling of them.
-          - { target: arm-unknown-linux-gnueabi, optional: true }
-          - { target: arm-unknown-linux-musleabi, optional: true }
-          - { target: armv7-unknown-linux-gnueabi, optional: true }
-          - { target: armv7-unknown-linux-musleabi, optional: true }
+          # ── Probes, group 1: BoringSSL has no support for the architecture ──────────────────────────
+          # These reach a working `cross` image and C toolchain and then fail inside BoringSSL's own
+          # build, which upstream supports for x86, ARM, and aarch64 only. Pingora vendors it through
+          # `pingora-boringssl` and 0.8 exposes no rustls alternative, so there is nothing to configure
+          # here: the fix would be forking BoringSSL or changing Pingora's TLS backend. Left as probes
+          # because that is a real dependency limit, not a defect in this tree.
+          - { target: powerpc64-unknown-linux-gnu, optional: true }
+          - { target: powerpc64le-unknown-linux-gnu, optional: true }
+          - { target: powerpc-unknown-linux-gnu, optional: true }
+          - { target: riscv64gc-unknown-linux-gnu, optional: true }
+          - { target: loongarch64-unknown-linux-gnu, optional: true }
+          - { target: sparc64-unknown-linux-gnu, optional: true }
+
+          # ── Probes, group 2: `cross` publishes no image for the target ──────────────────────────────
+          # These fail before a compiler runs at all, so nothing is yet known about whether the code
+          # would build for them. A `Cross.toml` naming a community image would let them try; the
+          # ppc64/loongarch/riscv ones would then most likely land in group 1 anyway.
           - { target: armv5te-unknown-linux-gnueabi, optional: true }
           - { target: armv5te-unknown-linux-musleabi, optional: true }
-          # musl on the less-travelled architectures: a different libc path than glibc on the same
-          # machine, which is where a C dependency's build script usually gives up.
+          - { target: i586-unknown-linux-gnu, optional: true }
+          - { target: i586-unknown-linux-musl, optional: true }
           - { target: powerpc64-unknown-linux-musl, optional: true }
           - { target: powerpc64le-unknown-linux-musl, optional: true }
           - { target: riscv64gc-unknown-linux-musl, optional: true }
-          - { target: loongarch64-unknown-linux-gnu, optional: true }
-          - { target: loongarch64-unknown-linux-musl, optional: true }
-          # 32-bit big-endian PowerPC, 64-bit SPARC, and pre-v7 x86: all real Linux architectures, none
-          # of them something this project has been built for.
-          - { target: powerpc-unknown-linux-gnu, optional: true }
-          - { target: sparc64-unknown-linux-gnu, optional: true }
-          - { target: i586-unknown-linux-gnu, optional: true }
-          - { target: i586-unknown-linux-musl, optional: true }
-          # NEON-mandatory ARMv7 and the newer RISC-V profile: narrower than their plain counterparts.
-          - { target: thumbv7neon-unknown-linux-gnueabihf, optional: true }
           - { target: riscv64a23-unknown-linux-gnu, optional: true }
+          - { target: loongarch64-unknown-linux-musl, optional: true }
     steps:
       - uses: actions/checkout@v4
       - name: Install the toolchain named in rust-toolchain.toml

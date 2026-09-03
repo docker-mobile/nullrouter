@@ -1428,20 +1428,28 @@ cargo fmt --all --check
 Tests execute on the two architectures GitHub hosts natively — **x86_64** and **aarch64 Linux**. Every
 other architecture is a **cross-compile only**; no test suite runs there.
 
-The cross matrix is Rust's target list filtered to Linux: 31 of the 35 triples stable rustc ships. The
-four left out are not architectures (three sanitizer variants of x86_64, plus the `gnux32` ILP32 ABI).
-It is split into two tiers, and the split is about evidence:
+The 29-cell cross matrix is split by evidence, not by guess. Together with the two native jobs that
+is 31 of the 35 Linux triples rustc ships; the four left out are not architectures (three sanitizer
+variants of x86_64, plus the `gnux32` ILP32 ABI). The first version of this matrix predicted which
+cells would work from `rustup target list` and was 8 cells off. After run `33741863314`:
 
-| Tier | Meaning |
-|---|---|
-| Gating (12) | `cross` publishes an official image; a failure blocks the build |
-| Probe (17) | `continue-on-error` — nobody has yet shown this workspace builds for it |
+| Tier | Count | Meaning |
+|---|---|---|
+| Gating | 14 | Built green. A failure here now blocks the build. |
+| Probe | 15 | Failed, for one of two named reasons, and `continue-on-error`. |
 
-The probes are honest about their status rather than decorative. Pingora documents Linux x86_64 and
-aarch64 as its supported set, so the soft-float ARM, SPARC, 32-bit PowerPC, and minority-musl cells may
-well stay red. **A red probe is information about a dependency's platform reach, not a defect here**, and
-the response is to leave it red — not to patch product code or fork a dependency for a platform nobody
-deploys to. A probe is promoted to gating only after it has actually passed on `main`.
+The 14 that gate are x86/i686/ARM/aarch64 (gnu and musl) plus `s390x-unknown-linux-gnu` — the last
+because it is the one **big-endian** architecture that actually links, so it is the only cell that
+would catch an endianness assumption in Cursor's Connect-RPC frames or Kiro's event stream.
+
+The 15 probes failed for one of two reasons, both in a dependency rather than in this tree:
+
+- **BoringSSL has no support for the architecture** (`powerpc*`, `riscv64gc`, `loongarch64`, `sparc64`)
+- **`cross` publishes no image for the target** (`armv5te*`, `i586*`, remaining musl/RISC-V variants)
+
+**A red probe is information, not a defect.** The response is to leave it red, not to patch product
+code or fork a dependency for a platform nobody deploys to. A probe is promoted to gating only after
+it has actually passed on `main`.
 
 **BSD is a compile check only**, and also `continue-on-error`: `cargo check` for `x86_64-unknown-freebsd`,
 `aarch64-unknown-freebsd`, and `x86_64-unknown-netbsd`. GitHub hosts no BSD runner, so nothing is ever
@@ -1515,7 +1523,10 @@ codegen unit, stripped symbols, and `panic = "abort"`.
 Registry and capability tables are generated from a read-only checkout of upstream 9Router, which is
 **not vendored** in this repository (it carries its own `.git` and is gitignored at `/inspire`). The
 generated JSON under `crates/providers/data/` is committed, so nothing here requires that checkout to
-build, test, or run. Clone it only if you are working on parity:
+build, test, or run. The one exception is `cargo test -p nullrouter-dashboard-wasm --features parity`,
+which `include_str!`s four files from that tree to pin MITM constants against the original. Without the
+feature (the default) those tests are not compiled, so a clone without `inspire/` is still a complete
+build-and-test. Clone it only if you are working on that parity:
 
 ```bash
 git clone https://github.com/decolua/9router inspire

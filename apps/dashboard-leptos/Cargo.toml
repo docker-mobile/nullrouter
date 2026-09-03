@@ -11,6 +11,20 @@ repository.workspace = true
 name = "nullrouter_dashboard_wasm"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Tests that read the upstream 9Router tree directly. `inspire/` is a read-only reference checkout that is
+# gitignored and absent from a fresh clone, so a test which `include_str!`s out of it cannot compile in CI
+# or for anyone who has not cloned it — and `include_str!` fails at compile time, which takes the whole
+# test binary down rather than skipping one case.
+#
+# Off by default so the default build is the one that works everywhere. Run the parity checks with:
+#   cargo test -p nullrouter-dashboard-wasm --features parity
+parity = []
+
+[[test]]
+name = "mitm_upstream_parity"
+required-features = ["parity"]
+
 [dependencies]
 console_error_panic_hook.workspace = true
 leptos.workspace = true
