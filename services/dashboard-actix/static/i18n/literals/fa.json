@@ -1,5 +1,9 @@
 {
   "error.retry": "تلاش مجدد",
+  "logs.description": "Console output from the router and connected services.",
+  "logs.disconnected": "Disconnected",
+  "logs.live": "Live",
+  "logs.waiting": "Waiting for log messages…",
   "nav.dashboard": "داشبورد",
   "nav.keys": "کلیدهای API",
   "nav.logs": "لاگ‌ها",

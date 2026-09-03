@@ -138,8 +138,10 @@ fn Placeholder(section: &'static str) -> impl IntoView {
 // Public rather than private-with-re-export: `unreachable_pub` does not model `pub use`, so a
 // private module holding `pub` components warns on every one of them, and narrowing the components
 // instead makes the re-export fail with E0364.
+pub mod logs;
 pub mod overview;
 
+pub use logs::Logs;
 pub use overview::Overview;
 
 #[component]
@@ -166,15 +168,6 @@ pub fn Usage() -> impl IntoView {
     view! {
         <PageHeader title=locale.get("nav.usage").to_owned() />
         <Placeholder section="Usage" />
-    }
-}
-
-#[component]
-pub fn Logs() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    view! {
-        <PageHeader title=locale.get("nav.logs").to_owned() />
-        <Placeholder section="Logs" />
     }
 }
 

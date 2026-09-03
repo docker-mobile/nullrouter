@@ -1,5 +1,9 @@
 {
   "error.retry": "Retry",
+  "logs.description": "Console output from the router and connected services.",
+  "logs.disconnected": "Disconnected",
+  "logs.live": "Live",
+  "logs.waiting": "Waiting for log messages…",
   "nav.dashboard": "לוח בקרה",
   "nav.keys": "API Keys",
   "nav.logs": "Logs",

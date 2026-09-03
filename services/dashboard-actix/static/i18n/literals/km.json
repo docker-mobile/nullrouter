@@ -1,5 +1,9 @@
 {
   "error.retry": "ព្យាយាមម្តងទៀត",
+  "logs.description": "Console output from the router and connected services.",
+  "logs.disconnected": "Disconnected",
+  "logs.live": "Live",
+  "logs.waiting": "Waiting for log messages…",
   "nav.dashboard": "ផ្ទាំងគ្រប់គ្រង",
   "nav.keys": "API Keys",
   "nav.logs": "កំណត់ហេតុ",

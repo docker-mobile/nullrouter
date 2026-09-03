@@ -1,5 +1,9 @@
 {
   "error.retry": "重试",
+  "logs.description": "Console output from the router and connected services.",
+  "logs.disconnected": "Disconnected",
+  "logs.live": "Live",
+  "logs.waiting": "Waiting for log messages…",
   "nav.dashboard": "仪表盘",
   "nav.keys": "API 密钥",
   "nav.logs": "日志",
