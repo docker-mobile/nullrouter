@@ -38,9 +38,9 @@ pub use stream::{
 
 /// Provider formats this port can actually execute.
 ///
-/// Every format the port has an executor for. All of them, now that the six bespoke protocols are ported —
-/// though `cursor`'s `AgentService` endpoint needs HTTP/2 duplex and only its `ChatService` one is
-/// reachable, and `kiro`'s integrity gate is deliberately not ported (see its module docs).
+/// Every format the port has an executor for. All of them, now that the six bespoke protocols are ported.
+/// Cursor plain-text turns go to `AgentService`; tool conversations stay on `ChatService`.
+/// Kiro's integrity gate re-prompts at most once on a truncated or malformed final.
 ///
 /// `ollama`, `gemini-cli`, and `commandcode` are included. None of them needs a
 /// distinct executor: what they need is an envelope, a per-request header, or a URL
@@ -141,8 +141,8 @@ mod tests {
     #[test]
     fn cursor_dispatches_on_its_own_binary_protocol() {
         // Ported from `open-sse/executors/cursor.js`: Connect-RPC carrying protobuf, so the request is
-        // bytes rather than JSON. Only the `ChatService` endpoint is ported — `AgentService` needs HTTP/2
-        // duplex, which this executor's request/response shape has no room for.
+        // bytes rather than JSON. Plain-text turns go to `AgentService`; tool conversations stay on
+        // `ChatService`.
         assert!(is_format_supported(Format::Cursor));
         assert!(is_executor_supported("cursor"));
     }

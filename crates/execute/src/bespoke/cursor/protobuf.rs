@@ -159,6 +159,16 @@ impl Message {
             .map(|(_number, value)| value)
     }
 
+    /// Every value of a field, in encounter order.
+    ///
+    /// Needed for repeated protobuf fields (`messages`, history entries). `get` would hide every
+    /// value after the first.
+    pub(crate) fn all(&self, field: u32) -> impl Iterator<Item = &FieldValue> {
+        self.fields
+            .iter()
+            .filter_map(move |(number, value)| (*number == field).then_some(value))
+    }
+
     /// The first value of a field, as text.
     pub(crate) fn text(&self, field: u32) -> Option<String> {
         self.get(field).and_then(FieldValue::text)

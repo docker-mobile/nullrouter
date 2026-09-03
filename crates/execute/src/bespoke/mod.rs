@@ -408,9 +408,12 @@ pub(crate) fn url_headers(provider: &str, url: &str) -> Vec<(String, String)> {
 /// The RPC path a provider's request posts to, replacing the base URL's own path.
 ///
 /// Separate from [`url_suffix`] because it is owned rather than static: it comes from the registry.
-pub(crate) fn chat_path(provider: &str) -> Option<String> {
+pub(crate) fn chat_path(provider: &str, body: &Value) -> Option<String> {
     if target_format(provider) != Format::Cursor {
         return None;
+    }
+    if cursor::prefers_agent_service(body) {
+        return Some(cursor::agent::RUN_PATH.to_owned());
     }
     registry::transport(provider).and_then(|transport| transport.chat_path.clone())
 }

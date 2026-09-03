@@ -182,7 +182,7 @@ pub fn prepare(request: &ExecuteRequest<'_>) -> PreparedRequest {
         // Some providers select the method in the URL rather than the body.
         url_suffix: bespoke::url_suffix(provider, model, request.stream).unwrap_or_default(),
         binary_body,
-        chat_path: bespoke::chat_path(provider),
+        chat_path: bespoke::chat_path(provider, request.body),
     }
 }
 

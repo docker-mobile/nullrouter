@@ -8,14 +8,13 @@
 //! observing the IDE, several fields carry no known meaning, and a Cursor release can add one at any time —
 //! so the decoder tolerates unknown fields rather than refusing them.
 //!
-//! **Two endpoints, one ported.** Upstream sends plain-text turns to `AgentService` and anything with tool
+//! **Two endpoints.** Upstream sends plain-text turns to `AgentService` and anything with tool
 //! calls to the older `ChatService`. `AgentService` is HTTP/2 duplex: the client sends a run request, the
 //! server asks for IDE file context mid-stream, and the client must answer on the same open stream before
-//! the response continues. That needs a bidirectional stream this executor's request/response shape has no
-//! room for, so only the `ChatService` path is ported here. Its request builder is complete, including the
-//! tool encoding, and [`prefers_agent_service`] reports when a request would have taken the other path so
-//! the caller can say so rather than fail obscurely.
+//! the response continues. [`agent`] builds that run frame and the empty-context acknowledgement;
+//! [`prefers_agent_service`] is how the executor picks the path.
 
+pub mod agent;
 pub(crate) mod headers;
 pub(crate) mod protobuf;
 pub(crate) mod request;
@@ -25,12 +24,10 @@ use serde_json::Value;
 
 use crate::credentials::Credentials;
 
-/// Whether upstream would have sent this request to `AgentService` rather than `ChatService`.
+/// Whether this request belongs on `AgentService` rather than `ChatService`.
 ///
 /// True for a plain-text conversation. Cursor retired `ChatService`, and it rejects a request carrying tool
-/// schemas — which many clients attach even to a plain turn — so upstream routes those to the newer
-/// endpoint. That endpoint needs HTTP/2 duplex, which is not ported; this reports the condition so a caller
-/// can name it.
+/// schemas — which many clients attach even to a plain turn — so those go to the newer endpoint.
 pub fn prefers_agent_service(body: &Value) -> bool {
     body.get("messages")
         .and_then(Value::as_array)
@@ -38,7 +35,17 @@ pub fn prefers_agent_service(body: &Value) -> bool {
 }
 
 /// The framed protobuf body for a Cursor request.
+///
+/// A plain-text turn is an `AgentService` run frame; anything with tool calls stays on `ChatService`.
 pub(crate) fn body(body: &Value, ids: &request::Ids) -> Vec<u8> {
+    if prefers_agent_service(body) {
+        let message_id = ids
+            .per_message
+            .last()
+            .cloned()
+            .unwrap_or_else(super::session_id);
+        return agent::run_frame(body, &message_id);
+    }
     let messages = body
         .get("messages")
         .and_then(Value::as_array)
@@ -192,7 +199,7 @@ mod tests {
 
     #[test]
     fn a_plain_turn_is_recognised_as_belonging_to_the_newer_endpoint() {
-        // Reported rather than silently mishandled: `AgentService` needs HTTP/2 duplex, which is not ported.
+        // A plain-text turn belongs on AgentService, which Cursor's ChatService now rejects.
         assert!(prefers_agent_service(&json!({
             "messages": [{ "role": "user", "content": "hi" }],
         })));

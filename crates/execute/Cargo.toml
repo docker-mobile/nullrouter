@@ -17,6 +17,7 @@ futures-util.workspace = true
 getrandom.workspace = true
 nullrouter-providers.workspace = true
 nullrouter-translate.workspace = true
+regex = "1"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -28,7 +29,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 actix-rt.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "io-util"] }
 
 [lints]
 workspace = true

@@ -560,10 +560,12 @@ router's own, which upstream discloses; and `x-cursor-timezone` is fixed to UTC 
 host clock, since the operator's location is not the user's to disclose. Ghost mode — Cursor's switch
 against retaining a conversation — stays **on** unless a connection explicitly turns it off.
 
-Only Cursor's `ChatService` endpoint is ported. Upstream sends plain-text turns to `AgentService`, which
-is HTTP/2 duplex: the server asks for IDE file context mid-stream and the client must answer on the same
-open stream before the response continues. This executor's request/response shape has no room for that,
-so a plain-text turn is logged as belonging to the unported endpoint rather than failing obscurely.
+Plain-text turns go to Cursor's `AgentService` (`/agent.v1.AgentService/Run`). The run frame carries
+the user message, optional conversation history, and the requested model, using the same field numbers
+as the reference. When the server asks for IDE file context mid-stream, this port answers on the same
+open stream with an empty `RequestContext` — 9router is not an editor, so fabricating file contents
+would be worse than sending none. Tool conversations stay on `ChatService`; AgentService's MCP tool
+protocol is a separate surface.
 
 `kiro` is the sixth and last. It is Amazon CodeWhisperer reached as the Kiro IDE reaches it: a
 `conversationState` request and a response in `vnd.amazon.eventstream` — CRC-framed binary carrying JSON
@@ -591,12 +593,11 @@ and the kiro.dev gateway does not, so it is added per-endpoint rather than per-r
 account-bound credential is never sent the shared default profile ARN, which belongs to a different
 account.
 
-**Not ported: Kiro's integrity gate.** Upstream inspects the finished answer and silently re-prompts when
-it looks truncated — an ellipsis-only reply, a malformed tool wrapper, or a final that only announces a
-future action. That last check is a page of language-specific regular expressions, including one tied to a
-single observed Chinese sentence. It re-runs the user's request against their quota on a heuristic
-judgment about prose, and a false positive spends a call to replace an answer that was fine. Left out
-deliberately rather than overlooked; the answer Kiro returns is the answer relayed.
+Kiro's integrity gate inspects a finished answer and, at most once, re-prompts with the
+reference's own instruction text when the final is ellipsis-only, a malformed `tool_call`
+wrapper, or a short announcement of a future action. The last check uses the reference's regex
+family and its completed / result / user-wait exemptions. If the retry does not improve the
+answer, the original is returned — a second failure is not evidence the first was wrong.
 
 Every protocol in the registry now has an executor, so no provider answers 501 for want of one. The
 refusal path is kept and tested against `Format::Codex` — the one format variant nothing resolves to — so
@@ -866,13 +867,6 @@ was wrong — the token comes from the caller's own request — and it is now im
   overwriting it would silently defeat a package manager or an image build. `GET /api/version`
   reports the compiled version and reports `latestVersion: null` rather than claiming to be current
   without checking. Graceful shutdown itself is implemented and stops a real server.
-- **Two pieces of the bespoke provider executors** — Listed
-  [above](#what-executes-and-what-refuses). All six protocols are ported; what is not is Cursor's
-  `AgentService` endpoint, which needs HTTP/2 duplex this executor cannot express, and Kiro's integrity
-  gate, which re-prompts on a heuristic reading of the answer's prose and is left out deliberately. Their
-  protocols are undocumented, so what a loopback test can establish is that the request matches the
-  reference — not that the provider accepts it. That distinction is stated rather than papered over:
-  verifying acceptance needs a real account per provider.
 - **The `browsermcp` plugin's own capability** — *a running Chrome and its extension*. The MCP
   bridge that starts it is implemented and tested (see below), and it will spawn the server on
   request. What this port cannot supply is the browser it drives: without Chrome and the Browser MCP

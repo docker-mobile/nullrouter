@@ -1528,18 +1528,6 @@ impl Runtime {
         // UTF-8 split on newlines — which corrupts binary frames and finds boundaries that are not there.
         let binary_upstream = nullrouter_execute::bespoke::is_binary_protocol(&target.provider);
         let stream_model = target.model.clone();
-        // Cursor retired `ChatService` for plain-text turns and routes those to `AgentService`, which needs
-        // HTTP/2 duplex and is not ported. Saying so in the log is the difference between a diagnosable
-        // rejection and an obscure one.
-        if binary_upstream
-            && nullrouter_execute::bespoke::cursor::prefers_agent_service(&outcome.sent_body)
-        {
-            tracing::warn!(
-                provider = %target.provider,
-                "cursor: a plain-text turn belongs to AgentService, which needs HTTP/2 duplex and is not \
-                 ported; sending it to the retired ChatService endpoint, which may refuse it"
-            );
-        }
 
         actix_web::rt::spawn(async move {
             let summary = if binary_upstream {

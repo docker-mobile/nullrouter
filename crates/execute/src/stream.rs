@@ -379,6 +379,46 @@ impl BinaryDecoder {
                             stop_after: true,
                         };
                     }
+                    let agent_events =
+                        crate::bespoke::cursor::agent::decode_payload(&frame.payload);
+                    if !agent_events.is_empty() {
+                        for event in agent_events {
+                            match event {
+                                crate::bespoke::cursor::agent::Event::Text(text) => {
+                                    let decoded = cursor::Decoded {
+                                        text: Some(text),
+                                        ..cursor::Decoded::default()
+                                    };
+                                    chunks.extend(stream.push(&decoded));
+                                }
+                                crate::bespoke::cursor::agent::Event::Done => {
+                                    chunks.extend(stream.finish());
+                                    return BinaryStep {
+                                        chunks,
+                                        fatal: None,
+                                        stop_after: true,
+                                    };
+                                }
+                                crate::bespoke::cursor::agent::Event::RequestContext => {
+                                    tracing::debug!(
+                                        "cursor AgentService asked for RequestContext on a \
+                                         request/response stream; the empty ack cannot be written back"
+                                    );
+                                }
+                                crate::bespoke::cursor::agent::Event::UnsupportedExec => {
+                                    return BinaryStep {
+                                        chunks,
+                                        fatal: Some(
+                                            "Cursor AgentService requested an unsupported IDE tool"
+                                                .to_owned(),
+                                        ),
+                                        stop_after: true,
+                                    };
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     let decoded = cursor::decode_frame(&frame.payload);
                     if decoded == cursor::Decoded::default() {
                         continue;

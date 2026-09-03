@@ -2613,6 +2613,7 @@ dependencies = [
  "getrandom 0.3.4",
  "nullrouter-providers",
  "nullrouter-translate",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

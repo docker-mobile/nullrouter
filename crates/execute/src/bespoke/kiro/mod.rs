@@ -20,6 +20,7 @@
 //! accepted the *credential*, for a request that a different endpoint of the same service answers fine.
 
 pub(crate) mod eventstream;
+pub(crate) mod integrity;
 pub(crate) mod request;
 pub(crate) mod response;
 
