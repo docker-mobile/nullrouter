@@ -12,6 +12,7 @@
 #![allow(clippy::future_not_send, reason = "wasm32 is single-threaded; JsFuture is !Send")]
 
 pub mod api;
+pub mod i18n;
 pub mod theme;
 
 /// Mount the dashboard into the document body.
