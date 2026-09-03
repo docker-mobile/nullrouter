@@ -144,12 +144,22 @@ fn run(config: GatewayConfig) -> PingoraResult<()> {
     // is there for anyone whose upstream really is that quick — a local llama.cpp on the same box,
     // say — where the tradeoff inverts.
     let worker_threads = gateway_threads();
+    let grace_period = gateway_grace_period();
     if let Some(configuration) = std::sync::Arc::get_mut(&mut server.configuration) {
         configuration.threads = worker_threads;
+        configuration.grace_period_seconds = Some(grace_period);
+        // Pingora waits this out *after* the grace period, once per runtime, so it is added to every
+        // graceful stop rather than being a ceiling on it. Its default is 5s, which would put the
+        // floor for any stop at 5s and the default total at 15s. Two seconds is enough for tokio to
+        // wind down runtimes that are already idle by this point.
+        configuration.graceful_shutdown_timeout_seconds = Some(GRACEFUL_RUNTIME_EXIT_SECONDS);
     } else {
         // Nothing else holds the Arc at this point, so this is unreachable in practice. Reported
-        // rather than ignored: silently running single-threaded is the thing being fixed.
-        tracing::warn!("could not set worker threads; the gateway will run with Pingora's default");
+        // rather than ignored: silently running single-threaded, or waiting five minutes to stop,
+        // are the things being fixed here.
+        tracing::warn!(
+            "could not set worker threads or grace period; the gateway will run with Pingora's defaults"
+        );
     }
     server.bootstrap();
 
@@ -196,8 +206,7 @@ fn gateway_threads() -> usize {
     let configured = configured.trim();
     if configured.eq_ignore_ascii_case("cores") {
         return std::thread::available_parallelism()
-            .map(std::num::NonZeroUsize::get)
-            .unwrap_or(DEFAULT_THREADS)
+            .map_or(DEFAULT_THREADS, std::num::NonZeroUsize::get)
             .min(MAX_THREADS);
     }
     configured
@@ -205,6 +214,119 @@ fn gateway_threads() -> usize {
         .ok()
         .filter(|threads| *threads > 0)
         .map_or(DEFAULT_THREADS, |threads| threads.min(MAX_THREADS))
+}
+
+/// Pingora's post-grace wait for its runtimes to exit. See the call site for why it is not its 5s
+/// default.
+const GRACEFUL_RUNTIME_EXIT_SECONDS: u64 = 2;
+
+/// How long a `SIGTERM` waits for in-flight requests before the process exits.
+///
+/// Pingora's own default is `EXIT_TIMEOUT`, five minutes of unconditional `thread::sleep` after the
+/// listener closes — even with zero connections open. Every process supervisor sends `SIGTERM`, so
+/// left alone the gateway looks hung for five minutes on every stop, and systemd or Docker reaches
+/// its own patience first and `SIGKILL`s it, which drops exactly the connections the grace period
+/// was supposed to protect.
+///
+/// Five seconds instead, which with `GRACEFUL_RUNTIME_EXIT_SECONDS` puts a whole graceful stop at
+/// about seven — inside Docker's 10s default before it escalates to `SIGKILL`, so a drain that is
+/// meant to be clean actually completes. Long enough for a non-streaming request to finish, short
+/// enough that a restart is a restart.
+///
+/// Streaming responses are the reason this is configurable rather than fixed: a long generation can
+/// outlive any bounded period, and whoever runs one knows better than this default does. `SIGINT` is
+/// unaffected and still exits immediately.
+fn gateway_grace_period() -> u64 {
+    const DEFAULT_GRACE_SECONDS: u64 = 5;
+
+    std::env::var("NULLROUTER_GATEWAY_GRACE_SECONDS")
+        .ok()
+        .map_or(DEFAULT_GRACE_SECONDS, |configured| {
+            // An unparseable value falls back rather than failing: refusing to start over a
+            // malformed tuning knob is worse than starting with the documented default.
+            configured
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(DEFAULT_GRACE_SECONDS)
+        })
+}
+
+#[cfg(test)]
+mod grace_period_tests {
+    use super::gateway_grace_period;
+
+    /// `NULLROUTER_GATEWAY_GRACE_SECONDS` is process-wide, so these must not run concurrently.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn with_var<T>(value: Option<&str>, body: impl FnOnce() -> T) -> T {
+        let _guard = env_lock();
+        match value {
+            // SAFETY: the lock above serialises every mutation of this variable in this process, and
+            // no other thread in these tests reads it.
+            Some(value) => unsafe {
+                std::env::set_var("NULLROUTER_GATEWAY_GRACE_SECONDS", value);
+            },
+            // SAFETY: as above.
+            None => unsafe {
+                std::env::remove_var("NULLROUTER_GATEWAY_GRACE_SECONDS");
+            },
+        }
+        let result = body();
+        // SAFETY: as above.
+        unsafe {
+            std::env::remove_var("NULLROUTER_GATEWAY_GRACE_SECONDS");
+        }
+        result
+    }
+
+    #[test]
+    fn defaults_to_five_seconds() {
+        assert_eq!(with_var(None, gateway_grace_period), 5);
+    }
+
+    /// A whole graceful stop is the grace period plus Pingora's runtime-exit wait, and it has to land
+    /// inside Docker's 10s patience or the drain this exists for is cut short by a `SIGKILL`.
+    #[test]
+    fn a_whole_graceful_stop_fits_within_dockers_default_timeout() {
+        let total = with_var(None, gateway_grace_period) + super::GRACEFUL_RUNTIME_EXIT_SECONDS;
+        assert!(
+            total < 10,
+            "a graceful stop takes {total}s, which Docker would cut short"
+        );
+    }
+
+    /// The whole point of the setting: not Pingora's 300.
+    #[test]
+    fn default_is_not_pingoras_five_minutes() {
+        assert_ne!(with_var(None, gateway_grace_period), 60 * 5);
+    }
+
+    #[test]
+    fn honours_a_configured_value() {
+        assert_eq!(with_var(Some("120"), gateway_grace_period), 120);
+    }
+
+    /// Zero is meaningful — "drop in-flight requests, stop now" — so it must not be treated as unset.
+    #[test]
+    fn zero_is_honoured() {
+        assert_eq!(with_var(Some("0"), gateway_grace_period), 0);
+    }
+
+    #[test]
+    fn tolerates_surrounding_whitespace() {
+        assert_eq!(with_var(Some("  30\n"), gateway_grace_period), 30);
+    }
+
+    #[test]
+    fn falls_back_on_a_malformed_value() {
+        assert_eq!(with_var(Some("soon"), gateway_grace_period), 5);
+        assert_eq!(with_var(Some("-5"), gateway_grace_period), 5);
+        assert_eq!(with_var(Some(""), gateway_grace_period), 5);
+    }
 }
 
 #[cfg(test)]
@@ -258,8 +380,7 @@ mod threads_tests {
     fn cores_asks_for_the_machines_core_count() {
         // Named rather than requiring a deployment script to hardcode a number for the host.
         let expected = std::thread::available_parallelism()
-            .map(std::num::NonZeroUsize::get)
-            .unwrap_or(1)
+            .map_or(1, std::num::NonZeroUsize::get)
             .min(32);
         // One guard at a time: `Threads::set` takes the env lock, so holding one while creating
         // another deadlocks against itself. Scoped rather than shadowed for that reason.

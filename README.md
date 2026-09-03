@@ -5,7 +5,8 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](rust-toolchain.toml)
 [![Edition](https://img.shields.io/badge/edition-2024-blue?logo=rust)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-MIT-green)](Cargo.toml)
-[![Tests](https://img.shields.io/badge/tests-1117-brightgreen)](#development)
+[![CI](https://github.com/docker-mobile/nullrouter/actions/workflows/ci.yml/badge.svg)](https://github.com/docker-mobile/nullrouter/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1987-brightgreen)](#development)
 
 nullrouter is a Rust microservice port of [9Router](https://github.com/decolua/9router): a local
 gateway that puts every AI provider you have credentials for behind a single OpenAI-compatible
@@ -101,45 +102,60 @@ sales pitch.
 
 ## Quick start
 
-**Prerequisites:** Rust stable (1.88+, edition 2024), plus
-[`wasm-bindgen-cli`](https://crates.io/crates/wasm-bindgen-cli) and the
-`wasm32-unknown-unknown` target for the dashboard.
+Three steps: **start it, connect one provider, point your tool at one local endpoint.** Nothing
+listens off your machine by default; the gateway on `127.0.0.1:20128` is the only public-facing
+port.
 
-**1. Build the dashboard WASM bundle once.** This is not optional — the dashboard,
-the sign-in screen, and the OAuth callback are all served by it, so without it every
-page is an empty shell:
+> **First time on a machine?** You need Rust stable (1.88+). The first command below installs its
+> own matching `wasm-bindgen-cli`, adds the dashboard's WASM target, and builds the dashboard bundle.
+> It can take several minutes and several GiB of disk on a cold machine. On Linux/macOS, install Rust
+> first with the command below, then open a new terminal (or run `. "$HOME/.cargo/env"`).
+>
+> ```bash
+> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+> . "$HOME/.cargo/env"
+> ```
+
+**1. Install from source and start nullrouter.** The launcher builds once, starts all eight local
+services in dependency order, waits until the gateway is reachable, and stops the complete set on
+<kbd>Ctrl</kbd>+<kbd>C</kbd>. It stores connections in `./nullrouter-state.json` by default, so they
+survive a restart.
 
 ```bash
-rustup target add wasm32-unknown-unknown
-cargo build -p nullrouter-dashboard-wasm --lib --target wasm32-unknown-unknown --release
-wasm-bindgen --target web \
-  --out-dir services/dashboard-actix/static/pkg \
-  --out-name dashboard_leptos \
-  target/wasm32-unknown-unknown/release/nullrouter_dashboard_wasm.wasm
+git clone https://github.com/docker-mobile/nullrouter.git
+cd nullrouter
+./run.sh
 ```
 
-**2. Start the services.** Bring up `nullrouter-state` first — the runtime and API read credentials
-and usage from it. Each of these blocks, so use separate terminals or your process manager of choice:
+When it says **`nullrouter is up`**, open <http://127.0.0.1:20128/dashboard/endpoint>. Sign in with
+`123456` on a fresh installation. Set `INITIAL_PASSWORD` (or, preferably,
+`NULLROUTER_AUTH_PASSWORD_HASH`) before exposing the dashboard to anyone else.
 
-```bash
-NULLROUTER_STATE_FILE=./nullrouter-state.json cargo run -p nullrouter-state
-cargo run -p nullrouter-runtime
-cargo run -p nullrouter-api
-cargo run -p nullrouter-events
-cargo run -p nullrouter-catalog
-cargo run -p nullrouter-auth
-cargo run -p nullrouter-dashboard-host
-cargo run -p nullrouter-gateway
+**2. Connect a provider.** In the dashboard choose **Providers → Add connection**, select the
+provider, paste the credential you obtained from that provider, and save it. Connections and their
+credentials stay on this machine; public `/api/*` responses never return a stored credential. Protect
+`nullrouter-state.json` like any other local file containing provider credentials.
+
+For a credential-backed provider, use its normal credential; the settings you need are exactly:
+
+```text
+Dashboard
+  Providers → Add connection
+  Provider: <your provider, for example OpenAI or Anthropic>
+  API key:  <credential from that provider>
+  Save connection
 ```
 
-> **Set `NULLROUTER_STATE_FILE`.** Without it the state service runs **entirely in memory** and every
-> provider connection, key, and usage record is lost when it exits.
+**3. Point a client at the one endpoint.** Use the provider/model name shown in the dashboard. An
+OpenAI-compatible client uses these exact settings:
 
-**3. Open the dashboard** at <http://127.0.0.1:20128/dashboard/endpoint> and sign in. The default
-password is `123456` unless you set `INITIAL_PASSWORD` or `NULLROUTER_AUTH_PASSWORD_HASH` — change it
-before exposing this anywhere.
+```text
+Base URL: http://127.0.0.1:20128/v1
+API key:  <a nullrouter managed key, if you enabled managed-key auth>
+Model:    provider/model
+```
 
-**4. Add a provider connection** in the dashboard, then call through the one public port:
+For example, once an `openai` connection is present, this reaches it through the gateway:
 
 ```bash
 curl -X POST http://127.0.0.1:20128/v1/chat/completions \
@@ -149,6 +165,20 @@ curl -X POST http://127.0.0.1:20128/v1/chat/completions \
 
 Models are addressed as `provider/model` (`anthropic/claude-sonnet-4.5`, `groq/llama-3.3-70b`), by
 provider alias (`cc/claude-sonnet-4.5`), or by a combo name you defined in the dashboard.
+
+### Useful launcher options
+
+```bash
+# Faster edit/run cycles; production-like release mode is the default.
+./run.sh --debug
+
+# Keep state somewhere else, without changing the launcher.
+NULLROUTER_STATE_FILE="$HOME/.local/share/nullrouter/state.json" ./run.sh
+```
+
+`run.sh` is deliberately a local trial path, not a production process manager. It only binds the
+built-in loopback defaults; see [Configuration](#configuration) and [Architecture](#architecture)
+before putting it behind another network boundary.
 
 ## Architecture
 
@@ -747,6 +777,7 @@ a bare `PORT` (which wins over the service-specific variable).
 |---|---|
 | `NULLROUTER_GATEWAY_LISTEN` / `--listen` | `127.0.0.1:20128` |
 | `NULLROUTER_GATEWAY_THREADS` | `1` — or `cores`, or a number (capped at 32) |
+| `NULLROUTER_GATEWAY_GRACE_SECONDS` | `5` — Pingora's SIGTERM drain, plus 2s of runtime teardown. `SIGINT` still exits immediately. |
 | `NULLROUTER_REQUIRE_API_KEY` / `--require-api-key` | `false` |
 | `NULLROUTER_API_UPSTREAM` / `--api-upstream` | `127.0.0.1:20129` |
 | `NULLROUTER_DASHBOARD_UPSTREAM` | `127.0.0.1:20130` |
@@ -1392,7 +1423,7 @@ install imports into it.
 ## Development
 
 ```bash
-cargo test --workspace          # 1117 tests, 132 integration files
+cargo test --workspace          # 1987 tests, 202 test groups
 cargo clippy --workspace --all-targets
 cargo fmt --all --check
 ```
