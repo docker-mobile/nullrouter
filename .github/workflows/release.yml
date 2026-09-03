@@ -20,8 +20,22 @@ env:
 
 jobs:
   binaries:
-    name: Build and package the release binaries
-    runs-on: ubuntu-latest
+    name: Build and package the release binaries (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    # The two architectures GitHub hosts natively, which are also the two whose tests actually execute in
+    # CI. Every other Linux triple is cross-compiled in `ci.yml` as coverage: a binary nobody has run a
+    # test suite against is not something to hand someone as a release artifact, so those stay out of here
+    # deliberately rather than by omission.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
       - name: Install the toolchain named in rust-toolchain.toml
@@ -39,7 +53,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build every service in release mode
         run: cargo build --release --workspace --exclude nullrouter-dashboard-wasm
@@ -56,23 +70,30 @@ jobs:
               *.d | *dashboard-wasm) continue ;;
             esac
             if [ -f "$binary" ] && [ -x "$binary" ]; then
-              cp "$binary" dist/
+              # The triple goes in the filename. Both matrix jobs attach to one release and every binary
+              # is called `nullrouter-<service>` on both, so without this the aarch64 upload would replace
+              # the x86_64 one and the release would quietly offer ARM binaries labelled as generic.
+              cp "$binary" "dist/$(basename "$binary")-${{ matrix.target }}"
             fi
           done
           ls -lh dist/
 
       - name: Record a checksum for each binary
         # So a downloader can verify what they got, and so a release's contents are pinned in its own log.
+        # The filename carries the architecture: both matrix jobs attach to the same release, and a plain
+        # `SHA256SUMS` from each would have one silently overwrite the other's.
         run: |
           set -euo pipefail
           cd dist
-          sha256sum nullrouter-* > SHA256SUMS
-          cat SHA256SUMS
+          sha256sum nullrouter-* > "SHA256SUMS-${{ matrix.target }}"
+          cat "SHA256SUMS-${{ matrix.target }}"
 
       - name: Upload the binaries as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nullrouter-binaries-${{ github.ref_name }}
+          # The triple is in the name because `upload-artifact@v4` refuses a duplicate name, and both
+          # matrix jobs would otherwise claim the same one.
+          name: nullrouter-binaries-${{ github.ref_name }}-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
 
@@ -84,5 +105,5 @@ jobs:
         with:
           files: |
             dist/nullrouter-*
-            dist/SHA256SUMS
+            dist/SHA256SUMS-${{ matrix.target }}
           generate_release_notes: true

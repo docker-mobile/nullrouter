@@ -1422,6 +1422,36 @@ cargo clippy --workspace --all-targets
 cargo fmt --all --check
 ```
 
+### What CI covers
+
+[`ci.yml`](.github/workflows/ci.yml) runs formatting, clippy, the workspace suite, and a release build.
+Tests execute on the two architectures GitHub hosts natively — **x86_64** and **aarch64 Linux**. Every
+other architecture is a **cross-compile only**; no test suite runs there.
+
+The cross matrix is Rust's target list filtered to Linux: 31 of the 35 triples stable rustc ships. The
+four left out are not architectures (three sanitizer variants of x86_64, plus the `gnux32` ILP32 ABI).
+It is split into two tiers, and the split is about evidence:
+
+| Tier | Meaning |
+|---|---|
+| Gating (12) | `cross` publishes an official image; a failure blocks the build |
+| Probe (17) | `continue-on-error` — nobody has yet shown this workspace builds for it |
+
+The probes are honest about their status rather than decorative. Pingora documents Linux x86_64 and
+aarch64 as its supported set, so the soft-float ARM, SPARC, 32-bit PowerPC, and minority-musl cells may
+well stay red. **A red probe is information about a dependency's platform reach, not a defect here**, and
+the response is to leave it red — not to patch product code or fork a dependency for a platform nobody
+deploys to. A probe is promoted to gating only after it has actually passed on `main`.
+
+**BSD is a compile check only**, and also `continue-on-error`: `cargo check` for `x86_64-unknown-freebsd`,
+`aarch64-unknown-freebsd`, and `x86_64-unknown-netbsd`. GitHub hosts no BSD runner, so nothing is ever
+executed there, and **this port makes no claim to run on BSD**. Pingora carries its own
+`cfg(target_os = "freebsd")` arms, which is why the check is worth having at all.
+
+[`release.yml`](.github/workflows/release.yml) attaches **x86_64 and aarch64 Linux binaries only** — the
+two whose tests actually run. A binary from a triple no suite has ever executed on is not something to
+hand someone as a release artifact.
+
 Tests by area:
 
 | Area | Integration files | Tests |

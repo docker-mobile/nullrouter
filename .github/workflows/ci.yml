@@ -142,3 +142,235 @@ jobs:
         run: cargo build --release --workspace --exclude nullrouter-dashboard-wasm
       - name: Confirm the binaries exist and report their sizes
         run: ls -lh target/release/nullrouter-* | grep -v '\.d$'
+
+  # ── aarch64 Linux, natively ─────────────────────────────────────────────────────────────────────────
+  # The second architecture anyone actually deploys on, and the only other one GitHub hosts natively, so
+  # it is the only non-x86_64 target whose *tests* can run without emulation. Everything below this job
+  # is a compile check; this one is a real run.
+  #
+  # `ubuntu-24.04-arm` is free for public repositories only. If this repository ever goes private these two
+  # jobs start failing to allocate a runner — the fix is a paid larger runner or dropping them, not
+  # silently swapping in an emulated x86_64 job that would claim aarch64 coverage it does not have.
+  test-aarch64:
+    name: Tests pass on aarch64 (cargo test --workspace)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Add the WASM target for the dashboard crate
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Install Node, which two suites require rather than skip
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Cache cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          # `runner.arch` is in the key because an x86_64 cache would be useless here and restoring one
+          # would just cost a download before every object was rebuilt anyway.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-test-
+      - name: Report free disk before the build
+        run: df -h /
+      - name: Run the workspace suite
+        run: cargo test --workspace
+      - name: Report free disk after the build
+        if: always()
+        run: df -h /
+
+  build-aarch64:
+    name: Release binaries build on aarch64 (cargo build --release)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Cache cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-release-
+      - name: Build every service in release mode
+        run: cargo build --release --workspace --exclude nullrouter-dashboard-wasm
+      - name: Confirm the binaries exist and report their sizes
+        run: ls -lh target/release/nullrouter-* | grep -v '\.d$'
+
+  # ── Every other Linux architecture, cross-compiled ──────────────────────────────────────────────────
+  # Rust's target list filtered to Linux. Of the 35 Linux triples stable rustc 1.98 ships, 31 are covered:
+  # 2 natively above and 29 here. The four not covered are excluded because they are not architectures:
+  #
+  #   x86_64-unknown-linux-gnuasan   ┐ sanitizer instrumentation of x86_64, which the native jobs already
+  #   x86_64-unknown-linux-gnumsan   ├ build. Running them would test ASan/MSan/TSan, not a machine, and
+  #   x86_64-unknown-linux-gnutsan   ┘ each needs its own nightly-ish runtime rather than a cross image.
+  #   x86_64-unknown-linux-gnux32      an ILP32 ABI on x86_64 hardware; no cross toolchain for the C deps.
+  #
+  # Regenerate the list with:
+  #   rustup target list | sed 's/ (installed)//' | grep -- -linux- | grep -Ev 'ohos|android'
+  #
+  # Tests are deliberately not run: emulating
+  # 1994 tests under qemu per triple would cost more runner time than the coverage is worth, and a
+  # compile is what catches the failures a new architecture actually introduces — pointer width, endianness,
+  # and whether a C dependency has a toolchain at all.
+  #
+  # `cross` is used rather than bare `cargo` because this workspace links real C: `libz-ng-sys` builds
+  # with cmake, and Pingora pulls in a TLS stack. `cross` supplies a Docker image with the target's C
+  # toolchain already in it, which bare `rustup target add` does not.
+  #
+  # These are CI coverage, not the release train. `release.yml` attaches x86_64 and aarch64 only, because
+  # those are the two anyone runs and the two whose tests actually execute above.
+  cross-linux:
+    name: Cross-build ${{ matrix.target }}${{ matrix.optional && ' (informational)' || '' }}
+    runs-on: ubuntu-latest
+    # Two tiers, and the split is about evidence rather than importance.
+    #
+    # A cell without `optional` gates the build: `cross` publishes an official image for it, and the
+    # dependency graph is expected to link. A cell with `optional: true` is a compile *probe* — nobody has
+    # yet shown this workspace builds for it, and Pingora documents only Linux x86_64/aarch64, so a red
+    # cell there is information about a dependency's platform reach, not a defect in this tree.
+    #
+    # Promote a probe to gating once it has passed on `main`. Do not patch product code to turn one green:
+    # if Pingora or a `-sys` crate has no support for an architecture, that is the finding.
+    continue-on-error: ${{ matrix.optional || false }}
+    # One architecture failing must not cancel the rest: the point of the matrix is to learn which ones
+    # work, and fail-fast would hide every cell after the first red one.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Gating: `cross` ships an official image for each of these ──────────────────────────────
+          - target: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+          - target: i686-unknown-linux-gnu
+          - target: i686-unknown-linux-musl
+          - target: armv7-unknown-linux-gnueabihf
+          - target: armv7-unknown-linux-musleabihf
+          - target: arm-unknown-linux-gnueabihf
+          - target: arm-unknown-linux-musleabihf
+          - target: riscv64gc-unknown-linux-gnu
+          - target: powerpc64le-unknown-linux-gnu
+          # Big-endian, and the only two cells that would catch an endianness assumption in the binary
+          # provider protocols: Cursor's Connect-RPC length prefixes and Kiro's CRC-framed event stream
+          # both read multi-byte integers straight off the wire. Gating because `cross` images exist —
+          # if either turns out not to link, it moves to a probe rather than being patched around.
+          - target: s390x-unknown-linux-gnu
+          - target: powerpc64-unknown-linux-gnu
+
+          # ── Probes: no evidence this workspace builds for them yet ─────────────────────────────────
+          # Soft-float ARM: a different float ABI from the `eabihf` cells above, not a spelling of them.
+          - { target: arm-unknown-linux-gnueabi, optional: true }
+          - { target: arm-unknown-linux-musleabi, optional: true }
+          - { target: armv7-unknown-linux-gnueabi, optional: true }
+          - { target: armv7-unknown-linux-musleabi, optional: true }
+          - { target: armv5te-unknown-linux-gnueabi, optional: true }
+          - { target: armv5te-unknown-linux-musleabi, optional: true }
+          # musl on the less-travelled architectures: a different libc path than glibc on the same
+          # machine, which is where a C dependency's build script usually gives up.
+          - { target: powerpc64-unknown-linux-musl, optional: true }
+          - { target: powerpc64le-unknown-linux-musl, optional: true }
+          - { target: riscv64gc-unknown-linux-musl, optional: true }
+          - { target: loongarch64-unknown-linux-gnu, optional: true }
+          - { target: loongarch64-unknown-linux-musl, optional: true }
+          # 32-bit big-endian PowerPC, 64-bit SPARC, and pre-v7 x86: all real Linux architectures, none
+          # of them something this project has been built for.
+          - { target: powerpc-unknown-linux-gnu, optional: true }
+          - { target: sparc64-unknown-linux-gnu, optional: true }
+          - { target: i586-unknown-linux-gnu, optional: true }
+          - { target: i586-unknown-linux-musl, optional: true }
+          # NEON-mandatory ARMv7 and the newer RISC-V profile: narrower than their plain counterparts.
+          - { target: thumbv7neon-unknown-linux-gnueabihf, optional: true }
+          - { target: riscv64a23-unknown-linux-gnu, optional: true }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          # Only the registry, not `target`. A cross build's objects are per-triple and the whole matrix
+          # sharing one cache entry would thrash it; the registry download is the part worth reusing.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-cross-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cross-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-cross-
+      - name: Report free disk before the build
+        run: df -h /
+      - name: Cross-build every service
+        # The dashboard crate is wasm-only and excluded here exactly as in the native release job.
+        run: cross build --release --workspace --exclude nullrouter-dashboard-wasm --target ${{ matrix.target }}
+      - name: Confirm the binaries exist and report their sizes
+        run: ls -lh target/${{ matrix.target }}/release/nullrouter-* | grep -v '\.d$'
+      - name: Report free disk after the build
+        if: always()
+        run: df -h /
+
+  # ── BSD, compile check only ─────────────────────────────────────────────────────────────────────────
+  # GitHub hosts no BSD runner, so nothing here is ever executed — this proves the tree *compiles* for
+  # FreeBSD and NetBSD, nothing more. It is `continue-on-error` because BSD support is a claim this port
+  # has never made: Pingora documents Linux as tier 1 and calls other Unix best-effort, and it carries
+  # `cfg(target_os = "freebsd")` arms of its own, so a FreeBSD build is plausible but not owed.
+  #
+  # The rule this job encodes: a red cell here is information, not a defect. If it fails, the failure is
+  # in a dependency's platform support, and the response is to leave it red rather than to patch product
+  # code or fork a dependency for a platform nobody is deploying to.
+  #
+  # `cargo build` rather than `cross`: there is no `cross` image for BSD. rustup ships the std for these
+  # triples, so a pure-Rust dependency graph links; anything needing a BSD C toolchain will not, and that
+  # is precisely the answer this job exists to report.
+  bsd-compile-check:
+    name: Compile check ${{ matrix.target }} (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-freebsd
+          - target: aarch64-unknown-freebsd
+          - target: x86_64-unknown-netbsd
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain named in rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+      - name: Install cmake, which libz-ng-sys builds with
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-bsd-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bsd-${{ matrix.target }}-
+      - name: Compile-check every service
+        # `cargo check` rather than `build`: linking needs a BSD linker this runner does not have, and
+        # type-checking the whole graph for the target is the part that finds a real portability break.
+        run: cargo check --release --workspace --exclude nullrouter-dashboard-wasm --target ${{ matrix.target }}
