@@ -35,8 +35,13 @@ pub fn start() {
 /// The application root: providers, then the router.
 ///
 /// Theme is installed before anything renders so the first painted frame is already in the right
-/// scheme. The locale load is awaited in a `Suspense` rather than blocking the mount, so a slow or
-/// missing locale file degrades to a brief loading state instead of a blank page.
+/// scheme.
+///
+/// Nothing here is gated on a network fetch. The router used to be wrapped in a `Suspense` waiting
+/// on the locale file, which meant one unresolved request left every page showing a spinner
+/// indefinitely — no error, no content, no way for the user to tell it apart from a slow load. The
+/// English catalogue is compiled in ([`i18n::Locale::embedded`]), so a complete locale exists before
+/// the first frame and a different language is loaded over the top of it afterwards.
 #[cfg(target_arch = "wasm32")]
 #[leptos::component]
 pub fn App() -> impl leptos::IntoView {
@@ -46,39 +51,30 @@ pub fn App() -> impl leptos::IntoView {
 
     theme::provide_theme();
 
-    let locale = LocalResource::new(i18n::provide_locale);
+    // Synchronous: the embedded catalogue needs no await, so the router below renders on the first
+    // frame with real labels.
+    i18n::provide_embedded_locale();
+
+    // A non-English preference is loaded after mount and replaces the context when it arrives.
+    // Failure is not surfaced as an error state on purpose: English is already on screen, and a
+    // missing translation file is not something the user can act on.
+    i18n::spawn_preferred_locale();
 
     view! {
-        <Suspense fallback=|| {
-            view! {
-                <div class="min-h-dvh bg-background grid place-items-center">
-                    <div class="size-6 rounded-full border-2 border-muted border-t-foreground animate-spin" />
-                </div>
-            }
-        }>
-            // Read the resource so Suspense actually waits on it; the locale itself reaches
-            // components through context rather than as a prop.
-            {move || {
-                locale.get().map(|_| {
-                    view! {
-                        <Router>
-                            <Routes fallback=routes::NotFound>
-                                <Route path=path!("/login") view=routes::Login />
-                                <Route path=path!("/callback") view=routes::Callback />
-                                <ParentRoute path=path!("/dashboard") view=shell::DashboardFrame>
-                                    <Route path=path!("") view=routes::Overview />
-                                    <Route path=path!("providers") view=routes::Providers />
-                                    <Route path=path!("keys") view=routes::Keys />
-                                    <Route path=path!("usage") view=routes::Usage />
-                                    <Route path=path!("logs") view=routes::Logs />
-                                    <Route path=path!("settings") view=routes::Settings />
-                                    <Route path=path!("*rest") view=routes::StatusPage />
-                                </ParentRoute>
-                            </Routes>
-                        </Router>
-                    }
-                })
-            }}
-        </Suspense>
+        <Router>
+            <Routes fallback=routes::NotFound>
+                <Route path=path!("/login") view=routes::Login />
+                <Route path=path!("/callback") view=routes::Callback />
+                <ParentRoute path=path!("/dashboard") view=shell::DashboardFrame>
+                    <Route path=path!("") view=routes::Overview />
+                    <Route path=path!("providers") view=routes::Providers />
+                    <Route path=path!("keys") view=routes::Keys />
+                    <Route path=path!("usage") view=routes::Usage />
+                    <Route path=path!("logs") view=routes::Logs />
+                    <Route path=path!("settings") view=routes::Settings />
+                    <Route path=path!("*rest") view=routes::StatusPage />
+                </ParentRoute>
+            </Routes>
+        </Router>
     }
 }

@@ -49,19 +49,38 @@ impl Locale {
         text
     }
 
+    /// The compiled-in English catalogue.
+    ///
+    /// Infallible by construction: the file is validated at build time by `include_str!` plus the
+    /// test below, so a parse failure here would be a corrupt build rather than a runtime condition.
+    /// An empty table is still a working locale — every lookup falls back to its key — so even that
+    /// degrades to readable text instead of a blank screen.
+    pub fn embedded() -> Self {
+        Self::parse("en-US".to_owned(), EMBEDDED_EN_US).unwrap_or_else(|_| Self {
+            tag: "en-US".to_owned(),
+            messages: HashMap::new(),
+        })
+    }
+
     /// Deserialize a fetched locale file.
     // Called from `load_locale`, which only exists on wasm32, and from the tests. On a native
     // non-test build it therefore has no callers.
-    #[cfg_attr(
-        all(not(test), not(target_arch = "wasm32")),
-        expect(dead_code, reason = "load_locale, its only caller, is wasm32-only")
-    )]
     fn parse(tag: String, json: &str) -> Result<Self, String> {
         let messages: HashMap<String, String> =
             serde_json::from_str(json).map_err(|error| format!("locale parse failed: {error}"))?;
         Ok(Self { tag, messages })
     }
 }
+
+/// The English catalogue, compiled in.
+///
+/// Embedded rather than fetched because it is the fallback everything else degrades to, and a
+/// fallback that needs the network is not one. The dashboard previously gated its first paint on
+/// fetching this file: when the request did not resolve, every page stayed on the loading spinner
+/// forever, with no error and nothing rendered. Compiled in, that failure mode does not exist —
+/// there is always a complete catalogue before the first frame. It costs a few kilobytes.
+const EMBEDDED_EN_US: &str =
+    include_str!("../../../services/dashboard-actix/static/i18n/literals/en-US.json");
 
 /// Locale files that exist, and the only tags a fetch may ask for.
 ///
@@ -118,6 +137,37 @@ pub fn resolve_tag(requested: &str) -> &'static str {
     "en-US"
 }
 
+/// Put the compiled-in English catalogue into context, synchronously.
+///
+/// Called before the router renders, so every component has a complete locale on the first frame
+/// without waiting for anything.
+pub fn provide_embedded_locale() {
+    provide_context(Locale::embedded());
+}
+
+/// Load the browser's preferred locale in the background, if it is not the embedded one.
+///
+/// Deliberately fire-and-forget. English is already rendered, so there is nothing to wait for and
+/// nothing useful to report: a user whose translation file is missing sees English, which is a worse
+/// experience than their own language but not a broken one.
+#[cfg(target_arch = "wasm32")]
+pub fn spawn_preferred_locale() {
+    let requested = detect_locale().unwrap_or_else(|| "en-US".to_owned());
+    let tag = resolve_tag(&requested);
+    if tag == "en-US" {
+        return;
+    }
+    leptos::task::spawn_local(async move {
+        if let Ok(locale) = load_locale(tag).await {
+            provide_context(locale);
+        }
+    });
+}
+
+/// Native builds have no browser preference to read.
+#[cfg(not(target_arch = "wasm32"))]
+pub const fn spawn_preferred_locale() {}
+
 /// Detect the user's preferred locale and load its message table.
 ///
 /// Tries: explicit `locale` cookie → browser's `navigator.languages` → `en-US`. Returns the loaded
@@ -130,16 +180,17 @@ pub fn resolve_tag(requested: &str) -> &'static str {
 pub async fn provide_locale() -> Locale {
     let requested = detect_locale().unwrap_or_else(|| "en-US".to_owned());
     let tag = resolve_tag(&requested);
-    let mut loaded = load_locale(tag).await;
-    // A resolved tag that still fails to load is a missing or corrupt file, not a bad preference.
-    // English is the authoritative catalogue, so it is worth one more request before giving up.
-    if loaded.is_err() && tag != "en-US" {
-        loaded = load_locale("en-US").await;
+    // English needs no request at all: it is already compiled in.
+    if tag == "en-US" {
+        let locale = Locale::embedded();
+        provide_context(locale.clone());
+        return locale;
     }
-    let locale = loaded.unwrap_or_else(|_| Locale {
-        tag: "en-US".to_owned(),
-        messages: HashMap::new(),
-    });
+    // Any other locale is fetched, and the embedded catalogue is what a failure falls back to, so a
+    // missing or malformed file costs the user their language rather than the whole dashboard.
+    let locale = load_locale(tag)
+        .await
+        .unwrap_or_else(|_| Locale::embedded());
     provide_context(locale.clone());
     locale
 }
@@ -151,10 +202,7 @@ pub async fn provide_locale() -> Locale {
     reason = "mirrors the wasm signature so callers stay target-agnostic"
 )]
 pub async fn provide_locale() -> Locale {
-    let locale = Locale {
-        tag: "en-US".to_owned(),
-        messages: HashMap::new(),
-    };
+    let locale = Locale::embedded();
     provide_context(locale.clone());
     locale
 }
@@ -164,10 +212,7 @@ pub async fn provide_locale() -> Locale {
 /// Falls back to an empty en-US rather than panicking, so a component rendered outside the provider
 /// degrades to showing message keys instead of crashing.
 pub fn use_locale() -> Locale {
-    use_context::<Locale>().unwrap_or_else(|| Locale {
-        tag: "en-US".to_owned(),
-        messages: HashMap::new(),
-    })
+    use_context::<Locale>().unwrap_or_else(Locale::embedded)
 }
 
 /// Read the user's locale preference from the cookie or the browser.
@@ -255,6 +300,34 @@ mod tests {
     fn every_available_tag_resolves_to_itself() {
         for tag in AVAILABLE {
             assert_eq!(resolve_tag(tag), tag, "{tag} did not round-trip");
+        }
+    }
+
+    #[test]
+    fn the_embedded_catalogue_parses_and_has_the_keys_the_ui_asks_for() {
+        let locale = Locale::embedded();
+        assert_eq!(locale.tag, "en-US");
+        // Non-empty is the load-bearing part: an empty table still "works" by echoing keys, which
+        // would pass a weaker assertion while showing `nav.logs` to every user.
+        assert!(
+            locale.messages.len() > 50,
+            "embedded catalogue looks truncated: {} keys",
+            locale.messages.len()
+        );
+        // A sample the shell and panels actually render, so a regenerated catalogue that dropped
+        // them fails here rather than in a browser.
+        for key in [
+            "nav.logs",
+            "nav.settings",
+            "theme.system",
+            "settings.migrate",
+            "state.enabled",
+        ] {
+            assert_ne!(
+                locale.get(key),
+                key,
+                "{key} is missing from the embedded catalogue"
+            );
         }
     }
 
