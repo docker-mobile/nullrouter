@@ -400,12 +400,28 @@ async fn no_route_claims_a_running_proxy_when_none_is_running() -> TestResult {
     let (stop_status, stop) = post_json("/api/headroom/stop", "").await?;
     let (status_status, status_body) = get_json("/api/headroom/status").await?;
 
-    // Then: the three that need the binary fail, and each names a cause.
-    for (status, body) in [
-        (extras_status, &extras),
-        (restart_status, &restart),
-        (start_status, &start),
-    ] {
+    // `extras` is deliberately not in the group below. It is the one route here that can legitimately
+    // succeed while the binary is absent, because installing is what it does: given a working pip and
+    // network it fetches `headroom-ai[proxy,ml]` and returns 200. Requiring it to fail encoded "this
+    // machine cannot pip install" as though it were a property of the code, which is why this case
+    // passed on one runner and failed on another for the same commit. Its sibling
+    // `an_empty_extras_list_still_installs_the_proxy_base` already tolerates either outcome.
+    //
+    // What must hold either way is the invariant this case is named for: whatever extras did, it must
+    // not report a proxy as running.
+    // Checked only if the key is there: the install response has no `running` field at all, and its
+    // absence is itself compliant — a route that says nothing about the proxy cannot mislead about it.
+    assert_ne!(
+        extras.get("running"),
+        Some(&serde_json::json!(true)),
+        "extras must never claim a running proxy: {extras}"
+    );
+    if extras_status.is_client_error() || extras_status.is_server_error() {
+        assert_eq!(field(&extras, "success")?, false);
+    }
+
+    // Then: the two that genuinely need an installed binary fail, and each names a cause.
+    for (status, body) in [(restart_status, &restart), (start_status, &start)] {
         assert!(
             status.is_client_error() || status.is_server_error(),
             "expected a failure with no binary installed, got {status}: {body}"
