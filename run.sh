@@ -130,10 +130,16 @@ for _ in $(seq 1 100); do
     if curl -fsS "http://127.0.0.1:$GATEWAY_PORT/api/health" >/dev/null 2>&1; then
         printf '\n'
         log "nullrouter is up"
-        printf '    Dashboard  http://127.0.0.1:%s/dashboard/endpoint\n' "$GATEWAY_PORT"
+        printf '    Dashboard  http://127.0.0.1:%s/dashboard\n' "$GATEWAY_PORT"
         printf '    API        http://127.0.0.1:%s/v1\n' "$GATEWAY_PORT"
         printf '    State file %s\n\n' "$NULLROUTER_STATE_FILE"
-        warn "default dashboard password is 123456 — set INITIAL_PASSWORD before exposing this anywhere"
+        # Only when the default is actually in force. Printed unconditionally it told an operator who
+        # had set a strong password that theirs was `123456`, which is both false and the kind of
+        # warning that teaches people to ignore warnings. `NULLROUTER_AUTH_PASSWORD_HASH` wins over
+        # `INITIAL_PASSWORD` in the auth service, so either one being set means the default is gone.
+        if [[ -z "${INITIAL_PASSWORD:-}" && -z "${NULLROUTER_AUTH_PASSWORD_HASH:-}" ]]; then
+            warn "dashboard password is the default 123456 — set INITIAL_PASSWORD before exposing this anywhere"
+        fi
         printf '\nCtrl-C to stop all services.\n'
         wait
     fi
