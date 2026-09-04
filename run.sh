@@ -65,8 +65,21 @@ trap cleanup EXIT INT TERM
 # Without it the dashboard, the sign-in screen, and the OAuth callback are all empty shells, so this is
 # built before anything starts rather than discovered as a blank page.
 BUNDLE=services/dashboard-actix/static/pkg/dashboard_leptos_bg.wasm
-if [[ ! -f "$BUNDLE" ]]; then
-    log "building the dashboard WASM bundle (first run only)"
+
+# Rebuilt when any dashboard source is newer than the bundle, not only when the bundle is missing.
+# Presence alone is the wrong test: after an edit, the stale bundle is still a file, so the old UI
+# gets served with no indication that what is running is not what is checked out — which reads as
+# "my change did nothing" rather than "the bundle was not rebuilt".
+bundle_is_stale() {
+    [[ ! -f "$BUNDLE" ]] && return 0
+    local newer
+    newer=$(find apps/dashboard-leptos/src apps/dashboard-leptos/Cargo.toml \
+        -newer "$BUNDLE" -print -quit 2>/dev/null)
+    [[ -n "$newer" ]]
+}
+
+if bundle_is_stale; then
+    log "building the dashboard WASM bundle"
     # Version-pinned to the `wasm-bindgen` in `Cargo.lock`: the CLI refuses a bundle built by a
     # different minor version, and the error names schema numbers rather than the mismatch.
     WASM_BINDGEN_VERSION=$(sed -n '/^name = "wasm-bindgen"$/,/^version/{s/^version = "\(.*\)"$/\1/p;}' Cargo.lock | head -1)

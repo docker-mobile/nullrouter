@@ -160,15 +160,29 @@ fn Toggle(label: String, on: ReadSignal<bool>, set: WriteSignal<bool>) -> impl I
     }
 }
 
+/// The import response.
+///
+/// The counts sit under `report`, not at the top level. Flattening them here would compile and
+/// deserialize fine — `serde(default)` fills every missing field — and then report "0 connections"
+/// after an import that actually moved two, which is the failure mode this dashboard's API layer
+/// exists to prevent.
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MigrateReport {
+struct MigrateResponse {
     #[serde(default)]
     ok: bool,
+    /// Present only on failure.
     #[serde(default)]
     error: String,
     #[serde(default)]
     message: String,
+    #[serde(default)]
+    report: MigrateReport,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MigrateReport {
     #[serde(default)]
     source: String,
     #[serde(default)]
@@ -177,6 +191,8 @@ struct MigrateReport {
     combos_imported: u64,
     #[serde(default)]
     proxy_pools_imported: u64,
+    /// Per-record problems that did not abort the import, such as API keys that cannot be
+    /// re-derived. Surfaced because an import that silently skipped credentials looks complete.
     #[serde(default)]
     warnings: Vec<String>,
 }
@@ -187,7 +203,7 @@ fn MigratePanel() -> impl IntoView {
     let (data_dir, set_data_dir) = signal(String::new());
     let (dry_run, set_dry_run) = signal(true);
     let (save, set_save) = signal(Save::Idle);
-    let (report, set_report) = signal(Option::<MigrateReport>::None);
+    let (report, set_report) = signal(Option::<MigrateResponse>::None);
 
     view! {
         <section class="rounded-lg border border-border bg-card p-5 space-y-4 mt-4">
@@ -241,13 +257,13 @@ fn MigratePanel() -> impl IntoView {
                         set_save,
                         move || async move { post("/api/migrate/legacy", &encoded).await },
                         move |body: String| {
-                            if let Ok(parsed) = serde_json::from_str::<MigrateReport>(&body) {
+                            if let Ok(parsed) = serde_json::from_str::<MigrateResponse>(&body) {
                                 set_report.set(Some(parsed));
                             } else {
-                                set_report.set(Some(MigrateReport {
+                                set_report.set(Some(MigrateResponse {
                                     ok: false,
                                     message: body,
-                                    ..MigrateReport::default()
+                                    ..MigrateResponse::default()
                                 }));
                             }
                         },
@@ -263,7 +279,7 @@ fn MigratePanel() -> impl IntoView {
             }}
             {move || {
                 report.get().map(|report| {
-                    let success = report.ok || (!report.source.is_empty() && report.error.is_empty());
+                    let success = report.ok && report.error.is_empty();
                     let summary = if success {
                         let head = if report.message.is_empty() {
                             locale.get("settings.migrate_ok").to_owned()
@@ -272,16 +288,22 @@ fn MigratePanel() -> impl IntoView {
                         };
                         let mut summary = format!(
                             "{head} · {} {}, {} {}, {} {}",
-                            report.connections_imported,
+                            report.report.connections_imported,
                             locale.get("settings.migrate_connections"),
-                            report.proxy_pools_imported,
+                            report.report.proxy_pools_imported,
                             locale.get("settings.migrate_pools"),
-                            report.combos_imported,
+                            report.report.combos_imported,
                             locale.get("settings.migrate_combos"),
                         );
-                        if !report.warnings.is_empty() {
+                        // Where the data came from. Worth showing: discovery searches several
+                        // locations, so "which install did it read" is not obvious from the counts.
+                        if !report.report.source.is_empty() {
+                            summary.push('\n');
+                            summary.push_str(&report.report.source);
+                        }
+                        if !report.report.warnings.is_empty() {
                             summary.push_str(" · ");
-                            summary.push_str(&report.warnings.join("; "));
+                            summary.push_str(&report.report.warnings.join("; "));
                         }
                         summary
                     } else {
@@ -303,5 +325,53 @@ fn MigratePanel() -> impl IntoView {
                 })
             }}
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MigrateResponse;
+
+    /// The exact body `POST /api/migrate/legacy` returns, captured from a running router.
+    ///
+    /// Pinned as a literal because the counts are nested under `report`: a flat struct would
+    /// deserialize this without error and render "0 connections" after importing two.
+    const LIVE_RESPONSE: &str = r#"{
+        "dryRun": true,
+        "ok": true,
+        "report": {
+            "apiKeysFound": 1,
+            "apiKeysImported": 0,
+            "combosFound": 0,
+            "combosImported": 0,
+            "connectionsFound": 2,
+            "connectionsImported": 2,
+            "format": "sqlite",
+            "proxyPoolsFound": 0,
+            "proxyPoolsImported": 0,
+            "settingsImported": false,
+            "source": "/root/.9router/db/data.sqlite",
+            "warnings": ["1 API key(s) found but not imported."]
+        }
+    }"#;
+
+    #[test]
+    fn the_live_response_decodes_with_its_counts() {
+        let parsed: MigrateResponse =
+            serde_json::from_str(LIVE_RESPONSE).expect("the live body must decode");
+        assert!(parsed.ok);
+        assert_eq!(parsed.report.connections_imported, 2);
+        assert_eq!(parsed.report.source, "/root/.9router/db/data.sqlite");
+        assert_eq!(parsed.report.warnings.len(), 1);
+    }
+
+    #[test]
+    fn a_failure_body_is_not_read_as_success() {
+        let body =
+            r#"{"ok": false, "error": "no_legacy_installation", "message": "nothing found"}"#;
+        let parsed: MigrateResponse = serde_json::from_str(body).expect("decodes");
+        assert!(!parsed.ok);
+        assert_eq!(parsed.error, "no_legacy_installation");
+        assert_eq!(parsed.report.connections_imported, 0);
     }
 }
