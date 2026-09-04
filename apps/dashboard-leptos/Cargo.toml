@@ -71,6 +71,7 @@ features = [
     "Document",
     "Element",
     "EventSource",
+    "EventTarget",
     "HtmlDocument",
     "HtmlElement",
     "KeyboardEvent",

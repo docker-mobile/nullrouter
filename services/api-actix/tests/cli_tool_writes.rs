@@ -170,7 +170,7 @@ async fn revoke(tool: &str) -> TestResult<(StatusCode, Value)> {
 
 fn backup_of(path: &Path) -> PathBuf {
     let mut name = path.file_name().expect("file name").to_os_string();
-    name.push(".9router-backup");
+    name.push(".nullrouter-backup");
     path.with_file_name(name)
 }
 
@@ -312,7 +312,7 @@ async fn a_revoke_reports_a_missing_config_rather_than_creating_one() -> TestRes
     let (status, body) = revoke("claude-settings").await?;
 
     // Then: it says so, and no file was created. A config file left behind for a tool the user
-    // never set up is worse than nothing: `has9Router` reads it, and the tool may too.
+    // never set up is worse than nothing: `hasRouter` reads it, and the tool may too.
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["message"], "No settings file to reset", "{body}");
     assert_eq!(body["written"].as_array().map(Vec::len), Some(0), "{body}");
@@ -914,8 +914,8 @@ async fn deepseek_is_merged_rather_than_overwritten() -> TestResult {
         config.contains("keep-me"),
         "the user's provider must survive: {config}"
     );
-    // No `9router` string appears in a deepseek config, which is why `spec`'s marker tests the
-    // provider and URL rather than grepping for a name.
+    // The provider name appears nowhere in a deepseek config, which is why `spec`'s marker tests the
+    // provider field and URL rather than grepping for a name.
     assert_eq!(
         config.matches("9router").count(),
         1,
@@ -1057,8 +1057,8 @@ async fn a_reapply_clears_stale_openclaw_allowlist_entries() -> TestResult {
     )
     .await?;
 
-    // Then: the stale entry is gone and the unrelated one is not. Leaving `9router/old` behind
-    // would keep allowing a model the provider no longer serves.
+    // Then: the stale entry is gone and the unrelated one is not. Leaving an old qualified model
+    // behind would keep allowing a model the provider no longer serves.
     let models = &home.read_json(OPENCLAW_SETTINGS)["agents"]["defaults"]["models"];
     assert!(models["9router/old"].is_null(), "{models}");
     assert!(models["9router/new"].is_object(), "{models}");
@@ -1233,8 +1233,8 @@ async fn a_second_grok_apply_does_not_overwrite_the_remembered_default() -> Test
     let payload = json!({"baseUrl": "http://x", "apiKey": "k", "model": "m"});
     apply("grok-build-settings", &payload).await?;
 
-    // When: a second apply runs. At this point the current default is `9router`, so a naive
-    // remember would record that and lose the original.
+    // When: a second apply runs. At this point the current default is this router's own slot, so a
+    // naive remember would record that and lose the original.
     apply("grok-build-settings", &payload).await?;
 
     // Then: the marker still holds their model, and a revoke restores it.
@@ -1264,8 +1264,8 @@ async fn a_grok_revoke_with_nothing_remembered_uses_the_builtin_default() -> Tes
     // When: the revoke runs.
     revoke("grok-build-settings").await?;
 
-    // Then: Grok Build's own built-in default is written, since leaving `9router` selected would
-    // point it at a slot that no longer exists.
+    // Then: Grok Build's own built-in default is written, since leaving this router's slot selected
+    // would point it at a section the revoke just removed.
     assert!(
         home.read(GROK_CONFIG).contains(r#"default = "grok-build""#),
         "{}",
@@ -1393,7 +1393,7 @@ async fn cowork_bridges_a_local_plugin_through_this_routers_sse_endpoint() -> Te
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let config = home.read_json(COWORK_CONFIG);
-    // Upstream's provider value is `gateway`, not `9router`.
+    // Cowork's provider value is the literal `gateway`, not the provider name.
     assert_eq!(config["inferenceProvider"], "gateway");
     assert_eq!(config["inferenceGatewayBaseUrl"], "http://127.0.0.1:20128");
     assert_eq!(config["inferenceModels"][0]["name"], "cc/opus");

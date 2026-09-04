@@ -1,5 +1,4 @@
 use actix_web::{HttpResponse, http::StatusCode, web};
-use serde::Deserialize;
 
 use crate::{json_body, responses};
 

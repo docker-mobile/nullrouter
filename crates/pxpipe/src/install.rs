@@ -13,6 +13,13 @@ use crate::PACKAGE;
 /// An `npm install` on a cold cache legitimately takes minutes.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// The legacy product's data directory under `$HOME`. An external program's
+/// address on disk: it must keep this spelling for a shared install to be found.
+const LEGACY_DATA_DIR: &str = ".9router";
+
+/// The same directory in the Windows `%APPDATA%` layout, and the same rule.
+const LEGACY_DATA_DIR_WINDOWS: &str = "9router";
+
 /// Lines of `install.log` returned to the dashboard.
 const LOG_TAIL_LINES: usize = 200;
 
@@ -46,9 +53,10 @@ impl Paths {
 
     /// Paths under the data directory this deployment uses.
     ///
-    /// `DATA_DIR` first, matching upstream's own override, then the default
-    /// per-user location. The same discovery `state-actix` uses for imports, so a
-    /// nullrouter sharing a directory with 9Router sees the same install.
+    /// `DATA_DIR` first, then the default per-user location. The same discovery
+    /// `state-actix` does for imports, so a nullrouter sharing a directory with
+    /// the legacy product sees the same install rather than reinstalling beside
+    /// it.
     pub fn discover() -> Self {
         if let Ok(configured) = std::env::var("DATA_DIR")
             && !configured.trim().is_empty()
@@ -56,10 +64,10 @@ impl Paths {
             return Self::new(Path::new(configured.trim()));
         }
         if let Some(home) = std::env::var_os("HOME") {
-            return Self::new(&Path::new(&home).join(".9router"));
+            return Self::new(&Path::new(&home).join(LEGACY_DATA_DIR));
         }
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            return Self::new(&Path::new(&appdata).join("9router"));
+            return Self::new(&Path::new(&appdata).join(LEGACY_DATA_DIR_WINDOWS));
         }
         Self::new(Path::new("."))
     }

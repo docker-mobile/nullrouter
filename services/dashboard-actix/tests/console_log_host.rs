@@ -81,8 +81,8 @@ async fn console_log_dashboard_serves_wasm_shell_when_requested() -> TestResult 
     let html = dashboard_shell_for!(app, "/dashboard/console-log");
 
     // Then: the host returns the dashboard bootstrap, not API JSON or a 404 page.
-    assert!(html.contains("Endpoint &amp; Key"));
-    assert!(html.contains("data-dashboard-host=\"actix\""));
+    assert!(html.contains("nullrouter"));
+    assert!(html.contains("/assets/dashboard/app.css"));
     Ok(())
 }
 
@@ -135,7 +135,7 @@ async fn neighboring_dashboard_routes_keep_serving_wasm_shell_when_requested() -
         let html = dashboard_shell_for!(app, path);
 
         // Then: the route still serves the WASM dashboard bootstrap.
-        assert!(html.contains("Endpoint &amp; Key"), "{path}");
+        assert!(html.contains("nullrouter"), "{path}");
     }
     Ok(())
 }

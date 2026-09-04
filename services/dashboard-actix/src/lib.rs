@@ -169,80 +169,44 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>9Router Dashboard</title>
-  <meta name="description" content="Local 9Router dashboard">
+  <title>nullrouter</title>
+  <meta name="description" content="Self-hosted AI model router and gateway.">
+  <meta name="color-scheme" content="light dark">
   <link rel="modulepreload" href="/pkg/dashboard_leptos.js">
   <link rel="preload" href="/pkg/dashboard_leptos_bg.wasm" as="fetch" type="application/wasm" crossorigin>
   <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/material-symbols-g016.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/dashboard/app.css">
   <link rel="stylesheet" href="/assets/dashboard.css">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <script>
+    (function () {
+      var dark;
+      try {
+        var stored = window.localStorage.getItem("nullrouter.theme");
+        if (stored === "light" || stored === "dark") {
+          dark = stored === "dark";
+        }
+      } catch (_) {}
+      if (dark === undefined) {
+        try {
+          dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        } catch (_) {
+          dark = false;
+        }
+      }
+      if (dark) {
+        document.documentElement.classList.add("dark");
+      }
+    })();
+  </script>
 </head>
 <body>
-  <noscript>Endpoint &amp; Key requires WebAssembly.</noscript>
-  <div class="nr-shell" data-dashboard-fallback data-dashboard-host="actix">
-    <aside class="nr-sidebar">
-      <div class="nr-window-lights"><span></span><span></span><span></span></div>
-      <div class="nr-logo">
-        <div class="nr-logo-mark">9</div>
-        <div><strong>9Router Proxy</strong><br><small>v0.5.20</small></div>
-      </div>
-      <nav>
-        <a class="nr-sidebar-item active" href="/dashboard/endpoint">Endpoint &amp; Key</a>
-        <span class="nr-sidebar-item muted">Providers</span>
-        <span class="nr-sidebar-item muted">Combos</span>
-        <span class="nr-sidebar-item muted">Usage</span>
-        <span class="nr-sidebar-item muted">CLI Tools</span>
-      </nav>
-    </aside>
-    <main class="nr-main">
-      <header class="nr-header">
-        <div>
-          <p class="nr-kicker">Dashboard host</p>
-          <h1>Endpoint</h1>
-        </div>
-        <div class="nr-header-actions">
-          <span class="nr-pill">/health</span>
-          <span class="nr-pill">/pkg/dashboard_leptos.js</span>
-        </div>
-      </header>
-      <section class="nr-grid">
-        <article class="nr-card">
-          <div class="nr-card-title">
-            <h2>API Endpoint</h2>
-            <span class="nr-endpoint-badge nr-endpoint-badge-local">local</span>
-          </div>
-          <div class="nr-endpoint-list">
-            <div class="nr-endpoint-row">
-              <span class="nr-endpoint-label">Local</span>
-              <code>/v1</code>
-              <span class="nr-endpoint-badge">API service</span>
-            </div>
-          </div>
-        </article>
-        <article class="nr-card">
-          <div class="nr-card-title">
-            <h2>Provider Assets</h2>
-            <span class="nr-endpoint-badge">static</span>
-          </div>
-          <div class="nr-provider-grid">
-            <div class="nr-provider-tile"><img class="nr-provider-logo" src="/providers/openai.png" alt=""><strong>OpenAI</strong><span class="nr-provider-state">served locally</span></div>
-            <div class="nr-provider-tile"><img class="nr-provider-logo" src="/providers/anthropic.png" alt=""><strong>Anthropic</strong><span class="nr-provider-state">served locally</span></div>
-          </div>
-        </article>
-        <article class="nr-card nr-card-wide">
-          <p class="nr-status-alert">The API remains a separate service behind Pingora; this host only serves dashboard assets and health.</p>
-        </article>
-      </section>
-    </main>
-  </div>
+  <noscript>This dashboard needs WebAssembly and JavaScript enabled.</noscript>
   <div id="dashboard-root"></div>
   <script type="module">
     import init from "/pkg/dashboard_leptos.js";
-
-    const fallback = document.querySelector("[data-dashboard-fallback]");
     await init("/pkg/dashboard_leptos_bg.wasm");
-    fallback?.remove();
   </script>
 </body>
 </html>

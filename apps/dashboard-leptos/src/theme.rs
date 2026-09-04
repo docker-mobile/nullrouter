@@ -109,7 +109,9 @@ impl ThemeState {
     /// Advance to the next selection in [`Selection::ALL`].
     pub fn cycle(self) {
         let current = self.selection.get_untracked();
-        let index = Selection::ALL.iter().position(|candidate| *candidate == current);
+        let index = Selection::ALL
+            .iter()
+            .position(|candidate| *candidate == current);
         let next = index
             .and_then(|index| Selection::ALL.get((index + 1) % Selection::ALL.len()))
             .copied()
@@ -134,7 +136,10 @@ pub fn provide_theme() -> ThemeState {
         apply(selection.resolve(os_prefers_dark.get()));
     });
 
-    let state = ThemeState { selection, resolved };
+    let state = ThemeState {
+        selection,
+        resolved,
+    };
     provide_context(state);
     state
 }
@@ -189,8 +194,12 @@ fn os_dark_signal() -> Signal<bool> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
 
-    let query = web_sys::window()
-        .and_then(|window| window.match_media("(prefers-color-scheme: dark)").ok().flatten());
+    let query = web_sys::window().and_then(|window| {
+        window
+            .match_media("(prefers-color-scheme: dark)")
+            .ok()
+            .flatten()
+    });
 
     let Some(query) = query else {
         return Signal::derive(|| false);

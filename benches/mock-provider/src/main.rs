@@ -272,10 +272,10 @@ fn render(config: &Config) -> Bodies {
 // `Connection: keep-alive`, because every real provider supports it and a mock that
 // closes every connection is not a neutral control.
 //
-// It was `close`, and that quietly penalised whichever router pools upstream
+// It was `close`, and that quietly penalised whichever router pools outbound
 // connections. A pooled client keeps the closed socket, tries to reuse it on the next
 // request, finds it dead and re-dials -- and nullrouter's streamed responses came out
-// at 80 ms against 9Router's 50 ms because of it. With keep-alive the same measurement
+// at 80 ms against the baseline's 50 ms because of it. With keep-alive the same measurement
 // puts nullrouter ahead. A control that changes which router looks faster is not
 // measuring the routers.
 //

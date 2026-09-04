@@ -19,11 +19,32 @@ use actix_web::http::{Method, StatusCode, header};
 use actix_web::{App, test, web};
 use nullrouter_api::{AppConfig, RuntimeClient, StateClient, TunnelManager, configure};
 use serde_json::Value;
+use std::sync::OnceLock;
 
 /// A port nothing listens on, so no test reaches a real dependency.
 const UNREACHABLE_STATE_ADDR: &str = "http://127.0.0.1:1";
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+/// Turn off binary discovery for this whole test binary, so "not installed" is a declared
+/// precondition rather than a property of the machine the suite happens to run on.
+///
+/// Every case here asserts the not-installed path. Reading that from the host meant the answers
+/// depended on whether `cloudflared` was present: on a machine that had it, two cases stopped
+/// exercising argument handling and started opening real Cloudflare quick tunnels, leaving a public
+/// URL alive after the run. Discovery off still produces a genuine `NotFound`, so the message these
+/// cases pin -- naming the binary and saying this service never downloads it -- keeps its coverage.
+///
+/// Set once for the binary and never restored, because every case wants the same answer. That is
+/// what removes the need for a lock: no case can observe a different value than another.
+fn discovery_off() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        // SAFETY: `get_or_init` runs this exactly once, and no case in this binary reads the
+        // variable before calling this function.
+        unsafe { std::env::set_var(nullrouter_procctl::binary::DISCOVERY_VAR, "off") };
+    });
+}
 
 /// Send one request through the full route table.
 async fn call(method: Method, uri: &str, body: &str) -> TestResult<(StatusCode, Value)> {
@@ -182,6 +203,7 @@ async fn a_required_parameter_is_demanded_before_anything_runs() -> TestResult {
 
 #[actix_rt::test]
 async fn an_undeclared_parameter_is_dropped_rather_than_forwarded() -> TestResult {
+    discovery_off();
     // Given: a body carrying a name no operation declares.
 
     // When: a read operation is called with it. cloudflared is absent here, so the answer is
@@ -205,6 +227,7 @@ async fn an_undeclared_parameter_is_dropped_rather_than_forwarded() -> TestResul
 
 #[actix_rt::test]
 async fn a_missing_binary_is_reported_as_a_dependency_not_a_bad_request() -> TestResult {
+    discovery_off();
     // Given: neither binary is installed in this sandbox.
 
     // When: one operation per tool is called.
@@ -232,6 +255,7 @@ async fn a_missing_binary_is_reported_as_a_dependency_not_a_bad_request() -> Tes
 
 #[actix_rt::test]
 async fn the_status_route_reports_structure_even_with_nothing_installed() -> TestResult {
+    discovery_off();
     // Given: nothing is installed and no tunnel has ever been started.
 
     // When: status is requested.
@@ -292,6 +316,7 @@ async fn the_tailscale_check_route_never_claims_a_password_or_a_brew() -> TestRe
 
 #[actix_rt::test]
 async fn a_named_tunnel_requires_a_token_and_never_echoes_it() -> TestResult {
+    discovery_off();
     // Given: the named tunnel takes a credential.
 
     // When: it is called with no token, then with one.
@@ -396,6 +421,7 @@ async fn a_hostile_parameter_value_never_reaches_a_process() -> TestResult {
 
 #[actix_rt::test]
 async fn an_empty_body_means_defaults_but_a_malformed_one_is_an_error() -> TestResult {
+    discovery_off();
     // Given: the dashboard POSTs these routes with no body at all, so empty has to mean
     // defaults. The trap is treating an unreadable body the same way: a silently defaulted
     // port is worse than either a clear error or a respected value, because the caller is
@@ -427,6 +453,7 @@ async fn an_empty_body_means_defaults_but_a_malformed_one_is_an_error() -> TestR
 
 #[actix_rt::test]
 async fn a_quick_tunnel_port_must_be_a_port() -> TestResult {
+    discovery_off();
     // Given: the only caller-chosen part of a quick tunnel is which loopback port to expose.
 
     // When: a body carries something that is not a port.

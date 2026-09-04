@@ -1,9 +1,9 @@
-//! Importing a real 9Router `SQLite` database.
+//! Importing a real legacy `SQLite` database.
 //!
-//! The fixture is built with 9Router's actual schema from
-//! `inspire/src/lib/db/schema.js`, including the `data` TEXT column that holds
-//! everything outside the queryable columns. Reading a hand-shaped JSON blob
-//! instead would not prove the importer works against a real installation.
+//! The fixture is built with the legacy product's actual schema, including the
+//! `data` TEXT column that holds everything outside the queryable columns.
+//! Reading a hand-shaped JSON blob instead would not prove the importer works
+//! against a real installation.
 
 #![allow(
     clippy::future_not_send,
@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-/// A scratch directory laid out like a 9Router install.
+/// A scratch directory laid out like a legacy install.
 struct Fixture {
     dir: std::path::PathBuf,
 }
@@ -27,7 +27,7 @@ struct Fixture {
 impl Fixture {
     fn new(tag: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "nr-9router-{tag}-{}-{:?}",
+            "nr-legacy-import-{tag}-{}-{:?}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -42,7 +42,7 @@ impl Fixture {
         self.dir.display().to_string()
     }
 
-    /// Write a `SQLite` database using 9Router's real schema.
+    /// Write a `SQLite` database using the legacy product's real schema.
     fn write_sqlite(&self) {
         let db = self.dir.join("db").join("data.sqlite");
         let connection = rusqlite::Connection::open(&db).expect("open fixture db");
@@ -66,8 +66,8 @@ impl Fixture {
             )
             .expect("create schema");
 
-        // Secrets and per-connection config live in the `data` blob, exactly as
-        // 9Router writes them.
+        // Secrets and per-connection config live in the `data` blob, exactly
+        // where the source writes them.
         connection
             .execute(
                 "INSERT INTO providerConnections
@@ -142,7 +142,7 @@ impl Fixture {
                     "combo_1",
                     "my-combo",
                     Option::<String>::None,
-                    // 9Router stores this as JSON text.
+                    // The models column holds JSON text, not a native array.
                     json!(["openai/gpt-5", "anthropic/claude-sonnet-4.5"]).to_string(),
                     "2026-01-01T00:00:00Z",
                     "2026-01-01T00:00:00Z",
@@ -156,7 +156,7 @@ impl Fixture {
                  VALUES (?1,?2,?3,?4,?5,?6)",
                 rusqlite::params![
                     "key_1",
-                    "sk_9router_plain",
+                    "sk_legacy_plain",
                     "cli",
                     "m1",
                     1,
@@ -201,7 +201,7 @@ async fn run_import(store: StateStore, body: Value) -> TestResult<(u16, Value)> 
     )
     .await;
     let req = test::TestRequest::post()
-        .uri("/internal/v1/migrate/9router")
+        .uri("/internal/v1/migrate/legacy")
         .insert_header((header::CONTENT_TYPE, "application/json"))
         .set_payload(body.to_string())
         .to_request();
@@ -430,7 +430,7 @@ async fn importing_twice_does_not_duplicate() -> TestResult {
 #[actix_web::test]
 async fn legacy_json_install_is_supported() -> TestResult {
     let fixture = Fixture::new("legacy");
-    // Pre-SQLite 9Router installs keep a flat db.json.
+    // Installs predating the SQLite layout keep a flat db.json instead.
     std::fs::write(
         fixture.dir.join("db.json"),
         json!({
@@ -471,25 +471,25 @@ async fn a_missing_installation_reports_where_it_looked() -> TestResult {
     let store = StateStore::memory();
     let (status, body) = run_import(
         store,
-        json!({ "dataDir": "/definitely/not/a/9router/install", "dryRun": false }),
+        json!({ "dataDir": "/definitely/not/an/install", "dryRun": false }),
     )
     .await?;
 
     assert_eq!(status, 404, "body: {body}");
-    assert_eq!(body.get("error"), Some(&json!("no_9router_installation")));
+    assert_eq!(body.get("error"), Some(&json!("no_legacy_installation")));
     let message = body
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or_default();
     assert!(
-        message.contains("/definitely/not/a/9router/install"),
+        message.contains("/definitely/not/an/install"),
         "the searched path must be reported: {message}"
     );
     Ok(())
 }
 
 #[actix_web::test]
-async fn the_source_9router_database_is_never_modified() -> TestResult {
+async fn the_source_database_is_never_modified() -> TestResult {
     let fixture = Fixture::new("readonly");
     fixture.write_sqlite();
     let db = fixture.dir.join("db").join("data.sqlite");
@@ -498,7 +498,7 @@ async fn the_source_9router_database_is_never_modified() -> TestResult {
     let store = StateStore::memory();
     run_import(store, json!({ "dataDir": fixture.path(), "dryRun": false })).await?;
 
-    // Opened read-only, so a live 9Router install cannot be disturbed.
+    // Opened read-only, so an install still in use cannot be disturbed.
     let after = std::fs::read(&db).expect("read fixture again");
     assert_eq!(before, after, "the source database must not be written to");
     Ok(())

@@ -21,6 +21,8 @@ use std::collections::HashMap;
 
 /// Which locale the dashboard resolved to.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+// Cheap to clone: the table is small and every nested view! closure that needs
+// a message has to own a copy. Copy would be nicer, but HashMap is not Copy.
 pub struct Locale {
     /// IETF language tag, e.g. `"en-US"`.
     pub tag: String,
@@ -61,6 +63,61 @@ impl Locale {
     }
 }
 
+/// Locale files that exist, and the only tags a fetch may ask for.
+///
+/// Kept as a list rather than probing the network: an unknown tag would otherwise cost a 404 per
+/// candidate before falling back, and the set only changes when a file is added.
+pub const AVAILABLE: [&str; 35] = [
+    "ar", "bn", "cs", "da", "de", "el", "en-US", "es", "fa", "fi", "fr", "he", "hi", "hu", "id",
+    "it", "ja", "km", "ko", "nl", "no", "pl", "pt-BR", "pt-PT", "ro", "ru", "sv", "th", "tl", "tr",
+    "uk", "ur", "vi", "zh-CN", "zh-TW",
+];
+
+/// Resolve a browser or cookie tag to a file that actually exists.
+///
+/// Browsers send region-qualified tags (`de-DE`, `en-GB`, `zh-Hans-CN`) while most catalogues are
+/// bare languages, so an exact-match-only lookup would 404 for nearly every non-English visitor and
+/// render raw message keys. The chain is: exact match, then the bare language, then the first
+/// regional file for that language, then `en-US`.
+pub fn resolve_tag(requested: &str) -> &'static str {
+    let requested = requested.trim();
+
+    if let Some(exact) = AVAILABLE
+        .iter()
+        .find(|tag| tag.eq_ignore_ascii_case(requested))
+    {
+        return exact;
+    }
+
+    // `zh-Hans-CN` -> `zh`; also the whole tag when there is no separator.
+    let language = requested
+        .split(['-', '_'])
+        .next()
+        .unwrap_or(requested)
+        .to_ascii_lowercase();
+    if language.is_empty() {
+        return "en-US";
+    }
+
+    if let Some(bare) = AVAILABLE
+        .iter()
+        .find(|tag| tag.eq_ignore_ascii_case(&language))
+    {
+        return bare;
+    }
+
+    // `en-GB` has no `en.json`, but `en-US.json` is the right answer; likewise `zh-MO` -> `zh-CN`.
+    if let Some(regional) = AVAILABLE.iter().find(|tag| {
+        tag.split('-')
+            .next()
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&language))
+    }) {
+        return regional;
+    }
+
+    "en-US"
+}
+
 /// Detect the user's preferred locale and load its message table.
 ///
 /// Tries: explicit `locale` cookie → browser's `navigator.languages` → `en-US`. Returns the loaded
@@ -71,8 +128,15 @@ impl Locale {
 /// load, and the file is small (under 20 KB even with every panel's messages).
 #[cfg(target_arch = "wasm32")]
 pub async fn provide_locale() -> Locale {
-    let tag = detect_locale().unwrap_or_else(|| "en-US".to_owned());
-    let locale = load_locale(&tag).await.unwrap_or_else(|_| Locale {
+    let requested = detect_locale().unwrap_or_else(|| "en-US".to_owned());
+    let tag = resolve_tag(&requested);
+    let mut loaded = load_locale(tag).await;
+    // A resolved tag that still fails to load is a missing or corrupt file, not a bad preference.
+    // English is the authoritative catalogue, so it is worth one more request before giving up.
+    if loaded.is_err() && tag != "en-US" {
+        loaded = load_locale("en-US").await;
+    }
+    let locale = loaded.unwrap_or_else(|_| Locale {
         tag: "en-US".to_owned(),
         messages: HashMap::new(),
     });
@@ -82,9 +146,15 @@ pub async fn provide_locale() -> Locale {
 
 /// Native builds have no browser to detect from or fetch through.
 #[cfg(not(target_arch = "wasm32"))]
-#[expect(clippy::unused_async, reason = "mirrors the wasm signature so callers stay target-agnostic")]
+#[expect(
+    clippy::unused_async,
+    reason = "mirrors the wasm signature so callers stay target-agnostic"
+)]
 pub async fn provide_locale() -> Locale {
-    let locale = Locale { tag: "en-US".to_owned(), messages: HashMap::new() };
+    let locale = Locale {
+        tag: "en-US".to_owned(),
+        messages: HashMap::new(),
+    };
     provide_context(locale.clone());
     locale
 }
@@ -114,7 +184,11 @@ fn detect_locale() -> Option<String> {
         .and_then(|html| html.cookie().ok())
     {
         for pair in cookies.split(';') {
-            if let Some(value) = pair.trim().strip_prefix("locale=").filter(|v| !v.is_empty()) {
+            if let Some(value) = pair
+                .trim()
+                .strip_prefix("locale=")
+                .filter(|v| !v.is_empty())
+            {
                 return Some(value.to_owned());
             }
         }
@@ -142,11 +216,54 @@ async fn load_locale(tag: &str) -> Result<Locale, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::Locale;
+    use super::{AVAILABLE, Locale, resolve_tag};
+
+    #[test]
+    fn an_exact_tag_is_used_as_is() {
+        assert_eq!(resolve_tag("pt-BR"), "pt-BR");
+        assert_eq!(resolve_tag("ja"), "ja");
+    }
+
+    #[test]
+    fn a_region_falls_back_to_the_bare_language() {
+        assert_eq!(resolve_tag("de-DE"), "de");
+        assert_eq!(resolve_tag("fr-CA"), "fr");
+    }
+
+    #[test]
+    fn a_language_with_only_regional_files_picks_one() {
+        // There is no `en.json` or `zh.json`; both must still resolve.
+        assert_eq!(resolve_tag("en-GB"), "en-US");
+        assert_eq!(resolve_tag("en"), "en-US");
+        assert!(resolve_tag("zh-Hans-CN").starts_with("zh-"));
+    }
+
+    #[test]
+    fn tags_are_matched_case_insensitively_and_accept_underscores() {
+        assert_eq!(resolve_tag("PT-br"), "pt-BR");
+        assert_eq!(resolve_tag("de_DE"), "de");
+    }
+
+    #[test]
+    fn an_unknown_or_empty_language_falls_back_to_english() {
+        assert_eq!(resolve_tag("xx-YY"), "en-US");
+        assert_eq!(resolve_tag(""), "en-US");
+        assert_eq!(resolve_tag("   "), "en-US");
+    }
+
+    #[test]
+    fn every_available_tag_resolves_to_itself() {
+        for tag in AVAILABLE {
+            assert_eq!(resolve_tag(tag), tag, "{tag} did not round-trip");
+        }
+    }
 
     #[test]
     fn missing_keys_fall_back_to_themselves() {
-        let locale = Locale { tag: "en-US".to_owned(), messages: [].into() };
+        let locale = Locale {
+            tag: "en-US".to_owned(),
+            messages: [].into(),
+        };
         assert_eq!(locale.get("missing.key"), "missing.key");
     }
 
@@ -165,14 +282,21 @@ mod tests {
             tag: "en-US".to_owned(),
             messages: [("greeting".to_owned(), "Hello, {name}!".to_owned())].into(),
         };
-        assert_eq!(locale.fmt("greeting", &[("name", "Alice")]), "Hello, Alice!");
+        assert_eq!(
+            locale.fmt("greeting", &[("name", "Alice")]),
+            "Hello, Alice!"
+        );
     }
 
     #[test]
     fn fmt_handles_multiple_replacements() {
         let locale = Locale {
             tag: "en-US".to_owned(),
-            messages: [("status".to_owned(), "{count} items in {container}".to_owned())].into(),
+            messages: [(
+                "status".to_owned(),
+                "{count} items in {container}".to_owned(),
+            )]
+            .into(),
         };
         assert_eq!(
             locale.fmt("status", &[("count", "5"), ("container", "queue")]),
@@ -182,7 +306,10 @@ mod tests {
 
     #[test]
     fn missing_keys_in_fmt_still_fall_back_to_the_key() {
-        let locale = Locale { tag: "en-US".to_owned(), messages: [].into() };
+        let locale = Locale {
+            tag: "en-US".to_owned(),
+            messages: [].into(),
+        };
         assert_eq!(locale.fmt("missing.key", &[("x", "y")]), "missing.key");
     }
 

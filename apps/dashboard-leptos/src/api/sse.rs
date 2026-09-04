@@ -77,7 +77,11 @@ impl Drop for Stream {
 /// The returned handle is registered for cleanup on the current reactive owner, so a panel that
 /// navigates away closes its socket without the caller having to remember.
 #[cfg(target_arch = "wasm32")]
-pub fn subscribe<T, F>(path: &str, connection: WriteSignal<Connection>, on_message: F) -> Option<Stream>
+pub fn subscribe<T, F>(
+    path: &str,
+    connection: WriteSignal<Connection>,
+    on_message: F,
+) -> Option<Stream>
 where
     T: serde::de::DeserializeOwned + 'static,
     F: Fn(T) + 'static,
@@ -91,14 +95,15 @@ where
     source.set_onopen(Some(on_open.as_ref().unchecked_ref()));
     on_open.forget();
 
-    let message = Closure::<dyn Fn(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
-        let Some(text) = event.data().as_string() else {
-            return;
-        };
-        if let Ok(parsed) = serde_json::from_str::<T>(&text) {
-            on_message(parsed);
-        }
-    });
+    let message =
+        Closure::<dyn Fn(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
+            let Some(text) = event.data().as_string() else {
+                return;
+            };
+            if let Ok(parsed) = serde_json::from_str::<T>(&text) {
+                on_message(parsed);
+            }
+        });
     source.set_onmessage(Some(message.as_ref().unchecked_ref()));
     message.forget();
 
@@ -117,9 +122,84 @@ where
     source.set_onerror(Some(on_error.as_ref().unchecked_ref()));
     on_error.forget();
 
-    let handle = Stream { source: source.clone() };
+    let handle = Stream {
+        source: source.clone(),
+    };
     on_cleanup(move || source.close());
     Some(handle)
+}
+
+/// Open a subscription to a *named* event.
+///
+/// Both live streams this dashboard reads emit named frames -- `console_logs` and `usage` -- and a
+/// named frame never reaches `onmessage`, which only receives unnamed ones. [`subscribe`] would
+/// therefore open the socket, report it healthy, and display nothing at all.
+#[cfg(target_arch = "wasm32")]
+pub fn subscribe_named<T, F>(
+    path: &str,
+    event_name: &str,
+    connection: WriteSignal<Connection>,
+    on_message: F,
+) -> Option<Stream>
+where
+    T: serde::de::DeserializeOwned + 'static,
+    F: Fn(T) + 'static,
+{
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+
+    let source = web_sys::EventSource::new(path).ok()?;
+    let on_open = Closure::<dyn Fn(web_sys::Event)>::new(move |_| connection.set(Connection::Open));
+    source.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+    on_open.forget();
+
+    let message =
+        Closure::<dyn Fn(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
+            // A frame that does not parse is skipped rather than closing the stream: one malformed
+            // row in a log feed must not take the rest of the feed down with it.
+            if let Some(parsed) = event
+                .data()
+                .as_string()
+                .and_then(|text| serde_json::from_str::<T>(&text).ok())
+            {
+                on_message(parsed);
+            }
+        });
+    let _ = source.add_event_listener_with_callback(event_name, message.as_ref().unchecked_ref());
+    message.forget();
+
+    let errored = source.clone();
+    let on_error = Closure::<dyn Fn(web_sys::Event)>::new(move |_| {
+        connection.set(if errored.ready_state() == web_sys::EventSource::CLOSED {
+            Connection::Closed
+        } else {
+            Connection::Reconnecting
+        });
+    });
+    source.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+    on_error.forget();
+
+    let handle = Stream {
+        source: source.clone(),
+    };
+    on_cleanup(move || source.close());
+    Some(handle)
+}
+
+/// Native builds have no `EventSource`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn subscribe_named<T, F>(
+    _path: &str,
+    _event_name: &str,
+    connection: WriteSignal<Connection>,
+    _on_message: F,
+) -> Option<Stream>
+where
+    T: serde::de::DeserializeOwned + 'static,
+    F: Fn(T) + 'static,
+{
+    connection.set(Connection::Closed);
+    None
 }
 
 /// Native builds have no `EventSource`.

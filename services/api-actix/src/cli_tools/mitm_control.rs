@@ -32,6 +32,13 @@ use serde::{Deserialize, Serialize};
 /// accepting one would report success for work that cannot happen.
 pub(crate) const TOOLS: [&str; 4] = ["antigravity", "copilot", "cursor", "kiro"];
 
+/// The legacy product's data directory under `$HOME`. An external program's address on disk: a
+/// nullrouter sharing it must spell it exactly, or the two stop seeing one alias map.
+const LEGACY_DATA_DIR: &str = ".9router";
+
+/// The same directory in the Windows `%APPDATA%` layout, and the same rule.
+const LEGACY_DATA_DIR_WINDOWS: &str = "9router";
+
 /// Where the CA and the alias map live under a data directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Paths {
@@ -49,9 +56,9 @@ impl Paths {
 
     /// Paths under the data directory this deployment uses.
     ///
-    /// `DATA_DIR` first, matching upstream's own override, then the per-user default. The same discovery
-    /// the imports and pxpipe use, so a nullrouter sharing a directory with 9Router sees the same files —
-    /// which is the point: an interceptor started from either reads one alias map.
+    /// `DATA_DIR` first, then the per-user default. The same discovery the imports and pxpipe do, so
+    /// a nullrouter sharing a directory with the legacy product sees the same files — which is the
+    /// point: an interceptor started from either reads one alias map.
     pub(crate) fn discover() -> Self {
         if let Ok(configured) = std::env::var("DATA_DIR")
             && !configured.trim().is_empty()
@@ -59,10 +66,10 @@ impl Paths {
             return Self::new(Path::new(configured.trim()));
         }
         if let Some(home) = std::env::var_os("HOME") {
-            return Self::new(&Path::new(&home).join(".9router"));
+            return Self::new(&Path::new(&home).join(LEGACY_DATA_DIR));
         }
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            return Self::new(&Path::new(&appdata).join("9router"));
+            return Self::new(&Path::new(&appdata).join(LEGACY_DATA_DIR_WINDOWS));
         }
         Self::new(Path::new("."))
     }
@@ -630,8 +637,8 @@ mod tests {
 
     #[test]
     fn the_data_directory_follows_the_same_discovery_as_the_rest_of_the_port() {
-        // A nullrouter sharing a directory with 9Router must see the same alias map, or an interceptor
-        // started from either reads a different one.
+        // A nullrouter sharing a directory with the legacy product must see the same alias map, or
+        // an interceptor started from either reads a different one.
         let paths = Paths::new(Path::new("/tmp/explicit"));
         assert_eq!(paths.root(), Path::new("/tmp/explicit/mitm"));
         assert!(paths.certificate().ends_with("mitm/root-ca.crt"));

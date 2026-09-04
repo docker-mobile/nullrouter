@@ -76,7 +76,10 @@ pub fn PanelSkeleton() -> impl IntoView {
 
 /// A failure, with the remedy when there is one.
 #[component]
-pub fn PanelError(error: ApiError, #[prop(optional)] on_retry: Option<Callback<()>>) -> impl IntoView {
+pub fn PanelError(
+    error: ApiError,
+    #[prop(optional)] on_retry: Option<Callback<()>>,
+) -> impl IntoView {
     let locale = crate::i18n::use_locale();
     let retry_label = locale.get("error.retry").to_owned();
     let show_retry = error.is_retryable() && on_retry.is_some();
@@ -120,65 +123,24 @@ pub fn PanelError(error: ApiError, #[prop(optional)] on_retry: Option<Callback<(
     }
 }
 
-/// A section that has no content yet.
-///
-/// Explicit rather than an empty div: a section that is reachable from navigation but not yet built
-/// should say so, not look like a section whose data failed to load.
-#[component]
-fn Placeholder(section: &'static str) -> impl IntoView {
-    view! {
-        <div class="rounded-lg border border-dashed border-border p-8 text-center">
-            <p class="text-sm text-muted-foreground">
-                {format!("{section} is not built yet.")}
-            </p>
-        </div>
-    }
-}
-
-// Public rather than private-with-re-export: `unreachable_pub` does not model `pub use`, so a
-// private module holding `pub` components warns on every one of them, and narrowing the components
-// instead makes the re-export fail with E0364.
+pub mod keys;
+pub mod login;
 pub mod logs;
 pub mod overview;
+pub mod providers;
+pub mod settings;
+pub mod status;
+pub mod types;
+pub mod usage;
 
+pub use keys::Keys;
+pub use login::Login;
 pub use logs::Logs;
 pub use overview::Overview;
-
-#[component]
-pub fn Routing() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    view! {
-        <PageHeader title=locale.get("nav.routing").to_owned() />
-        <Placeholder section="Routing" />
-    }
-}
-
-#[component]
-pub fn Keys() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    view! {
-        <PageHeader title=locale.get("nav.keys").to_owned() />
-        <Placeholder section="API keys" />
-    }
-}
-
-#[component]
-pub fn Usage() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    view! {
-        <PageHeader title=locale.get("nav.usage").to_owned() />
-        <Placeholder section="Usage" />
-    }
-}
-
-#[component]
-pub fn Settings() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    view! {
-        <PageHeader title=locale.get("nav.settings").to_owned() />
-        <Placeholder section="Settings" />
-    }
-}
+pub use providers::Providers;
+pub use settings::Settings;
+pub use status::StatusPage;
+pub use usage::Usage;
 
 /// Shown for any path the router does not recognise.
 #[component]
@@ -189,6 +151,24 @@ pub fn NotFound() -> impl IntoView {
                 <p class="text-4xl font-semibold tracking-tight text-muted-foreground">"404"</p>
                 <p class="text-sm text-muted-foreground">"That page does not exist."</p>
             </div>
+        </div>
+    }
+}
+
+/// OAuth callback mount: the grant stays in the address bar for the opener to read.
+#[component]
+pub fn Callback() -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    view! {
+        <div class="min-h-dvh grid place-items-center bg-background p-6">
+            <section class="w-full max-w-sm rounded-lg border border-border bg-card p-6 space-y-2 text-center">
+                <h1 class="text-xl font-semibold tracking-tight">
+                    {locale.get("callback.title").to_owned()}
+                </h1>
+                <p class="text-sm text-muted-foreground">
+                    {locale.get("callback.copy").to_owned()}
+                </p>
+            </section>
         </div>
     }
 }

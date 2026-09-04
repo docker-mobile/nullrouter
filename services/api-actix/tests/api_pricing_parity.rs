@@ -48,7 +48,7 @@ fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
 }
 
 #[actix_rt::test]
-async fn pricing_routes_match_9router_stateful_json_contract() -> TestResult {
+async fn pricing_routes_match_the_stateful_json_contract() -> TestResult {
     // Given: pricing starts with the upstream provider defaults for this Actix app instance.
     let app = test::init_service(
         App::new()
@@ -123,7 +123,7 @@ async fn pricing_routes_match_9router_stateful_json_contract() -> TestResult {
 }
 
 #[actix_rt::test]
-async fn pricing_patch_rejects_invalid_shapes_with_9router_errors() -> TestResult {
+async fn pricing_patch_rejects_invalid_shapes_with_structured_errors() -> TestResult {
     // Given: browser clients can submit malformed pricing structures.
     let cases = [
         ("null", "Invalid pricing data format"),

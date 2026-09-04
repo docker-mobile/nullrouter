@@ -94,7 +94,7 @@ nullrouter-translate = { path = "crates/translate" }
 futures-util = "0.3"
 # Session ids for providers that require a per-request correlation header.
 getrandom = "0.3"
-# Bundled so a 9Router import works without a system SQLite present.
+# Bundled so a legacy import works without a system SQLite present.
 rusqlite = { version = "0.32", features = ["bundled"] }
 rcgen = "0.14.10"
 reqwest = { version = "0.12", default-features = false, features = [
@@ -111,9 +111,9 @@ pingora-proxy = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-# Codex keeps `~/.codex/config.toml`, and its 9Router block has to be merged into whatever the
-# user already has there rather than overwriting the file. `preserve_order` so a rewrite does not
-# reshuffle the user's own keys.
+# Codex keeps `~/.codex/config.toml`, and this router's provider block has to be merged into
+# whatever the user already has there rather than overwriting the file. `preserve_order` so a
+# rewrite does not reshuffle the user's own keys.
 toml = { version = "0.8", features = ["preserve_order"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tracing = "0.1"

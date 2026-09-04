@@ -4,7 +4,7 @@
 //! its models. Before probing, `/v1/models` reported **nothing** for such a connection:
 //! `models_for_key` finds no row for the node id, and an owner who has not typed a model
 //! list by hand got an empty picker in every client that reads the route. This was found
-//! against a real 9Router config, where the route returned zero rows for two working
+//! against a real imported config, where the route returned zero rows for two working
 //! connections.
 //!
 //! What only this level can check:

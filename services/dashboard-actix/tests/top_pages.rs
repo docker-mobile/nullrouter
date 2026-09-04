@@ -65,7 +65,14 @@ async fn top_level_pages_match_upstream_contract_when_requested() -> TestResult 
     let landing = html_for!(app, "/landing");
     assert!(landing.contains("One Endpoint for"));
     assert!(landing.contains("All AI Providers"));
-    assert!(landing.contains("npx 9router"));
+    // The quickstart command, which has to be one that actually works: this page used to show an
+    // `npx` invocation, and there is no root `package.json`, so it would have failed for anyone who
+    // typed it. `./run.sh` is the entry point this repository really ships.
+    assert!(landing.contains("$ ./run.sh"));
+    assert!(
+        !landing.contains("npx"),
+        "no npx install path exists in this repository"
+    );
     assert!(landing.contains("http://localhost:20128"));
     assert!(!landing.contains(r#"import init from "/pkg/dashboard_leptos.js";"#));
     assert!(!landing.contains(r#"<div id="dashboard-root"></div>"#));

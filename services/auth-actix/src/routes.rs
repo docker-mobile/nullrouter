@@ -25,8 +25,7 @@ use crate::{
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1_024;
 const MAX_PASSWORD_BYTES: usize = 1_024;
 const MAX_API_KEY_BYTES: usize = 4_096;
-const RESET_HINT: &str =
-    "Forgot password? Reset to default via 9Router CLI -> Settings -> Reset Password to Default.";
+const RESET_HINT: &str = "Forgot password? Reset to default via nullrouter CLI -> Settings -> Reset Password to Default.";
 
 pub(crate) fn configure(config: &mut web::ServiceConfig, service: AuthService) {
     config
@@ -81,8 +80,9 @@ fn health() -> Ready<HttpResponse> {
 /// `requireLogin` is a hard-coded `true` **by design, not by omission**.
 /// Dashboard login is unconditional in nullrouter: there is no setting behind
 /// this field, `GET /api/settings/require-login` has been removed, and
-/// `Settings` carries no `requireLogin` to read. 9Router lets an operator turn
-/// dashboard auth off entirely; this port deliberately does not.
+/// `Settings` carries no `requireLogin` to read. Turning dashboard auth off
+/// entirely is deliberately not offered — the dashboard holds provider
+/// credentials, so an unauthenticated one is a credential leak with a UI.
 ///
 /// So please do not "fix" this back into a settings lookup. The field stays only
 /// because the login page reads it, and it must never report `false` — a client

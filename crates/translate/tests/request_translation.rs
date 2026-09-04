@@ -1,4 +1,4 @@
-//! Request-translation parity tests against the frozen 9Router behavior.
+//! Request-translation tests against the frozen reference behaviour.
 
 use nullrouter_providers::Format;
 use nullrouter_translate::schema::DEFAULT_MAX_TOKENS;

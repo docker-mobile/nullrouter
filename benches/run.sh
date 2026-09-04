@@ -10,7 +10,7 @@
 #
 # It measures whichever router is listening on --router-port. It does NOT start one, and
 # it does not know which one it is talking to — that is deliberate: the same script must
-# drive nullrouter and 9Router identically, or the comparison is between two harnesses
+# drive nullrouter and the baseline identically, or the comparison is between two harnesses
 # rather than two routers.
 #
 # This script starts and stops the mock itself, once per cell, because the frame count
@@ -24,7 +24,7 @@
 #
 # Usage:
 #   benches/run.sh --label nullrouter --router-port 20128 --api-key sk-...
-#   benches/run.sh --label 9router    --router-port 3000  --api-key sk-...
+#   benches/run.sh --label baseline    --router-port 3000  --api-key sk-...
 #
 # Requires `oha` (or set LOAD_TOOL=wrk). A hand-rolled client becomes the bottleneck and
 # ends up measuring itself.
@@ -42,7 +42,7 @@ WARMUP=200
 OUT_DIR="benches/results"
 
 # Model names must resolve on the router under test to a provider pointed at the mock.
-# They differ between nullrouter and 9Router configs, so they are flags, not constants.
+# They differ between the two router configs, so they are flags, not constants.
 MODEL_OPENAI="${MODEL_OPENAI:-bench-openai}"
 MODEL_CLAUDE="${MODEL_CLAUDE:-bench-claude}"
 
@@ -63,7 +63,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$LABEL" ]]       || { echo "--label is required (nullrouter | 9router)" >&2; exit 2; }
+[[ -n "$LABEL" ]]       || { echo "--label is required (nullrouter | baseline)" >&2; exit 2; }
 [[ -n "$ROUTER_PORT" ]] || { echo "--router-port is required" >&2; exit 2; }
 
 LOAD_TOOL="${LOAD_TOOL:-oha}"
@@ -168,9 +168,9 @@ trap stop_mock EXIT
 BODY_DIR="$(mktemp -d)"
 trap 'stop_mock; rm -rf "$BODY_DIR"' EXIT
 
-# `"stream": false` is explicit, and must stay explicit. 9Router reads an *absent* stream
+# `"stream": false` is explicit, and must stay explicit. the baseline reads an *absent* stream
 # field as streaming (`body.stream !== false` in open-sse/handlers/chatCore.js), so a body
-# that merely omits it makes 9Router return SSE while nullrouter returns JSON -- different
+# that merely omits it makes the baseline return SSE while nullrouter returns JSON -- different
 # work in what is supposed to be the same cell. Omitting it silently invalidates S1, S2 and
 # S6 rather than failing them.
 cat > "$BODY_DIR/openai.json" <<'JSON'
@@ -243,7 +243,7 @@ warm() {
 # Does this cell actually measure what it claims? Checked once per cell, before the timed
 # runs, because every failure here is invisible in a latency number.
 #
-# The specific bug this exists for: 9Router treats an absent `stream` field as streaming, so
+# The specific bug this exists for: the baseline treats an absent `stream` field as streaming, so
 # a "non-streaming" cell can have one side returning SSE and the other JSON. Both sides
 # answer, both look fast, and the comparison is meaningless. Rather than trusting the bodies
 # to be right, ask what came back.
@@ -280,7 +280,7 @@ verify_shape() {
   if [[ "$through_kind" != "$want" || "$direct_kind" != "$want" ]]; then
     echo "$name: shape mismatch -- wanted $want, router gave $through_kind ($through_type), mock gave $direct_kind ($direct_type)" \
       | tee -a "$RESULT"
-    echo "  a non-streaming body that omits \"stream\":false reads as streaming to 9Router." \
+    echo "  a non-streaming body that omits \"stream\":false reads as streaming to the baseline." \
       | tee -a "$RESULT"
     return 1
   fi

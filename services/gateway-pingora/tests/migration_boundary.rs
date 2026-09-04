@@ -1,8 +1,8 @@
-//! The 9Router import must require a dashboard session.
+//! The legacy import must require a dashboard session.
 //!
-//! It reads provider credentials out of a local 9Router install and writes them
-//! into this router's state. Reachable unauthenticated, it would let anyone on
-//! the network trigger a credential import.
+//! It reads provider credentials out of a legacy install on this machine and
+//! writes them into this router's state. Reachable unauthenticated, it would let
+//! anyone on the network trigger a credential import.
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -11,7 +11,7 @@ use nullrouter_gateway::{AccessDecision, AccessRequirement, AuthorizationState, 
 const REMOTE: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
 const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-const MIGRATE_PATH: &str = "/api/migrate/9router";
+const MIGRATE_PATH: &str = "/api/migrate/legacy";
 
 #[test]
 fn migration_is_routed_to_the_api_service() {
@@ -60,7 +60,7 @@ fn migration_requires_a_session_not_public_access() {
 fn the_internal_import_endpoint_stays_unreachable_publicly() {
     // The API service forwards to this; it must never be callable directly.
     let requirement = AccessRequirement::for_request(
-        "/internal/v1/migrate/9router",
+        "/internal/v1/migrate/legacy",
         &http::Method::POST,
         nullrouter_gateway::RouteKind::State,
         Some(REMOTE),

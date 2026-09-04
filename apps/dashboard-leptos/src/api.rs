@@ -187,7 +187,8 @@ fn build_request(
         init.set_body(&wasm_bindgen::JsValue::from_str(payload));
     }
 
-    let request = Request::new_with_str_and_init(path, &init).map_err(|_| ApiError::RequestBuild)?;
+    let request =
+        Request::new_with_str_and_init(path, &init).map_err(|_| ApiError::RequestBuild)?;
     if body.is_some() {
         request
             .headers()
@@ -225,7 +226,10 @@ pub async fn request(method: Method, path: &str, body: Option<&str>) -> Result<S
 /// Native builds have no browser to fetch from. Any call here is a programming error, reported
 /// rather than faked.
 #[cfg(not(target_arch = "wasm32"))]
-#[expect(clippy::unused_async, reason = "mirrors the wasm signature so callers stay target-agnostic")]
+#[expect(
+    clippy::unused_async,
+    reason = "mirrors the wasm signature so callers stay target-agnostic"
+)]
 pub async fn request(
     _method: Method,
     _path: &str,
@@ -273,7 +277,12 @@ pub async fn request_detailed(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[expect(clippy::unused_async, reason = "mirrors the wasm signature so callers stay target-agnostic")]
+// `allow`, not `expect`: whether `unused_async` fires here depends on the target being built, so an
+// expectation is reported unfulfilled on the target where it does not.
+#[allow(
+    clippy::unused_async,
+    reason = "mirrors the wasm signature so callers stay target-agnostic"
+)]
 pub async fn request_detailed(
     _method: Method,
     _path: &str,
@@ -417,10 +426,19 @@ mod tests {
 
     #[test]
     fn hydrate_map_preserves_the_non_ready_states() {
-        assert_eq!(Hydrate::Ready(2_u8).map(|value| value * 2), Hydrate::Ready(4_u8));
-        assert_eq!(Hydrate::<u8>::Loading.map(|value| value * 2), Hydrate::Loading);
+        assert_eq!(
+            Hydrate::Ready(2_u8).map(|value| value * 2),
+            Hydrate::Ready(4_u8)
+        );
+        assert_eq!(
+            Hydrate::<u8>::Loading.map(|value| value * 2),
+            Hydrate::Loading
+        );
         let failed = Hydrate::<u8>::Failed(ApiError::Body);
-        assert_eq!(failed.map(|value| value * 2), Hydrate::Failed(ApiError::Body));
+        assert_eq!(
+            failed.map(|value| value * 2),
+            Hydrate::Failed(ApiError::Body)
+        );
     }
 
     #[test]
@@ -463,8 +481,12 @@ mod tests {
     #[test]
     fn only_transient_failures_offer_a_retry() {
         // Offering to retry a 404 or a 403 is a false promise: neither changes on its own.
-        for error in [ApiError::Network, ApiError::Body, ApiError::Status(429), ApiError::Status(503)]
-        {
+        for error in [
+            ApiError::Network,
+            ApiError::Body,
+            ApiError::Status(429),
+            ApiError::Status(503),
+        ] {
             assert!(error.is_retryable(), "{error:?}");
         }
         for error in [
@@ -484,7 +506,10 @@ mod tests {
         assert!(!Save::Idle.is_saving());
         assert!(Save::Saving.is_saving());
         assert!(Save::Saved.failure().is_none());
-        assert_eq!(Save::Failed(ApiError::Network).failure(), Some(ApiError::Network));
+        assert_eq!(
+            Save::Failed(ApiError::Network).failure(),
+            Some(ApiError::Network)
+        );
         assert!(!Save::Failed(ApiError::Network).is_saving());
     }
 
@@ -500,15 +525,24 @@ mod tests {
     #[test]
     fn a_shape_change_upstream_becomes_a_body_error() {
         // Not a panic, and not a default value that would render as real data.
-        assert_eq!(decode::<Vec<u8>>("{\"not\":\"an array\"}").unwrap_err(), ApiError::Body);
+        assert_eq!(
+            decode::<Vec<u8>>("{\"not\":\"an array\"}").unwrap_err(),
+            ApiError::Body
+        );
         assert_eq!(decode::<Vec<u8>>("truncated").unwrap_err(), ApiError::Body);
-        assert_eq!(decode::<Vec<u8>>("[1,2,3]").unwrap_or_default(), vec![1, 2, 3]);
+        assert_eq!(
+            decode::<Vec<u8>>("[1,2,3]").unwrap_or_default(),
+            vec![1, 2, 3]
+        );
     }
 
     #[test]
     fn bodies_round_trip() {
         let encoded = encode(&vec![1_u8, 2, 3]).unwrap_or_default();
         assert_eq!(encoded, "[1,2,3]");
-        assert_eq!(decode::<Vec<u8>>(&encoded).unwrap_or_default(), vec![1, 2, 3]);
+        assert_eq!(
+            decode::<Vec<u8>>(&encoded).unwrap_or_default(),
+            vec![1, 2, 3]
+        );
     }
 }

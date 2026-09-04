@@ -28,22 +28,24 @@ use super::spec::{ConfigFile, Format, Root};
 use super::toml_text;
 use super::write;
 
-/// The default key upstream writes when a request omits one.
+/// The default key written when a request omits one.
 ///
-/// Only some tools do this — copilot, opencode, droid and grok-build — and it is a placeholder,
-/// not a credential: those tools reject an empty key outright, so upstream gives them something
-/// syntactically valid to hold.
+/// Only some tools need it — copilot, opencode, droid and grok-build — and it is a placeholder, not
+/// a credential: those tools reject an empty key outright, so they are given something
+/// syntactically valid to hold until a real key is applied.
 pub(crate) const PLACEHOLDER_KEY: &str = "sk_9router";
 
 /// The provider name this router registers itself under in every config it writes.
 ///
-/// Load-bearing: it is what [`super::spec`]'s markers grep for, and what a config written by
-/// upstream already contains. Renaming it would make this port stop recognising configs it wrote.
-const PROVIDER: &str = "9router";
+/// An external wire contract, and the one literal in this module that must never be renamed: it is
+/// what [`super::spec`]'s markers grep for, and it is already sitting in the config files of every
+/// user who set their tools up before switching. Renaming it makes this port stop recognising a
+/// configured tool, and makes each tool stop resolving the models written against it.
+pub(crate) const PROVIDER: &str = "9router";
 
-/// The display name, which is capitalised differently from [`PROVIDER`] and is also matched
-/// exactly — copilot searches its array for `name === "9Router"`.
-const DISPLAY: &str = "9Router";
+/// The display name, capitalised differently from [`PROVIDER`] and matched just as exactly —
+/// copilot searches its config array for an entry whose `name` equals this. Also not renameable.
+pub(crate) const DISPLAY: &str = "9Router";
 
 /// One request body, covering every field any tool reads.
 ///
@@ -613,7 +615,7 @@ fn opencode_revoke(document: &mut Value) {
     }
 }
 
-/// A model name in `9router/{model}` form, which opencode and openclaw both use.
+/// A model name in `<provider>/{model}` form, which opencode and openclaw both use.
 fn qualified(model: &str) -> String {
     format!("{PROVIDER}/{model}")
 }
@@ -628,15 +630,16 @@ fn is_qualified(value: Option<&Value>) -> bool {
 // Factory Droid — ~/.factory/settings.json, customModels as an array
 // ---------------------------------------------------------------------------------------------
 
-/// The id prefix droid entries carry. Matched by **prefix**, not equality: the entries are
-/// `custom:9Router-0`, `-1`, and so on, so an equality test would miss every one of them.
-const DROID_ID_PREFIX: &str = "custom:9Router";
+/// The id prefix droid entries carry, built on [`DISPLAY`] and so equally fixed. Matched by
+/// **prefix**, not equality: the entries are `custom:9Router-0`, `-1`, and so on, so an equality
+/// test would miss every one of them.
+pub(crate) const DROID_ID_PREFIX: &str = "custom:9Router";
 
 /// Droid's own placeholder, which is **not** [`PLACEHOLDER_KEY`].
 ///
-/// Upstream writes `"your_api_key"` here where it writes `sk_9router` elsewhere. Kept as upstream
-/// has it: the string is what a user sees in their settings file when they applied without a key,
-/// and changing it would make this port's output differ from the dashboard that wrote it.
+/// Droid's settings file wants `"your_api_key"` where the others take `sk_9router`. It stays that
+/// spelling because it is what a user sees in their own settings file after applying without a key,
+/// and because droid's model picker treats it as the "no key yet" sentinel.
 const DROID_PLACEHOLDER_KEY: &str = "your_api_key";
 
 /// Rebuilds the router's entries, leaving the user's other custom models alone.
@@ -794,16 +797,16 @@ const HERMES_KEY_VAR: &str = "OPENAI_API_KEY";
 
 /// Points the `openai` provider here and selects it.
 ///
-/// Note what is *not* written: no `9router` string appears anywhere in this file. That is why
-/// [`super::spec`]'s deepseek marker tests `provider == "openai"` plus a local `base_url` instead
-/// of grepping for a name — a text search would report "not configured" straight after this
-/// succeeds.
+/// Note what is *not* written: the provider name appears nowhere in this file, because DeepSeek TUI
+/// only speaks OpenAI. That is why [`super::spec`]'s deepseek marker tests `provider == "openai"`
+/// plus a local `base_url` instead of grepping for a name — a text search would report "not
+/// configured" straight after this succeeds.
 ///
-/// DIVERGENCE: this merges where upstream replaces. Upstream's apply writes a freshly built file
-/// containing only these four keys, and its revoke writes a two-line default, so either one throws
-/// away a user's other provider sections and any unrelated settings. The backup this port takes
-/// makes that survivable rather than fine. Merging reaches the same end state — the provider is
-/// selected and points here — without deleting configuration nobody asked it to touch.
+/// This merges rather than replaces. Writing a fresh file with only these four keys, or a two-line
+/// default on revoke, would throw away the user's other provider sections and any unrelated
+/// settings; the backup taken beforehand makes that survivable, not fine. Merging reaches the same
+/// end state — the provider is selected and points here — without deleting configuration nobody
+/// asked it to touch.
 fn deepseek_apply(document: &mut Value, payload: &Payload) {
     write::set_path(document, &["provider"], Value::String("openai".to_owned()));
     write::set_path(
@@ -847,17 +850,17 @@ fn deepseek_revoke(document: &mut Value) {
     }
 }
 
-/// The local-URL test upstream uses for deepseek and hermes: `/localhost|127\.0\.0\.1|0\.0\.0\.0/`.
+/// The local-URL test for deepseek and hermes: localhost, `127.0.0.1`, or `0.0.0.0`.
 ///
-/// A different set from the one cline and kilo use — it accepts `0.0.0.0` and does not accept a
-/// `9router` hostname. [`super::spec`] keeps the two apart for the same reason, and merging them
+/// A different set from the one cline and kilo use — it accepts `0.0.0.0` and does not accept the
+/// provider hostname. [`super::spec`] keeps the two apart for the same reason, and merging them
 /// here would make a revoke delete a section the status route does not consider ours.
 fn points_at_a_local_router(url: &str) -> bool {
     url.contains("localhost") || url.contains("127.0.0.1") || url.contains("0.0.0.0")
 }
 
 // ---------------------------------------------------------------------------------------------
-// jcode — ~/.jcode/config.toml + $XDG_CONFIG_HOME/jcode/provider-9router.env
+// jcode — ~/.jcode/config.toml + the provider env file under $XDG_CONFIG_HOME/jcode
 // ---------------------------------------------------------------------------------------------
 
 /// jcode's key is not in this file: `api_key_env` and `env_file` name where to find it.
@@ -904,7 +907,15 @@ fn jcode_env_revoke(document: &mut Value) {
     *document = Value::String(write::remove_env(text, JCODE_KEY_VAR));
 }
 
+/// The env var jcode looks the key up in, named in the config's `api_key_env`.
+///
+/// An external wire contract twice over: jcode reads this exact variable, and a config already on
+/// disk names this exact spelling. Renaming it leaves the old variable set in the user's `.env`
+/// forever, because revoke removes the name it knows.
 const JCODE_KEY_VAR: &str = "JCODE_9ROUTER_API_KEY";
+
+/// The file jcode loads that variable from, named in the config's `env_file`. Fixed for the same
+/// reason as [`JCODE_KEY_VAR`]: an existing config points at this filename.
 const JCODE_ENV_FILE: &str = "provider-9router.env";
 
 // ---------------------------------------------------------------------------------------------
@@ -916,7 +927,7 @@ const OPENCLAW_PLACEHOLDER_KEY: &str = "your_api_key";
 
 /// The provider entry, the default model, and the allowlist that gates it.
 ///
-/// Three things have to agree or the model is written but unusable: `models.providers.9router`
+/// Three things have to agree or the model is written but unusable: `models.providers.<provider>`
 /// supplies the endpoint, `agents.defaults.model.primary` selects it, and
 /// `agents.defaults.models` is an allowlist that OpenClaw checks the selection against. Writing
 /// the first two without the third leaves a config that looks right and refuses to run.
@@ -942,7 +953,7 @@ fn openclaw_apply(document: &mut Value, payload: &Payload) {
         }
     }
 
-    // Stale `9router/*` entries go first, so a re-apply that drops a model drops its allowance too.
+    // Stale entries of ours go first, so a re-apply that drops a model drops its allowance too.
     retain_unqualified(document);
 
     write::set_path(
@@ -1035,7 +1046,7 @@ fn openclaw_revoke(document: &mut Value) {
     }
 }
 
-/// Drop every `9router/*` key from the default allowlist.
+/// Drop every key qualified with this router's provider prefix from the default allowlist.
 fn retain_unqualified(document: &mut Value) {
     let Some(models) = document
         .get_mut("agents")
@@ -1142,10 +1153,11 @@ fn openclaw_agent_models(
 // Grok Build — ~/.grok/config.toml, edited as text
 // ---------------------------------------------------------------------------------------------
 
-/// The slot this router's main model occupies. `[model.9router]`, selected by `[models] default`.
+/// The slot this router's main model occupies: the `[model.<provider>]` section, selected by
+/// `[models] default`.
 const GROK_MAIN_SLOT: &str = PROVIDER;
 
-/// The subagent kinds upstream offers, each with its own `9router-{type}` slot.
+/// The subagent kinds Grok Build offers, each getting its own `<provider>-{kind}` slot.
 const GROK_SUBAGENT_TYPES: &[&str] = &["general-purpose", "explore", "plan"];
 
 /// Written into a subagent marker when there was no previous value to remember.
@@ -1153,6 +1165,9 @@ const GROK_SUBAGENT_TYPES: &[&str] = &["general-purpose", "explore", "plan"];
 /// A marker has to distinguish "was set to X" from "was not set", because restoring the latter
 /// means deleting the key rather than writing an empty string — and an empty string is a value Grok
 /// Build would try to resolve as a model name.
+///
+/// The spelling is fixed: it is written into the user's own config file and read back by a later
+/// revoke, so renaming it strands every marker already on disk.
 const GROK_UNSET_SENTINEL: &str = "__9router_unset__";
 
 /// Grok Build's own built-in default, restored when there is no remembered one.
@@ -1172,8 +1187,8 @@ fn grok_section(slot: &str) -> String {
 /// Upserts the model section, selects it, and remembers what was selected before.
 ///
 /// The remembering is the reason this file is edited as text: the previous default is stored in a
-/// `# 9router-prev-default` comment, which a parse and re-serialise would drop — turning every
-/// later revoke into "reset to the built-in default" and losing the user's own choice.
+/// TOML *comment* (see [`GROK_PREV_DEFAULT`]), which a parse and re-serialise would drop — turning
+/// every later revoke into "reset to the built-in default" and losing the user's own choice.
 fn grok_apply(document: &mut Value, payload: &Payload) {
     let mut text = document.as_str().unwrap_or_default().to_owned();
     let base = payload.base_v1();
@@ -1247,7 +1262,7 @@ fn grok_revoke(document: &mut Value) {
     *document = Value::String(toml_text::collapse_blank_runs(&text));
 }
 
-/// The lines of a `[model.<slot>]` section, in upstream's order.
+/// The lines of a `[model.<slot>]` section, in the order Grok Build's own config uses.
 ///
 /// `api_backend = "chat_completions"` is fixed and load-bearing: it is what tells Grok Build to
 /// speak the chat-completions dialect to this endpoint rather than its own.
@@ -1263,15 +1278,14 @@ fn grok_section_fields(
         format!("model = {}", quote(model)),
         format!("base_url = {}", quote(base_url)),
         format!("name = {}", quote(name)),
-        format!("description = {}", quote("Routed via 9Router gateway")),
+        format!("description = {}", quote("Routed via nullrouter gateway")),
         "api_backend = \"chat_completions\"".to_owned(),
     ];
     if !api_key.is_empty() {
         fields.push(format!("api_key = {}", quote(api_key)));
     }
-    // Written only for a finite positive number, and floored — upstream's
-    // `Number.isFinite(w) && w > 0` then `Math.floor`. A zero or negative window would make Grok
-    // Build reject every request as over budget.
+    // Written only for a finite positive number, and floored. A zero or negative window would make
+    // Grok Build reject every request as over budget, and a fractional one is not a token count.
     if let Some(window) = context_window.and_then(positive_whole_number) {
         fields.push(format!("context_window = {window}"));
     }
@@ -1292,8 +1306,14 @@ fn positive_whole_number(value: &Value) -> Option<u64> {
     Some(number.floor() as u64)
 }
 
+/// The comment marker holding the default that was selected before the first apply.
+///
+/// Written into the user's `config.toml` and read back by a later revoke, so the spelling is fixed:
+/// rename it and every marker already on disk becomes unreadable, which means a revoke silently
+/// resets the user to Grok Build's built-in default instead of restoring their own choice.
 const GROK_PREV_DEFAULT: &str = "9router-prev-default";
 
+/// Per-subagent equivalents of [`GROK_PREV_DEFAULT`], fixed for the same reason.
 fn grok_prev_subagent(kind: &str) -> String {
     format!("9router-prev-subagent-{kind}")
 }
@@ -1301,7 +1321,7 @@ fn grok_prev_subagent(kind: &str) -> String {
 /// Records the current default, unless one is already recorded or it is already ours.
 ///
 /// "Already recorded" matters: a second apply must not overwrite the user's original choice with
-/// `9router`, which is exactly what the first apply just set.
+/// this router's own slot, which is exactly what the first apply just selected.
 fn grok_remember_default(text: &str) -> String {
     if toml_text::read_marker(text, GROK_PREV_DEFAULT).is_some() {
         return text.to_owned();
@@ -1364,7 +1384,7 @@ fn grok_restore_subagent(text: &str, kind: &str) -> String {
 // Cowork — Claude Desktop's applied config, plus its MCP server list
 // ---------------------------------------------------------------------------------------------
 
-/// Upstream's provider value, which is `"gateway"` and not `"9router"`.
+/// The provider value cowork expects, which is `"gateway"` — *not* [`PROVIDER`].
 ///
 /// Getting this wrong reports every Cowork user as unconfigured; [`super::spec`]'s cowork marker
 /// tests the same string for the same reason.

@@ -1,9 +1,9 @@
 //! Provider registry, model resolution, and wire-format detection for the
 //! nullrouter Rust port.
 //!
-//! The registry data is dumped verbatim from the frozen 9Router reference in
-//! `inspire/open-sse/providers/registry/` so transports, auth descriptors, and
-//! model tables stay faithful to upstream rather than hand-transcribed.
+//! The registry data in [`registry`] is generated from a frozen reference dump
+//! rather than hand-transcribed, so transports, auth descriptors, and model
+//! tables cannot drift through a typo in a table nobody reads.
 
 pub mod capabilities;
 pub mod format;
@@ -32,8 +32,8 @@ pub use models_list::{
     ComboView, ConnectionView, LLM_KIND, ModelRow, ModelsListInput, build_models_list,
 };
 pub use registry::{
-    Auth, AuthSpec, Model, OAuth, Quirks, RegistryEntry, RetryEntry, Transport, entries, entry,
-    find_model, models_for_provider, normalize_model_id, resolve_provider_id, transport,
+    Auth, AuthSpec, Display, Model, OAuth, Quirks, RegistryEntry, RetryEntry, Transport, entries,
+    entry, find_model, models_for_provider, normalize_model_id, resolve_provider_id, transport,
 };
 pub use services::{
     ServiceEndpoint, ServiceKind, providers_for_service, service_endpoint, supports_service,

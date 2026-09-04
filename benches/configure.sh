@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Point nullrouter at the mock provider, the same way 9Router is pointed at it.
+# Point nullrouter at the mock provider using an imported fixture.
 #
-# It imports 9Router's own config rather than building an equivalent one by hand. That is
+# It imports an existing legacy config rather than building an equivalent one by hand. That is
 # the point: hand-writing "the same" two provider definitions is how a comparison quietly
-# stops being one. `/api/migrate/9router` reads ~/.9router directly, so both routers end up
+# stops being one. `/api/migrate/legacy` reads "~/$LEGACY_DATA_DIR" directly, so both routers end up
 # serving the same nodes with the same baseUrls.
 #
 # API keys are the one thing migration cannot carry: nullrouter stores a digest, so a
@@ -22,6 +22,8 @@ COOKIES="$(mktemp)"
 trap 'rm -f "$COOKIES"' EXIT
 
 DRY_RUN=false
+# External legacy data directory; this address belongs to the importer source and must not change.
+LEGACY_DATA_DIR=".9router"
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
 
 say() { echo "==> $*"; }
@@ -42,17 +44,17 @@ login="$(curl -s -c "$COOKIES" -X POST "$GATEWAY/api/auth/login" \
   -H 'content-type: application/json' -d "{\"password\":\"$PASSWORD\"}")"
 grep -q auth_token "$COOKIES" || fail "login failed: $login"
 
-# ── import 9Router's configuration ───────────────────────────────────────────
+# ── import legacy configuration ───────────────────────────────────────────
 if $DRY_RUN; then
   say "dry run: what would be imported"
-  curl -s -b "$COOKIES" -X POST "$GATEWAY/api/migrate/9router" \
+  curl -s -b "$COOKIES" -X POST "$GATEWAY/api/migrate/legacy" \
     -H 'content-type: application/json' -d '{"dryRun":true}'
   echo
   exit 0
 fi
 
-say "importing ~/.9router"
-report="$(curl -s -b "$COOKIES" -X POST "$GATEWAY/api/migrate/9router" \
+say "importing ~/$LEGACY_DATA_DIR"
+report="$(curl -s -b "$COOKIES" -X POST "$GATEWAY/api/migrate/legacy" \
   -H 'content-type: application/json' -d '{}')"
 echo "$report"
 
@@ -94,8 +96,8 @@ unauth="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$GATEWAY/v1/chat/compl
 # `requireApiKey` and silently dropped it -- the field was missing from `SettingsUpdate` -- so the
 # gateway enforced from its environment variable while the runtime did not enforce at all. The
 # warning went to stderr, the caller piped this script through `tail -1` to read the key, and the
-# benchmark measured one key check per request where 9Router did one too. Fair by accident, and
-# not what the script claimed. `fail`, not a warning, so the next such gap stops the run.
+# benchmark measured one key check per request where the baseline did one too. Fair by accident,
+# and not what the script claimed. `fail`, not a warning, so the next such gap stops the run.
 runtime_port="${NULLROUTER_RUNTIME_PORT:-20132}"
 runtime_unauth="$(curl -s -o /dev/null -w '%{http_code}' \
   -X POST "http://127.0.0.1:${runtime_port}/v1/chat/completions" \

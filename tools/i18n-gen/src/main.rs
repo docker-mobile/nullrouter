@@ -51,10 +51,14 @@ const SOURCE_LOCALE: &str = "en-US";
 
 /// The old branding, and what it is now.
 ///
-/// The pre-existing translations mention the upstream project by name in ordinary prose, and those
-/// mentions are branding rather than interop, so they are rewritten. This does *not* touch the
-/// config-marker strings elsewhere in the workspace, which are wire format and have to keep their
-/// original spelling to detect configs written by the upstream tool.
+/// Load-bearing in one direction only: the left-hand strings must keep this spelling because they
+/// are matched against translation files that still carry the old name, and both capitalisations
+/// appear in that prose. A translation carried over from such a file is rewritten on the way
+/// through, so a locale nobody has retranslated still reads correctly.
+///
+/// This applies to translated prose only. It does *not* touch the config-marker strings elsewhere
+/// in the workspace, which are wire format: those have to keep their spelling to recognise config
+/// files written by another program, and are documented as such where they are declared.
 const REBRAND: [(&str, &str); 2] = [("9Router", "nullrouter"), ("9router", "nullrouter")];
 
 fn main() -> ExitCode {
@@ -213,7 +217,7 @@ fn translate(
         .collect()
 }
 
-/// Replace upstream branding in translated prose.
+/// Replace the old branding in translated prose. See [`REBRAND`].
 fn rebrand(text: &str) -> String {
     let mut out = text.to_owned();
     for (from, to) in REBRAND {
@@ -435,19 +439,19 @@ mod tests {
     }
 
     #[test]
-    fn branding_is_rewritten_in_both_spellings() {
+    fn legacy_branding_is_rewritten_in_both_spellings() {
         assert_eq!(rebrand("9Router Hub"), "nullrouter Hub");
         assert_eq!(rebrand("via 9router"), "via nullrouter");
         assert_eq!(rebrand("9Router and 9router"), "nullrouter and nullrouter");
     }
 
     #[test]
-    fn text_without_branding_is_untouched() {
+    fn unrelated_text_is_untouched() {
         assert_eq!(rebrand("Annuler"), "Annuler");
     }
 
     #[test]
-    fn branding_is_rewritten_when_carrying_a_translation_over() {
+    fn legacy_branding_is_rewritten_when_carrying_a_translation_over() {
         let english = map(&[("mitm.notice", "Restart 9Router as Administrator")]);
         let existing = map(&[("Restart 9Router as Administrator", "9Router 재시작")]);
         let result = translate(&keys(&["mitm.notice"]), &english, &existing);

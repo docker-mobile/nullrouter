@@ -18,10 +18,10 @@
 *.wasm
 
 # ---- Upstream reference (not ours to vendor) ----
-# `inspire/` is a read-only clone of https://github.com/decolua/9router kept
-# locally as the parity reference. It carries its own .git, so it stays out of
-# this tree. Clone it yourself to work on parity:
-#   git clone https://github.com/decolua/9router inspire
+# `inspire/` is a read-only reference checkout kept locally. It carries its own
+# .git, so it stays out of this tree, and nothing in a build or test needs it --
+# the data generated from it is committed. `tools/extract-models-fetcher.py`
+# prints the clone command if you do need it.
 /inspire/
 
 # ---- Agent / tooling scratch ----

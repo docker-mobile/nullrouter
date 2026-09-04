@@ -31,6 +31,10 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 REGISTRY_JSON = REPO / "crates" / "providers" / "data" / "registry.json"
 UPSTREAM_REGISTRY = REPO / "inspire" / "open-sse" / "providers" / "registry"
 
+# The reference checkout's real clone URL. An external address, printed so a reader can
+# actually fetch it; it is not ours to rename.
+UPSTREAM_CLONE_URL = "https://github.com/decolua/9router"
+
 # `modelsFetcher: { url: "...", type: "..." }` on one line, which is how every entry is
 # written upstream. A multi-line entry would be missed, so the count is asserted below.
 FETCHER = re.compile(
@@ -48,7 +52,7 @@ def extract() -> dict[str, dict[str, str]]:
     if not UPSTREAM_REGISTRY.is_dir():
         sys.exit(
             f"no upstream checkout at {UPSTREAM_REGISTRY}.\n"
-            "  git clone https://github.com/decolua/9router inspire"
+            f"  git clone {UPSTREAM_CLONE_URL} inspire"
         )
 
     found: dict[str, dict[str, str]] = {}

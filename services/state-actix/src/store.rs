@@ -1317,10 +1317,12 @@ impl StateStore {
         })
     }
 
-    /// Create a combo during a 9Router import, preserving its original name.
+    /// Create a combo during a legacy import, preserving its original name.
     ///
-    /// Separate from `create_combo` so an import can carry the upstream `kind`
-    /// and model list without going through request validation.
+    /// Separate from `create_combo` so an import can carry the `kind` and model
+    /// list it read verbatim, without going through request validation. An
+    /// imported combo is existing configuration, not a new request: rejecting it
+    /// would drop a working combo rather than correct it.
     pub(crate) fn create_combo_from_import(
         &self,
         name: &str,
@@ -1342,7 +1344,7 @@ impl StateStore {
         })
     }
 
-    /// Apply settings read from a 9Router install.
+    /// Apply settings read from a legacy install.
     ///
     /// Only keys with a nullrouter equivalent are taken; anything else is
     /// ignored rather than guessed at.
@@ -1352,8 +1354,8 @@ impl StateStore {
     ) -> Result<(), StoreError> {
         let boolean = |key: &str| imported.get(key).and_then(Value::as_bool);
         let text = |key: &str| imported.get(key).and_then(Value::as_str).map(str::to_owned);
-        // 9Router stores this as a JSON number, but a SQLite settings row can
-        // carry it as text, so both spellings are read.
+        // The source stores this as a JSON number, but the same value arrives as
+        // text when it came out of a SQLite settings row, so both are read.
         let count = |key: &str| {
             imported
                 .get(key)
@@ -1404,7 +1406,8 @@ impl StateStore {
             if let Some(value) = count("stickyRoundRobinLimit") {
                 snapshot.settings.sticky_round_robin_limit = value;
             }
-            // Dashboard SSO configuration, under the same keys 9Router uses.
+            // Dashboard SSO configuration. These key spellings are the imported
+            // settings blob's own, so they are matched as-is.
             for (key, target) in [
                 ("oidcIssuerUrl", &mut snapshot.settings.oidc_issuer_url),
                 ("oidcClientId", &mut snapshot.settings.oidc_client_id),
@@ -1744,9 +1747,9 @@ pub(crate) struct SettingsUpdate {
     /// Whether `/v1` requires a managed API key.
     ///
     /// Was missing here, which meant `PUT /api/settings` accepted `{"requireApiKey": true}`,
-    /// answered 200, and changed nothing — the field was only reachable through a 9Router import.
-    /// Upstream's `PATCH /api/settings` passes its whole body to `updateSettings`, so the toggle
-    /// works there; a dashboard switch that silently does nothing is worse than one that is absent.
+    /// answered 200, and changed nothing — the only way to set it was a legacy import. A dashboard
+    /// switch that silently does nothing is worse than one that is absent, so every settable
+    /// setting needs its field here.
     pub require_api_key: Option<bool>,
     pub tunnel_dashboard_access: Option<bool>,
     pub tunnel_url: Option<String>,

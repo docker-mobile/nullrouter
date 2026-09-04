@@ -308,15 +308,15 @@ impl StateClient {
         }
     }
 
-    /// Trigger a 9Router import in the state service.
+    /// Trigger a legacy import in the state service.
     ///
     /// Returns the raw report so the dashboard can show exactly what landed.
-    pub(crate) async fn migrate_from_9router(
+    pub(crate) async fn migrate_from_legacy(
         &self,
         data_dir: Option<&str>,
         dry_run: bool,
     ) -> Option<(u16, Value)> {
-        let url = format!("{}/internal/v1/migrate/9router", self.base);
+        let url = format!("{}/internal/v1/migrate/legacy", self.base);
         let payload = serde_json::json!({ "dataDir": data_dir, "dryRun": dry_run });
         // An import walks a whole database, so it gets a longer budget than a
         // dashboard read.
@@ -327,7 +327,7 @@ impl StateClient {
             .json(&payload)
             .send()
             .await
-            .inspect_err(|error| tracing::warn!(%error, "9router import unreachable"))
+            .inspect_err(|error| tracing::warn!(%error, "legacy import unreachable"))
             .ok()?;
         let status = response.status().as_u16();
         let body = response.json::<Value>().await.ok()?;

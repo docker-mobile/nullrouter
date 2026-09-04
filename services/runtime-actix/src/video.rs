@@ -36,9 +36,10 @@ const DEFAULT_VIDEO_PROVIDER: &str = "xai";
 
 /// Header naming the account a job belongs to.
 ///
-/// Emitted on every answer and read back on a poll. The name matches 9Router so an
-/// existing client keeps working; `x-connection-id` is also accepted inbound,
-/// because that is what upstream's own clients send.
+/// An external wire contract: emitted on every answer and read back on a poll, so a client that
+/// captured it from an earlier response has to find the same name on the next one. Renaming it
+/// breaks every existing client mid-job. The shorter `x-connection-id` is also accepted inbound,
+/// because some clients send that instead.
 pub(crate) const CONNECTION_HEADER: &str = "x-9router-connection-id";
 
 /// Which creation failures may be retried against another account.

@@ -362,6 +362,6 @@ mod tests {
             super::on_path("sh").is_some(),
             "PATH lookup failed for a binary that must exist"
         );
-        assert!(super::on_path("definitely-not-a-real-binary-9router").is_none());
+        assert!(super::on_path("definitely-not-a-real-binary-nullrouter").is_none());
     }
 }

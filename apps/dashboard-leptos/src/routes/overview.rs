@@ -1,20 +1,17 @@
 //! Service health, version, and the switches that decide how requests are handled.
-//!
-//! Reads `/api/version` and `/api/settings`, whose response types come from
-//! `nullrouter-contracts` -- the same types the services serialize, so a field renamed there is a
-//! compile error here rather than a panel that silently renders nothing.
 
 use leptos::prelude::*;
-use nullrouter_contracts::{SettingsResponse, VersionResponse};
+use nullrouter_contracts::VersionResponse;
 
 use crate::api::{Hydrate, load};
+use crate::routes::types::SettingsView;
 use crate::routes::{PageHeader, Panel};
 
 #[component]
 pub fn Overview() -> impl IntoView {
     let locale = crate::i18n::use_locale();
     let (version, set_version) = signal(Hydrate::<VersionResponse>::Loading);
-    let (settings, set_settings) = signal(Hydrate::<SettingsResponse>::Loading);
+    let (settings, set_settings) = signal(Hydrate::<SettingsView>::Loading);
 
     let reload = move || {
         set_version.set(Hydrate::Loading);
@@ -43,14 +40,13 @@ pub fn Overview() -> impl IntoView {
                 <Panel
                     state=settings
                     on_retry=Callback::new(move |()| reload())
-                    children=|data: SettingsResponse| view! { <SettingsSummary data=data /> }
+                    children=|data: SettingsView| view! { <SettingsSummary data=data /> }
                 />
             </Card>
         </div>
     }
 }
 
-/// A titled surface.
 #[component]
 fn Card(title: String, children: Children) -> impl IntoView {
     view! {
@@ -64,8 +60,6 @@ fn Card(title: String, children: Children) -> impl IntoView {
 #[component]
 fn VersionBody(data: VersionResponse) -> impl IntoView {
     let locale = crate::i18n::use_locale();
-    // `latestVersion` is null when the update check has not run or could not reach the network.
-    // That is not the same as "up to date", so it is reported as unknown rather than as current.
     let latest = data.latest_version.clone();
 
     view! {
@@ -105,7 +99,7 @@ fn VersionBody(data: VersionResponse) -> impl IntoView {
 }
 
 #[component]
-fn SettingsSummary(data: SettingsResponse) -> impl IntoView {
+fn SettingsSummary(data: SettingsView) -> impl IntoView {
     let locale = crate::i18n::use_locale();
 
     view! {
@@ -114,18 +108,23 @@ fn SettingsSummary(data: SettingsResponse) -> impl IntoView {
                 label=locale.get("settings.require_api_key").to_owned()
                 on=data.require_api_key
             />
-            <Row label=locale.get("settings.request_logs").to_owned() on=data.enable_request_logs />
-            <Row label=locale.get("settings.translator").to_owned() on=data.enable_translator />
-            <Row label=locale.get("settings.password_set").to_owned() on=data.has_password />
-            <Row label=locale.get("settings.oidc").to_owned() on=data.oidc_configured />
+            <Row
+                label=locale.get("settings.tunnel_dashboard").to_owned()
+                on=data.tunnel_dashboard_access
+            />
+            <Row
+                label=locale.get("settings.outbound_proxy").to_owned()
+                on=data.outbound_proxy_enabled
+            />
+            <Row label=locale.get("settings.pxpipe").to_owned() on=data.pxpipe_enabled />
+            <Row
+                label=locale.get("settings.oidc").to_owned()
+                on=data.oidc_client_secret_set || !data.oidc_client_id.is_empty()
+            />
         </dl>
     }
 }
 
-/// One on/off fact.
-///
-/// A dot rather than a checkbox: these are read-only here, and a checkbox would invite a click that
-/// does nothing. The Settings section owns changing them.
 #[component]
 fn Row(label: String, on: bool) -> impl IntoView {
     let locale = crate::i18n::use_locale();

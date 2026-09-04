@@ -12,10 +12,31 @@ use actix_web::{
     test, web,
 };
 use serde_json::Value;
+use std::sync::OnceLock;
 
 use nullrouter_api::{AppConfig, RuntimeClient, StateClient, TunnelManager, configure};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+/// Turn off binary discovery for this whole test binary, so "not installed" is a declared
+/// precondition rather than a property of the machine the suite happens to run on.
+///
+/// Every case here asserts the not-installed path. Reading that from the host meant the answers
+/// depended on whether `cloudflared` was present: on a machine that had it, two cases stopped
+/// exercising argument handling and started opening real Cloudflare quick tunnels, leaving a public
+/// URL alive after the run. Discovery off still produces a genuine `NotFound`, so the message these
+/// cases pin -- naming the binary and saying this service never downloads it -- keeps its coverage.
+///
+/// Set once for the binary and never restored, because every case wants the same answer. That is
+/// what removes the need for a lock: no case can observe a different value than another.
+fn discovery_off() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        // SAFETY: `get_or_init` runs this exactly once, and no case in this binary reads the
+        // variable before calling this function.
+        unsafe { std::env::set_var(nullrouter_procctl::binary::DISCOVERY_VAR, "off") };
+    });
+}
 
 /// A closed loopback port: usage reads fall back to the zeroed shape,
 /// so these parity tests need no state service.
@@ -105,7 +126,7 @@ async fn cli_tool_routes_report_what_is_actually_on_the_machine() -> TestResult 
             .get("settings")
             .is_none_or(serde_json::Value::is_null)
         {
-            assert_eq!(field(status, "has9Router")?, false, "{tool}");
+            assert_eq!(field(status, "hasRouter")?, false, "{tool}");
         }
         // And the path inspected is always named, so a user knows where to look.
         assert!(status.get("configPath").is_some() || !installed, "{tool}");
@@ -129,6 +150,7 @@ async fn cli_tool_routes_report_what_is_actually_on_the_machine() -> TestResult 
 
 #[actix_rt::test]
 async fn headroom_and_tunnel_routes_return_safe_defaults() -> TestResult {
+    discovery_off();
     // Given: neither the headroom binary, cloudflared nor tailscale is installed on this
     // machine. All three route families are real now, so what they must do here is name the
     // missing dependency rather than claim the feature does not exist.

@@ -9,7 +9,10 @@
 // `!Send`. That is a property of the platform -- wasm32 is single-threaded and there is no other
 // thread to send a future to -- not something callers here could fix, so the nursery lint asking
 // for `Send` futures cannot be satisfied in a browser crate.
-#![allow(clippy::future_not_send, reason = "wasm32 is single-threaded; JsFuture is !Send")]
+#![allow(
+    clippy::future_not_send,
+    reason = "wasm32 is single-threaded; JsFuture is !Send"
+)]
 
 pub mod api;
 pub mod i18n;
@@ -18,16 +21,16 @@ pub mod shell;
 pub mod theme;
 
 /// Mount the dashboard into the document body.
-#[cfg(target_arch = "wasm32")]
+///
+/// Named `start` rather than `main` so `cargo test --target wasm32-unknown-unknown` can
+/// compile: the test harness already emits a `main`, and a second one fails with
+/// "entry symbol `main` declared multiple times".
+#[cfg(all(target_arch = "wasm32", not(test)))]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
-pub fn main() {
+pub fn start() {
     console_error_panic_hook::set_once();
     leptos::mount::mount_to_body(App);
 }
-
-/// Native builds have no document to mount into.
-#[cfg(not(target_arch = "wasm32"))]
-pub const fn main() {}
 
 /// The application root: providers, then the router.
 ///
@@ -38,7 +41,7 @@ pub const fn main() {}
 #[leptos::component]
 pub fn App() -> impl leptos::IntoView {
     use leptos::prelude::*;
-    use leptos_router::components::{Route, Router, Routes};
+    use leptos_router::components::{ParentRoute, Route, Router, Routes};
     use leptos_router::path;
 
     theme::provide_theme();
@@ -59,16 +62,19 @@ pub fn App() -> impl leptos::IntoView {
                 locale.get().map(|_| {
                     view! {
                         <Router>
-                            <shell::Shell>
-                                <Routes fallback=routes::NotFound>
-                                    <Route path=path!("/dashboard") view=routes::Overview />
-                                    <Route path=path!("/dashboard/routing") view=routes::Routing />
-                                    <Route path=path!("/dashboard/keys") view=routes::Keys />
-                                    <Route path=path!("/dashboard/usage") view=routes::Usage />
-                                    <Route path=path!("/dashboard/logs") view=routes::Logs />
-                                    <Route path=path!("/dashboard/settings") view=routes::Settings />
-                                </Routes>
-                            </shell::Shell>
+                            <Routes fallback=routes::NotFound>
+                                <Route path=path!("/login") view=routes::Login />
+                                <Route path=path!("/callback") view=routes::Callback />
+                                <ParentRoute path=path!("/dashboard") view=shell::DashboardFrame>
+                                    <Route path=path!("") view=routes::Overview />
+                                    <Route path=path!("providers") view=routes::Providers />
+                                    <Route path=path!("keys") view=routes::Keys />
+                                    <Route path=path!("usage") view=routes::Usage />
+                                    <Route path=path!("logs") view=routes::Logs />
+                                    <Route path=path!("settings") view=routes::Settings />
+                                    <Route path=path!("*rest") view=routes::StatusPage />
+                                </ParentRoute>
+                            </Routes>
                         </Router>
                     }
                 })

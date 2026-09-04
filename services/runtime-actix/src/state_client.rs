@@ -217,9 +217,9 @@ pub(crate) struct StateClient {
     /// against a total router overhead of 14.3ms.
     ///
     /// A short TTL rather than invalidation-on-write: the three reads happen microseconds apart, so
-    /// any TTL above a millisecond collapses them, and 9Router re-reads its own SQLite config on
-    /// every request too. 250ms bounds how long a dashboard change takes to take effect, which is
-    /// below the point a user would notice, and it needs no wiring between services.
+    /// any TTL above a millisecond collapses them. 250ms bounds how long a dashboard change takes to
+    /// take effect, which is below the point a user would notice, and it needs no invalidation
+    /// wiring between services to stay correct.
     context: std::sync::Arc<std::sync::RwLock<Option<(std::time::Instant, RoutingContext)>>>,
     /// Bounds how many spawned usage POSTs can be awaiting state at once.
     ///

@@ -1,28 +1,31 @@
 //! Which CLI coding tools exist, where each keeps its config, and how to tell if we are in it.
 //!
-//! One table rather than fourteen handlers. Every field here was read out of the corresponding
-//! `src/app/api/cli-tools/<tool>-settings/route.js` upstream — the paths in particular are not
-//! guesses, because a wrong path means writing a config file into a directory some other program
-//! owns.
+//! One table rather than fourteen handlers. Every field here describes a file some other program
+//! owns, so none of it is guesswork: a wrong path means writing a config file into a directory
+//! that belongs to someone else, and a wrong marker means reporting the wrong state for a tool
+//! that is perfectly well configured.
 //!
 //! # Why the markers are function pointers
 //!
-//! `has9Router` drives a toggle in the dashboard, so a check that is merely plausible shows the
-//! user the wrong state. Upstream's checks do not share a shape: cline ANDs a provider field with
-//! a URL test, copilot's config is a top-level array searched by name, openclaw nests two levels
-//! deep, cowork compares an enum field. Rather than bend those into one enum, each is transcribed
-//! as a small function next to a comment naming the upstream line it came from.
+//! The `hasRouter` flag drives a toggle in the dashboard, so a check that is merely plausible
+//! shows the user something false. The fourteen checks do not share a shape: cline ANDs a provider
+//! field with a URL test, copilot's config is a top-level array searched by name, openclaw nests
+//! two levels deep, cowork compares an enum field, deepseek-tui has no mention of this router in
+//! its config at all. Rather than bend those into one enum, each is a small function beside a
+//! comment recording the field it reads and why that field and not the obvious one.
 //!
 //! # The `tool` path segment is not a path component
 //!
 //! `GET /api/cli-tools/{tool}` takes a caller-supplied string, and the route reads and writes
 //! files in the user's home directory. So `{tool}` is resolved through [`Tool::parse`] against
-//! this fixed table and never joined into a path. A tool this port does not know is a 404, not a
-//! filesystem lookup — otherwise `../../../etc/passwd` would be a config path.
+//! this fixed table and never joined into a path. An unknown tool is a 404, not a filesystem
+//! lookup — otherwise `../../../etc/passwd` would be a config path.
 
 use std::path::PathBuf;
 
 use serde_json::Value;
+
+use super::mutations::{DISPLAY, PROVIDER};
 
 /// The config file format, which decides how a merge is done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,27 +229,26 @@ fn home_dir() -> Option<PathBuf> {
 pub(crate) enum Writable {
     /// Apply and revoke are implemented.
     Yes,
-    /// Read-only here because upstream exposes no mutation either — `devin` has only a `GET`. This
-    /// is parity, not a gap.
-    NoUpstreamHasNoneEither,
+    /// Read-only because the tool exposes no way to apply a config that this port could drive —
+    /// `devin` can only be reported on. A deliberate limit, not an unfinished writer.
+    NoMutationAvailable,
 }
 
 /// Does a string look like it points at a local router?
 ///
-/// Upstream's test, used by cline and kilo: `baseUrl.includes("localhost") ||
-/// includes("127.0.0.1") || includes("9router")`. Kept as-is including the `9router` spelling,
-/// because a user who configured their tool through upstream has that string in their file and
-/// this port must recognise it.
+/// Used by cline and kilo. The [`PROVIDER`] spelling counts as a match because it is a hostname a
+/// user may have configured — a tool set up before switching has that string in its `baseUrl`, and
+/// failing to recognise it would report a configured tool as unconfigured.
 fn looks_like_router_url(url: &str) -> bool {
-    url.contains("localhost") || url.contains("127.0.0.1") || url.contains("9router")
+    url.contains("localhost") || url.contains("127.0.0.1") || url.contains(PROVIDER)
 }
 
-/// The other local-URL test upstream uses, in hermes and deepseek-tui.
+/// The other local-URL test, used by hermes and deepseek-tui.
 ///
-/// A different set from [`looks_like_router_url`]: this one is `/localhost|127\.0\.0\.1|0\.0\.0\.0/`
-/// — it accepts `0.0.0.0` and does not accept a `9router` hostname. Kept as two functions rather
-/// than merged into one union, because merging them would make each tool report a state its own
-/// upstream route would not.
+/// Deliberately a different set from [`looks_like_router_url`]: this one accepts `0.0.0.0` and does
+/// *not* accept the provider hostname. Kept as two functions rather than merged into their union,
+/// because each tool decides for itself what counts as local, and a merged test would report a
+/// state neither tool's own configuration implies.
 fn is_local_base_url(url: &str) -> bool {
     url.contains("localhost") || url.contains("127.0.0.1") || url.contains("0.0.0.0")
 }
@@ -265,8 +267,7 @@ fn string_at(value: &Value, path: &[&str]) -> String {
 
 /// Every tool the dashboard can ask about.
 ///
-/// Ordered as upstream's `all-statuses` reports them, so a diff against that response reads
-/// straightforwardly.
+/// The order is the order `all-statuses` reports them in, which is what the dashboard renders.
 pub(crate) const TOOLS: &[Tool] = &[
     Tool {
         id: "claude-settings",
@@ -294,9 +295,10 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Toml,
             indirect: None,
         }),
-        // Upstream greps the raw text for either of these rather than reasoning over the parsed
-        // tree, so a file where the provider block exists but is not selected still counts. That
-        // distinction is upstream's to make, so it is preserved.
+        // Matched against the raw text rather than the parsed tree, so a file where the provider
+        // block exists but is not the selected one still counts as configured. That is the more
+        // useful answer: the block is there because an apply put it there, and the dashboard's
+        // toggle is about whether this router is set up, not whether it is currently in use.
         marker: Marker::Text(|text| {
             text.contains("model_provider = \"9router\"")
                 || text.contains("[model_providers.9router]")
@@ -313,11 +315,11 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Json,
             indirect: None,
         }),
-        // `config.provider["9router"]`
+        // A provider entry keyed by name under the top-level `provider` map.
         marker: Marker::Json(|config| {
             config
                 .get("provider")
-                .and_then(|providers| providers.get("9router"))
+                .and_then(|providers| providers.get(PROVIDER))
                 .is_some()
         }),
         writable: Writable::Yes,
@@ -332,7 +334,8 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Json,
             indirect: None,
         }),
-        // `settings.customModels.some(m => m.id?.startsWith("custom:9Router"))`
+        // Droid numbers its custom model ids — `custom:9Router-0`, `-1` — so this is a prefix test
+        // over `customModels`, never an equality one.
         marker: Marker::Json(|settings| {
             settings
                 .get("customModels")
@@ -342,7 +345,7 @@ pub(crate) const TOOLS: &[Tool] = &[
                         model
                             .get("id")
                             .and_then(Value::as_str)
-                            .is_some_and(|id| id.starts_with("custom:9Router"))
+                            .is_some_and(|id| id.starts_with(super::mutations::DROID_ID_PREFIX))
                     })
                 })
         }),
@@ -358,12 +361,13 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Json,
             indirect: None,
         }),
-        // `settings.models.providers["9router"]`
+        // Two levels deep — `models.providers.<name>` — not the top-level `providers` map that
+        // several other tools use. Reading the shallow path finds nothing for a configured install.
         marker: Marker::Json(|settings| {
             settings
                 .get("models")
                 .and_then(|models| models.get("providers"))
-                .and_then(|providers| providers.get("9router"))
+                .and_then(|providers| providers.get(PROVIDER))
                 .is_some()
         }),
         writable: Writable::Yes,
@@ -378,18 +382,20 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::YamlBlock,
             indirect: None,
         }),
-        marker: Marker::Text(|text| text.contains("9router")),
+        // Hermes' config is edited as text by block, so its marker reads text too: anywhere the
+        // provider name appears in the YAML means an apply has been through it.
+        marker: Marker::Text(|text| text.contains(PROVIDER)),
         writable: Writable::Yes,
     },
     Tool {
         id: "cowork-settings",
         display_name: "Cowork",
         // Claude Desktop in Cowork mode: a desktop app, not a CLI, so there is no binary to find.
-        // Upstream detects it by the presence of one of the candidate roots.
+        // The presence of one of the candidate roots is the only installation signal there is.
         binaries: &[],
         config: Some(ConfigFile {
-            // Upstream tries `Claude-3p` then `Claude`, picking the first that has a
-            // `configLibrary` directory, and falling back to the first candidate.
+            // `Claude-3p` then `Claude`, taking the first that has a `configLibrary` directory and
+            // falling back to the first candidate.
             roots: &[
                 Root::XdgConfig(&["Claude-3p"]),
                 Root::XdgConfig(&["Claude"]),
@@ -402,8 +408,9 @@ pub(crate) const TOOLS: &[Tool] = &[
                 key: "appliedId",
             }),
         }),
-        // `config?.inferenceProvider === PROVIDER && baseUrl`, where upstream's `PROVIDER` is
-        // `"gateway"` — not `"9router"` — and `baseUrl` is `inferenceGatewayBaseUrl`.
+        // The trap in this table: cowork's provider value is the literal `"gateway"`, *not*
+        // [`PROVIDER`], and the URL field is `inferenceGatewayBaseUrl`, not `baseUrl`. Testing
+        // either of the obvious names reports every cowork user as unconfigured.
         marker: Marker::Json(|config| {
             string_at(config, &["inferenceProvider"]) == "gateway"
                 && !string_at(config, &["inferenceGatewayBaseUrl"]).is_empty()
@@ -422,12 +429,13 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Json,
             indirect: None,
         }),
-        // The config is a top-level array: `config.some(entry => entry.name === "9Router")`.
+        // Copilot's config is a top-level *array* of model entries, not an object, so this searches
+        // it for one named [`DISPLAY`] — the capitalised spelling, matched exactly.
         marker: Marker::Json(|config| {
             config.as_array().is_some_and(|entries| {
                 entries
                     .iter()
-                    .any(|entry| entry.get("name").and_then(Value::as_str) == Some("9Router"))
+                    .any(|entry| entry.get("name").and_then(Value::as_str) == Some(DISPLAY))
             })
         }),
         writable: Writable::Yes,
@@ -442,7 +450,9 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Json,
             indirect: None,
         }),
-        // `(actModeApiProvider === "openai" || planModeApiProvider === "openai") && looksLocal`
+        // Cline names no provider of ours: it selects `openai` in either of its two modes and
+        // points the OpenAI base URL here, so both halves have to hold. The provider field alone
+        // would match anyone using OpenAI directly.
         marker: Marker::Json(|state| {
             let openai = string_at(state, &["actModeApiProvider"]) == "openai"
                 || string_at(state, &["planModeApiProvider"]) == "openai";
@@ -460,12 +470,11 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Json,
             indirect: None,
         }),
-        // `auth["openai-compatible"] || auth["9router"]`, then `baseUrl || baseURL` looks local.
-        // Both spellings of the URL key, because upstream accepts both.
+        // Kilo files its entry under either `openai-compatible` or the provider name, depending on
+        // which release wrote it, and spells the URL key `baseUrl` or `baseURL` for the same reason.
+        // All four combinations are live in the wild, so all four are accepted.
         marker: Marker::Json(|auth| {
-            let entry = auth
-                .get("openai-compatible")
-                .or_else(|| auth.get("9router"));
+            let entry = auth.get("openai-compatible").or_else(|| auth.get(PROVIDER));
             entry.is_some_and(|entry| {
                 let url = match entry.get("baseUrl").and_then(Value::as_str) {
                     Some(url) => url.to_owned(),
@@ -486,14 +495,14 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Toml,
             indirect: None,
         }),
-        // `provider === "openai"` and `providers.openai.base_url` looking local. Note what this is
-        // *not*: the config DeepSeek TUI gets written contains no `9router` string anywhere, so a
-        // text search for one would report "not configured" immediately after a successful apply.
+        // `provider == "openai"` plus a local `providers.openai.base_url`. Note what this is *not*:
+        // a DeepSeek TUI config configured by this router contains the provider name nowhere at all,
+        // because the tool only speaks OpenAI. A text search for the provider would report "not
+        // configured" immediately after a successful apply, which is why this reads two fields.
         //
-        // Upstream reads this as the flat key `config["providers.openai"]`, because its own TOML
-        // reader turns a `[providers.openai]` header into a literal dotted key. A real parser gives
-        // a nested table, so the nested path is checked here — same file, same answer, different
-        // representation.
+        // The nested path is the real one. A TOML reader that flattens `[providers.openai]` into a
+        // literal dotted key would need `config["providers.openai"]` instead; a real parser gives a
+        // nested table, and that is what is walked here.
         marker: Marker::Json(|config| {
             string_at(config, &["provider"]) == "openai"
                 && is_local_base_url(&string_at(config, &["providers", "openai", "base_url"]))
@@ -510,16 +519,19 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Toml,
             indirect: None,
         }),
-        // `providers["9router"]`, or *any* provider whose `base_url` contains
-        // `localhost:20128`. The second half is upstream's, and it is why the port number is
-        // hardcoded here: a user who pointed jcode at a different port under a different provider
-        // name is not detected upstream either, and inventing a broader check would make the two
-        // dashboards disagree.
+        // The provider entry by name, or *any* provider whose `base_url` names the default port.
+        // The second half catches a user who added the router under a name of their own choosing;
+        // the port is spelled out rather than generalised because a provider on some other port is
+        // a different router, not this one, and claiming it would light the toggle for someone
+        // else's install.
+        //
+        // jcode's primary config is `config.toml`. Its `.env` file holds only the key, so a marker
+        // that read the `.env` would miss every jcode user who has one but no provider block.
         marker: Marker::Json(|config| {
             let Some(providers) = config.get("providers").and_then(Value::as_object) else {
                 return false;
             };
-            providers.contains_key("9router")
+            providers.contains_key(PROVIDER)
                 || providers
                     .values()
                     .any(|provider| string_at(provider, &["base_url"]).contains("localhost:20128"))
@@ -536,14 +548,14 @@ pub(crate) const TOOLS: &[Tool] = &[
             format: Format::Toml,
             indirect: None,
         }),
-        // `Boolean(settings?.model?.base_url)`, where upstream's `settings.model` is *not* the
-        // `[model]` table: it is `parseModelSection(toml, "9router")`, which reads the
-        // `[model.9router]` section. In parsed TOML that is `model.9router.base_url`.
+        // The router's slot is the `[model.9router]` *section*, so the path is
+        // `model.<provider>.base_url` — three levels, not the `[model]` table. Reading `[model]`
+        // would report every Grok Build user with any model configured as pointing here.
         //
-        // Presence alone, with no URL test — loose, but it is upstream's check, and a stricter one
-        // here would show a different state in the same dashboard.
+        // Presence of the URL is the whole test, with no check on its value: the section exists
+        // only because an apply wrote it, so its presence already carries the answer.
         marker: Marker::Json(|config| {
-            !string_at(config, &["model", "9router", "base_url"]).is_empty()
+            !string_at(config, &["model", PROVIDER, "base_url"]).is_empty()
         }),
         writable: Writable::Yes,
     },
@@ -551,13 +563,13 @@ pub(crate) const TOOLS: &[Tool] = &[
         id: "devin-settings",
         display_name: "Devin",
         binaries: &["devin"],
-        // Upstream inspects no config file for devin: it looks for the binary in several places
-        // and reports the version. Inventing a config path here would report "not configured" on
-        // the strength of a file that tool never writes.
+        // Devin keeps no config file this router can inspect: it is found on `PATH` and reports its
+        // version, and that is the whole signal. Inventing a config path here would report "not
+        // configured" on the strength of a file the tool never writes.
         config: None,
         marker: Marker::NoConfig,
-        // Upstream exports only `GET` for devin, so there is nothing to port on the write side.
-        writable: Writable::NoUpstreamHasNoneEither,
+        // And with no config file, there is nothing an apply could write.
+        writable: Writable::NoMutationAvailable,
     },
 ];
 
@@ -718,14 +730,14 @@ mod tests {
     }
 
     #[test]
-    fn the_only_read_only_tool_is_the_one_upstream_has_no_writer_for() {
+    fn devin_is_the_only_read_only_tool() {
         let read_only: Vec<&str> = TOOLS
             .iter()
-            .filter(|tool| tool.writable == Writable::NoUpstreamHasNoneEither)
+            .filter(|tool| tool.writable == Writable::NoMutationAvailable)
             .map(|tool| tool.id)
             .collect();
-        // Upstream's devin route exports GET only. Every other settings route exports POST and
-        // DELETE, so anything else appearing here is an unported writer, not parity.
+        // Devin is read-only because it has no config file to write. Every other tool here does, so
+        // a second name appearing in this list is a writer someone forgot to finish.
         assert_eq!(read_only, ["devin-settings"]);
     }
 
@@ -785,7 +797,7 @@ mod tests {
             super::ConfigFile::safe_basename("abc-123").as_deref(),
             Some("abc-123.json")
         );
-        // A UUID is the realistic case, since upstream writes `crypto.randomUUID()`.
+        // A UUID is the realistic case: that is what cowork names its config files.
         assert_eq!(
             super::ConfigFile::safe_basename("2f1c9e64-0b7a-4d1e-9f3a-77c0d9e5a1b2").as_deref(),
             Some("2f1c9e64-0b7a-4d1e-9f3a-77c0d9e5a1b2.json")
@@ -795,7 +807,7 @@ mod tests {
     #[test]
     fn a_tool_with_no_config_has_no_json_marker() {
         // A `Marker::Json` on a tool with no file could never run, and would quietly report
-        // `has9Router: false` forever.
+        // `hasRouter: false` forever.
         for tool in TOOLS {
             match (tool.config, tool.marker) {
                 (None, Marker::NoConfig) | (Some(_), Marker::Json(_) | Marker::Text(_)) => {}
@@ -866,7 +878,8 @@ mod tests {
         assert!(check(&json!([{"name": "other"}, {"name": "9Router"}])));
         assert!(!check(&json!([{"name": "other"}])));
         assert!(!check(&json!([])));
-        // Case matters, as it does in upstream's `===`.
+        // Case matters: copilot compares the name exactly, so the lowercase provider spelling is a
+        // different entry from the capitalised display name.
         assert!(!check(&json!([{"name": "9router"}])));
         // An object where an array was expected must not panic.
         assert!(!check(&json!({"name": "9Router"})));
@@ -905,9 +918,9 @@ mod tests {
     }
 
     #[test]
-    fn the_cowork_marker_uses_upstreams_field_names_not_the_obvious_ones() {
-        // Two traps here, both of which would report every Cowork user as unconfigured: upstream's
-        // provider value is `"gateway"`, not `"9router"`, and the URL field is
+    fn the_cowork_marker_reads_coworks_field_names_not_the_obvious_ones() {
+        // Two traps here, either of which would report every Cowork user as unconfigured: the
+        // provider value cowork stores is `"gateway"`, not the provider name, and the URL field is
         // `inferenceGatewayBaseUrl`, not `baseUrl`.
         let tool = Tool::parse("cowork").expect("cowork is in the table");
         let Marker::Json(check) = tool.marker else {
@@ -936,14 +949,14 @@ mod tests {
     }
 
     #[test]
-    fn the_jcode_marker_has_both_of_upstreams_branches() {
+    fn the_jcode_marker_has_both_of_its_branches() {
         let tool = Tool::parse("jcode").expect("jcode is in the table");
         let Marker::Json(check) = tool.marker else {
             panic!("jcode should have a JSON marker")
         };
         // Named provider.
         assert!(check(&json!({"providers": {"9router": {}}})));
-        // Or any provider pointing at the default port, under any name — upstream's second branch.
+        // Or any provider pointing at the default port, under a name of the user's own choosing.
         assert!(check(&json!({
             "providers": {"mine": {"base_url": "http://localhost:20128/v1"}}
         })));
@@ -955,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn the_codex_marker_matches_either_upstream_string() {
+    fn the_codex_marker_matches_either_written_string() {
         let tool = Tool::parse("codex").expect("codex is in the table");
         let Marker::Text(check) = tool.marker else {
             panic!("codex should have a text marker")
@@ -963,16 +976,16 @@ mod tests {
         assert!(check("model_provider = \"9router\"\n"));
         assert!(check("[model_providers.9router]\nbase_url = \"...\"\n"));
         assert!(!check("model_provider = \"openai\"\n"));
-        // Single quotes are valid TOML but not what upstream greps for, and matching them would
-        // make this port disagree with the dashboard upstream ships.
+        // Single-quoted is valid TOML but is not what an apply writes, and this marker reads raw
+        // text rather than a parse. Matching it would claim a hand-edited file was written here.
         assert!(!check("model_provider = '9router'\n"));
     }
 
     #[test]
-    fn the_deepseek_marker_matches_the_config_upstream_writes() {
-        // The trap: upstream's writer produces a config with no `9router` string in it at all, so a
-        // text search would report "not configured" straight after a successful apply. This asserts
-        // the marker against the exact TOML upstream's `build9RouterConfig` emits.
+    fn the_deepseek_marker_matches_the_config_an_apply_writes() {
+        // The trap: a deepseek apply produces a config with no provider name in it at all, so a text
+        // search would report "not configured" straight after one succeeded. This asserts the marker
+        // against the exact TOML the writer emits.
         let tool = Tool::parse("deepseek-tui").expect("in the table");
         let Marker::Json(check) = tool.marker else {
             panic!("deepseek-tui should have a JSON marker")
@@ -987,7 +1000,7 @@ mod tests {
         let parsed = crate::cli_tools::detect::parse_config(written, Format::Toml).expect("parses");
         assert!(
             check(&parsed),
-            "the config upstream writes must match: {parsed}"
+            "the config an apply writes must match: {parsed}"
         );
 
         // And a remote OpenAI config does not.
@@ -999,9 +1012,8 @@ mod tests {
 
     #[test]
     fn the_grok_marker_reads_the_slot_section_not_the_model_table() {
-        // Upstream's `settings.model` is `parseModelSection(toml, "9router")`, i.e. the
-        // `[model.9router]` section — not a `[model]` table. Reading `[model]` would report every
-        // Grok Build user as unconfigured.
+        // The router's model lives in the `[model.9router]` section, not a `[model]` table. Reading
+        // `[model]` would report every Grok Build user as unconfigured.
         let tool = Tool::parse("grok-build").expect("in the table");
         let Marker::Json(check) = tool.marker else {
             panic!("grok-build should have a JSON marker")
@@ -1011,7 +1023,7 @@ mod tests {
         let parsed = crate::cli_tools::detect::parse_config(written, Format::Toml).expect("parses");
         assert!(check(&parsed), "{parsed}");
 
-        // A `[model]` table with a base_url is *not* what upstream checks.
+        // A `[model]` table with a base_url is a different section, and must not match.
         let wrong_shape = "[model]\nbase_url = \"http://127.0.0.1:20128/v1\"\n";
         let parsed =
             crate::cli_tools::detect::parse_config(wrong_shape, Format::Toml).expect("parses");
@@ -1020,9 +1032,9 @@ mod tests {
 
     #[test]
     fn the_two_local_url_tests_are_kept_distinct() {
-        // They differ, and merging them would make a tool report a state its own upstream route
-        // would not. `0.0.0.0` is local to hermes and deepseek but not to cline and kilo; a
-        // `9router` hostname is the reverse.
+        // They differ, and merging them would make a tool report a state its own config does not
+        // support. `0.0.0.0` is local to hermes and deepseek but not to cline and kilo; a provider
+        // hostname is the reverse.
         assert!(super::is_local_base_url("http://0.0.0.0:20128/v1"));
         assert!(!looks_like_router_url("http://0.0.0.0:20128/v1"));
 
@@ -1037,15 +1049,15 @@ mod tests {
     }
 
     #[test]
-    fn the_local_url_test_matches_upstreams() {
+    fn the_local_url_test_accepts_the_three_forms_a_config_can_hold() {
         assert!(looks_like_router_url("http://localhost:20128/v1"));
         assert!(looks_like_router_url("http://127.0.0.1:20128/v1"));
         assert!(looks_like_router_url("https://9router.example.com/v1"));
         assert!(!looks_like_router_url("https://api.openai.com/v1"));
         assert!(!looks_like_router_url(""));
-        // Not covered by upstream's test, and deliberately not added: `[::1]` and `0.0.0.0` would
-        // be reasonable, but recognising a URL upstream does not would make the dashboard show a
-        // different state depending on which router served it.
+        // Deliberately not added: `[::1]` and `0.0.0.0` would both be reasonable, but the tools
+        // reading this field never write them, so accepting them would only widen what counts as
+        // "configured" without any config to justify it.
         assert!(!looks_like_router_url("http://[::1]:20128/v1"));
     }
 

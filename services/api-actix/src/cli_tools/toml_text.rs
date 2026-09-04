@@ -1,26 +1,23 @@
 //! TOML edited as text, one section at a time.
 //!
-//! Grok Build's config is the one file this port cannot round-trip through a parser. Upstream
-//! records the user's previous default model in a **comment** —
-//! `# 9router-prev-default = "grok-4"` — so that a later revoke can put it back. A parse and
-//! re-serialise drops comments, which would silently turn every revoke into "reset to the built-in
-//! default" and lose a setting the user chose.
+//! Grok Build's config is the one file this port cannot round-trip through a parser. The user's
+//! previous default model is remembered in a **comment** — `# 9router-prev-default = "grok-4"` — so
+//! that a later revoke can put it back. A parse and re-serialise drops comments, which would
+//! silently turn every revoke into "reset to the built-in default" and lose a setting the user
+//! chose.
 //!
-//! So the operations here work on the raw text, the way upstream's regexes do, and for the same
-//! reason [`super::yaml_block`] does: everything not named is left byte-identical.
+//! So the operations here work on the raw text, for the same reason [`super::yaml_block`] does:
+//! everything not named is left byte-identical, comments included.
 //!
 //! # Section matching
 //!
-//! Upstream's pattern is
+//! A section is a header line that is exactly `[section]`, followed by every line up to the next one
+//! starting with `[`. The header has to match in full: `[model.9router]` is *not* found by looking
+//! for `[model]`, and a nested `[model.9router.extra]` is a third, separate section. Getting that
+//! wrong would edit or delete a table the caller did not name.
 //!
-//! ```text
-//! /^\[<section>\][ \t]*\r?\n((?:(?!\[)[^\r\n]*\r?\n?)*)/m
-//! ```
-//!
-//! — a header line that is exactly `[section]`, then every following line that does not start with
-//! `[`. Note the header must match in full: `[model.9router]` is not found by looking for
-//! `[model]`, and a nested `[model.9router.extra]` is a different section. That is implemented
-//! directly rather than with a regex crate, which is a handful of line tests and no dependency.
+//! Implemented with a handful of line tests rather than a regex, which keeps the dependency out for
+//! no loss in clarity.
 
 use std::ops::Range;
 
@@ -73,9 +70,10 @@ pub(crate) fn get_field(text: &str, section: &str, key: &str) -> Option<String> 
         .next()
         .and_then(|line| {
             let value = line.split_once('=')?.1.trim();
-            // Only the double-quoted form, which is what upstream's pattern accepts and what it
-            // writes. A bare or single-quoted value is left to be read as absent rather than guessed
-            // at, so this port and upstream agree on the same file.
+            // Only the double-quoted form, which is the only form written here. A bare or
+            // single-quoted value reads as absent rather than being guessed at: this is a text
+            // edit, not a parse, and half-parsing a value nobody wrote is how a marker gets
+            // misread as the user's own setting.
             value
                 .strip_prefix('"')
                 .and_then(|value| value.split('"').next())
@@ -95,7 +93,7 @@ fn field_lines<'a>(body: &'a str, key: &'a str) -> impl Iterator<Item = &'a str>
 pub(crate) fn set_field(text: &str, section: &str, key: &str, value: &str) -> String {
     let line = format!("{key} = {}", quoted(value));
     let Some(range) = section_range(text, section) else {
-        // Appended, with a blank line before it, matching upstream's `setSectionField`.
+        // No such section yet: append it, with a blank line so it reads as its own block.
         let mut output = ended_with_newline(text);
         output.push_str(&format!("\n[{section}]\n{line}\n"));
         return output;
@@ -118,7 +116,8 @@ pub(crate) fn set_field(text: &str, section: &str, key: &str, value: &str) -> St
             .join("\n")
             + "\n"
     } else {
-        // Upstream prepends a new field rather than appending it.
+        // A new field goes at the top of the section, so it sits next to the header rather than
+        // after whatever the user has accumulated below.
         format!("{line}\n{body}")
     };
     splice(text, &range, &format!("[{section}]\n{replaced}"))
@@ -174,8 +173,8 @@ pub(crate) fn remove_section(text: &str, section: &str) -> String {
 /// Insert a comment line, before `anchor`'s section when there is one.
 ///
 /// The position matters only for legibility — the marker is read by prefix wherever it sits — but
-/// upstream puts it directly above the section it describes, and a config a user opens should look
-/// the same whichever router wrote it.
+/// directly above the section it describes is where a user opening the file would expect to find a
+/// comment about that section.
 pub(crate) fn insert_marker(text: &str, anchor: &str, marker: &str) -> String {
     match section_range(text, anchor) {
         Some(range) => {
@@ -218,7 +217,8 @@ pub(crate) fn remove_marker(text: &str, name: &str) -> String {
     joined
 }
 
-/// A TOML basic string, escaped the way `JSON.stringify` does — which is what upstream uses.
+/// A TOML basic string. JSON's string escaping is a subset of TOML's, so serialising through
+/// `serde_json` produces a valid TOML basic string without a second escaper to keep correct.
 fn quoted(value: &str) -> String {
     serde_json::Value::String(value.to_owned()).to_string()
 }
@@ -239,7 +239,8 @@ fn ended_with_newline(text: &str) -> String {
     }
 }
 
-/// Upstream's `.replace(/\n{3,}/g, "\n\n")`, so removing a section does not leave a gap.
+/// Collapse runs of three or more newlines to one blank line, so removing a section does not leave
+/// a growing gap behind it.
 pub(crate) fn collapse_blank_runs(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     let mut newlines = 0_usize;
@@ -354,8 +355,8 @@ mod tests {
 
     #[test]
     fn removing_a_section_leaves_no_widening_gap() {
-        // Upstream collapses runs of blank lines, so repeated apply/revoke cycles do not push the
-        // rest of the file down a line at a time.
+        // Blank runs are collapsed, so repeated apply/revoke cycles do not push the rest of the
+        // file down a line at a time.
         let text = "a = \"1\"\n\n[gone]\nx = \"1\"\n\n[kept]\ny = \"2\"\n";
         let updated = remove_section(text, "gone");
         assert!(!updated.contains("[gone]"), "{updated}");
@@ -426,9 +427,9 @@ mod tests {
 
     #[test]
     fn a_bare_or_single_quoted_value_reads_as_absent() {
-        // Upstream's pattern only accepts the double-quoted form, and only writes that form.
-        // Accepting more here would make this port read a value the dashboard upstream ships
-        // does not.
+        // Only the double-quoted form is written, so only it is read. A bare or single-quoted value
+        // is something a user hand-edited, and treating it as a marker this code wrote would let a
+        // revoke restore a value it never remembered.
         let text = "[models]\ndefault = grok-4\nother = 'grok-4'\n";
         assert!(get_field(text, "models", "default").is_none());
         assert!(get_field(text, "models", "other").is_none());

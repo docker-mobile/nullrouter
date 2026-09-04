@@ -528,7 +528,7 @@ async fn deno(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpRes
         .bearer_auth(token)
         .json(&serde_json::json!({
             "slug": name,
-            "labels": { "custom.kind": "9router-relay" },
+            "labels": { "custom.kind": "nullrouter-relay" },
             "config": {
                 "install": "deno install",
                 "runtime": { "type": "dynamic", "entrypoint": "main.ts" },

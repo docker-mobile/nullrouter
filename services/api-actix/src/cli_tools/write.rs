@@ -13,7 +13,7 @@
 //!
 //! # Backups
 //!
-//! The previous contents are copied to `<name>.9router-backup` before the first modification, so
+//! The previous contents are copied to `<name>.nullrouter-backup` before the first modification, so
 //! there is something to go back to. Only once: a second apply must not overwrite the backup of
 //! the user's original file with a backup of our own output.
 
@@ -156,7 +156,7 @@ pub(crate) fn write_atomically(path: &Path, text: &str) -> Result<(), WriteError
     // not a case worth supporting, and a predictable leftover is easier for a user to find and
     // delete than a random one.
     let temporary = path.with_extension(format!(
-        "{}.9router-tmp",
+        "{}.nullrouter-tmp",
         path.extension()
             .and_then(std::ffi::OsStr::to_str)
             .unwrap_or("")
@@ -179,9 +179,12 @@ pub(crate) fn write_atomically(path: &Path, text: &str) -> Result<(), WriteError
 }
 
 /// The name of the backup kept beside a config file.
+///
+/// Named after this router rather than the tool, so a user looking at their config directory can see
+/// which program made the copy.
 pub(crate) fn backup_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".9router-backup");
+    name.push(".nullrouter-backup");
     path.with_file_name(name)
 }
 
@@ -444,7 +447,7 @@ mod tests {
             .expect("read_dir")
             .filter_map(Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains("9router-tmp"))
+            .filter(|name| name.contains("nullrouter-tmp"))
             .collect();
         assert!(leftovers.is_empty(), "left a temp file: {leftovers:?}");
     }

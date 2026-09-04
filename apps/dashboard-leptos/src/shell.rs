@@ -7,7 +7,7 @@
 //! navigation from a single list, so a new section is one entry rather than three edits.
 
 use leptos::prelude::*;
-use leptos_router::components::A;
+use leptos_router::components::{A, Outlet};
 use leptos_router::hooks::use_location;
 
 use crate::theme::{Selection, use_theme};
@@ -38,9 +38,9 @@ pub const NAV_ITEMS: &[NavItem] = &[
         icon: "M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z",
     },
     NavItem {
-        key: "nav.routing",
-        path: "/dashboard/routing",
-        icon: "M11 9h2V6h3l-4-4-4 4h3v3zm-2 2V9H6l4-4 M3 12h18M6 15l-4 4 4 4v-3h3v-2H6v-3z",
+        key: "nav.providers",
+        path: "/dashboard/providers",
+        icon: "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z",
     },
     NavItem {
         key: "nav.keys",
@@ -64,16 +64,39 @@ pub const NAV_ITEMS: &[NavItem] = &[
     },
 ];
 
+/// The frame nested dashboard routes render inside.
+#[component]
+pub fn DashboardFrame() -> impl IntoView {
+    view! {
+        <Shell>
+            <Outlet />
+        </Shell>
+    }
+}
+
 /// The frame every route renders inside.
 #[component]
 pub fn Shell(children: Children) -> impl IntoView {
     // Collapse state is local rather than persisted: the sidebar is a per-session affordance, and
     // restoring a collapsed sidebar on a fresh visit hides navigation from someone who has no
     // reason to expect it.
-    let (collapsed, set_collapsed) = signal(false);
+    let (collapsed, set_collapsed) = signal(viewport_is_narrow());
 
     view! {
         <div class="min-h-dvh bg-background text-foreground flex">
+            {move || {
+                (!collapsed.get())
+                    .then(|| {
+                        view! {
+                            <button
+                                type="button"
+                                class="fixed inset-0 z-20 bg-black/40 md:hidden"
+                                aria-label="Close navigation"
+                                on:click=move |_| set_collapsed.set(true)
+                            />
+                        }
+                    })
+            }}
             <Sidebar collapsed=collapsed />
             <div class="flex-1 flex flex-col min-w-0">
                 <Header collapsed=collapsed set_collapsed=set_collapsed />
@@ -94,10 +117,14 @@ fn Sidebar(collapsed: ReadSignal<bool>) -> impl IntoView {
 
     view! {
         <aside class=move || {
-            let width = if collapsed.get() { "w-16" } else { "w-60" };
+            let collapsed = collapsed.get();
+            let width = if collapsed { "w-16" } else { "w-60" };
+            let hidden = if collapsed { "max-md:hidden" } else { "" };
             format!(
                 "{width} shrink-0 border-r border-sidebar-border bg-sidebar \
-                 transition-[width] duration-200 ease-out hidden md:flex md:flex-col"
+                 transition-[width] duration-200 ease-out flex flex-col \
+                 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-30 \
+                 {hidden}",
             )
         }>
             <div class="h-14 flex items-center gap-2.5 px-4 shrink-0">
@@ -128,11 +155,7 @@ fn Sidebar(collapsed: ReadSignal<bool>) -> impl IntoView {
 
 /// One sidebar link.
 #[component]
-fn NavLink(
-    item: NavItem,
-    collapsed: ReadSignal<bool>,
-    location: Memo<String>,
-) -> impl IntoView {
+fn NavLink(item: NavItem, collapsed: ReadSignal<bool>, location: Memo<String>) -> impl IntoView {
     let locale = crate::i18n::use_locale();
     let label = locale.get(item.key).to_owned();
     // The tooltip is what carries the label when the sidebar is collapsed, so it needs its own copy.
@@ -266,6 +289,20 @@ fn ThemeToggle() -> impl IntoView {
     }
 }
 
+fn viewport_is_narrow() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| window.inner_width().ok())
+            .and_then(|width| width.as_f64())
+            .is_some_and(|width| width < 768.0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::NAV_ITEMS;
@@ -274,9 +311,15 @@ mod tests {
     fn every_nav_item_is_complete() {
         for item in NAV_ITEMS {
             assert!(!item.key.is_empty(), "{item:?} has no message key");
-            assert!(item.path.starts_with("/dashboard"), "{item:?} escapes the dashboard");
+            assert!(
+                item.path.starts_with("/dashboard"),
+                "{item:?} escapes the dashboard"
+            );
             assert!(!item.icon.is_empty(), "{item:?} has no icon");
-            assert!(item.key.starts_with("nav."), "{item:?} key should be namespaced");
+            assert!(
+                item.key.starts_with("nav."),
+                "{item:?} key should be namespaced"
+            );
         }
     }
 
@@ -295,7 +338,10 @@ mod tests {
     #[test]
     fn nav_keys_are_unique() {
         for (index, item) in NAV_ITEMS.iter().enumerate() {
-            let duplicate = NAV_ITEMS.iter().skip(index + 1).find(|other| other.key == item.key);
+            let duplicate = NAV_ITEMS
+                .iter()
+                .skip(index + 1)
+                .find(|other| other.key == item.key);
             assert!(duplicate.is_none(), "{:?} is listed twice", item.key);
         }
     }
@@ -304,7 +350,10 @@ mod tests {
     fn the_root_is_listed_exactly_once() {
         // Active-state matching special-cases the root because it prefixes every other path. That
         // only works while there is exactly one root entry.
-        let roots = NAV_ITEMS.iter().filter(|item| item.path == "/dashboard").count();
+        let roots = NAV_ITEMS
+            .iter()
+            .filter(|item| item.path == "/dashboard")
+            .count();
         assert_eq!(roots, 1);
     }
 }

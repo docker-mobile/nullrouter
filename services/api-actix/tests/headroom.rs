@@ -181,10 +181,10 @@ async fn extras_reports_the_available_compression_extras_and_python_detection() 
 
 #[actix_rt::test]
 async fn extras_log_query_returns_the_install_log_tail() -> TestResult {
-    // Given: this build never writes an install log, but one may exist from
-    // upstream 9Router sharing the same data directory.
+    // Given: this build never writes an install log, but one may exist from another
+    // process sharing the same data directory.
 
-    // When: the panel polls for install progress the way upstream's UI does.
+    // When: the panel polls for install progress.
     let (status, body) = get_json("/api/headroom/extras?log=1").await?;
 
     // Then: a `log` string is always present — empty when no log exists, which

@@ -85,13 +85,13 @@ async fn health_returns_catalog_service_status_when_requested() -> TestResult {
 }
 
 #[actix_web::test]
-async fn route_catalog_groups_inspire_inventory_when_requested() -> TestResult {
-    // Given: inspire exposes control-plane, OpenAI-compatible, and dashboard route families.
+async fn route_catalog_groups_route_inventory_when_requested() -> TestResult {
+    // Given: the route catalog exposes control-plane, OpenAI-compatible, and dashboard route families.
 
     // When: the route catalog is requested.
     let (status, json) = get_json("/api/catalog/routes").await?;
 
-    // Then: routes are grouped by the upstream service that should own them.
+    // Then: routes are grouped by the service that owns them.
     assert_eq!(status, StatusCode::OK);
     let families = array_field(&json, "families")?;
     assert_eq!(families.len(), 3);
