@@ -3165,6 +3165,7 @@ dependencies = [
 name = "nullrouter-auth"
 version = "0.5.20"
 dependencies = [
+ "actix-rt",
  "actix-web",
  "async-trait",
  "base64 0.22.1",
@@ -3181,6 +3182,8 @@ dependencies = [
  "sha2",
  "subtle",
  "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

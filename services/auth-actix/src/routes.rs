@@ -165,6 +165,16 @@ fn login_inner(
         .map_err(|_| ApiError::InternalStateUnavailable)?
         .check(peer, now);
     if let LockState::Locked { retry_after } = current_lock {
+        // Logged on every rejected attempt while locked, not only at the moment the lock is applied.
+        // A lockout that keeps being hit is an attack still in progress; one that is hit once is
+        // someone who mistyped. Only the repeated records distinguish them.
+        tracing::warn!(
+            audit = true,
+            event = "auth.login.locked_out",
+            %peer,
+            retry_after_seconds = retry_after,
+            "dashboard sign-in refused: address is locked out"
+        );
         return Ok(locked_response(retry_after));
     }
 
@@ -184,6 +194,17 @@ fn login_inner(
             .lock()
             .map_err(|_| ApiError::InternalStateUnavailable)?
             .record_success(peer);
+        // Every record carries `audit = true` so a collector can select these without pattern
+        // matching on message text, which changes. The peer address is included because "who signed
+        // in, from where" is the question an incident review starts from; the password never is, not
+        // even its length, since that narrows a brute-force search.
+        tracing::info!(
+            audit = true,
+            event = "auth.login.succeeded",
+            %peer,
+            method = "password",
+            "dashboard sign-in succeeded"
+        );
         let token = service
             .session()
             .create_token(now)
@@ -203,11 +224,31 @@ fn login_inner(
         .lock()
         .map_err(|_| ApiError::InternalStateUnavailable)?
         .record_failure(peer, now);
+    // `warn`, not `info`: a failed sign-in is what a brute-force attempt looks like in aggregate, so
+    // it should survive a collector configured to drop info. `remaining_before_lock` is what turns a
+    // series of these into a rate, which is the signal worth alerting on.
+    tracing::warn!(
+        audit = true,
+        event = "auth.login.failed",
+        %peer,
+        method = "password",
+        remaining_before_lock = failure.remaining_before_lock,
+        locked = matches!(failure.lock_state, LockState::Locked { .. }),
+        "dashboard sign-in failed"
+    );
     Ok(failed_login_response(failure))
 }
 
 fn logout(service: web::Data<AuthService>) -> Ready<HttpResponse> {
     let service = service.into_inner();
+    // No peer address: this handler does not take the request, and logout is unauthenticated by
+    // design -- it only clears a cookie. Recorded anyway so a session's end appears in the trail
+    // alongside its start.
+    tracing::info!(
+        audit = true,
+        event = "auth.logout",
+        "dashboard session cleared"
+    );
     ready(responses::json_with_cookie(
         StatusCode::OK,
         &LogoutResponse { success: true },
