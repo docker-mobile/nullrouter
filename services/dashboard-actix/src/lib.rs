@@ -96,10 +96,58 @@ async fn dashboard() -> HttpResponse {
     html(DASHBOARD_HTML)
 }
 
+/// The headers every HTML response carries, and why each one is shaped the way it is.
+///
+/// Applied to the documents rather than to assets: a stylesheet or a `.wasm` file has no scripting
+/// context to constrain, and a policy on one is noise in a review.
+///
+/// `script-src` needs both relaxations, and neither is incidental:
+///
+/// - `'wasm-unsafe-eval'` is what permits `WebAssembly.instantiate`. Without it the dashboard does
+///   not run at all -- the bundle is the application.
+/// - `'unsafe-inline'` covers the theme bootstrap, which must execute before first paint to avoid a
+///   flash of the wrong scheme and therefore cannot be moved to a fetched file. A nonce would be
+///   the stricter answer and is not available: these documents are `&'static str` constants, so
+///   there is no per-response value to inject.
+///
+/// `connect-src 'self'` is the load-bearing one for this product: the dashboard holds provider
+/// credentials, and this is what stops injected script from posting them to another origin.
+///
+/// No HSTS. It is meaningless over the plaintext HTTP this service speaks, and a deployment that
+/// terminates TLS at a proxy should set it there, where the certificate lives.
+const SECURITY_HEADERS: &[(&str, &str)] = &[
+    (
+        "Content-Security-Policy",
+        "default-src 'self'; \
+         script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data:; \
+         font-src 'self'; \
+         connect-src 'self'; \
+         frame-ancestors 'none'; \
+         base-uri 'none'; \
+         form-action 'self'; \
+         object-src 'none'",
+    ),
+    // Redundant with `frame-ancestors` for current browsers, kept for older ones that read only
+    // this. Enterprise fleets are exactly where those still appear.
+    ("X-Frame-Options", "DENY"),
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "no-referrer"),
+    // Nothing here uses a camera, microphone or location, so the page declines them outright.
+    (
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    ),
+];
+
 fn html(body: &'static str) -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type(ContentType::html())
-        .body(body)
+    let mut response = HttpResponse::Ok();
+    response.content_type(ContentType::html());
+    for (name, value) in SECURITY_HEADERS {
+        response.insert_header((*name, *value));
+    }
+    response.body(body)
 }
 
 async fn pkg_asset(
