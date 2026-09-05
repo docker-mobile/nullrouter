@@ -50,6 +50,9 @@ pub fn configure_dashboard(service: &mut ServiceConfig, config: DashboardConfig)
     service
         .app_data(web::Data::new(config))
         .route("/health", web::get().to(health))
+        // Both spellings: `/readyz` is the Kubernetes convention, `/ready` is what someone types.
+        .route("/readyz", web::get().to(readiness))
+        .route("/ready", web::get().to(readiness))
         .route("/", web::get().to(root_redirect))
         .route("/landing", web::get().to(landing))
         .route("/login", web::get().to(login))
@@ -71,6 +74,44 @@ async fn health() -> impl Responder {
     web::Json(json!({
         "ok": true,
         "service": "nullrouter-dashboard-host"
+    }))
+}
+
+/// The files without which this host serves pages that load but do not work.
+///
+/// The bundle is the application: absent it, `/dashboard` still answers 200 with a document that
+/// mounts nothing, which is a blank screen rather than an error. That exact failure happened twice
+/// while building this dashboard, and neither time did any status code reveal it.
+const REQUIRED_ASSETS: &[&str] = &["pkg/dashboard_leptos_bg.wasm", "assets/dashboard/app.css"];
+
+/// Whether this instance can actually serve, as opposed to merely being alive.
+///
+/// Separate from `/health` because the two answer different questions and an orchestrator uses them
+/// differently. Liveness failing means restart me; readiness failing means stop sending traffic,
+/// which is the correct response to a deployment whose static assets did not ship. Conflating them
+/// turns a missing bundle into a restart loop that never fixes anything.
+///
+/// `/health` is left exactly as it was: existing deployments and this repo's own CI poll it, and
+/// changing what it means would break them silently.
+async fn readiness(config: web::Data<DashboardConfig>) -> HttpResponse {
+    let missing: Vec<&str> = REQUIRED_ASSETS
+        .iter()
+        .filter(|relative| !config.path(relative).is_file())
+        .copied()
+        .collect();
+
+    if missing.is_empty() {
+        return HttpResponse::Ok().json(json!({
+            "ready": true,
+            "service": "nullrouter-dashboard-host"
+        }));
+    }
+    // 503 so a Kubernetes readiness probe fails, and the list so an operator does not have to guess
+    // which build step was skipped.
+    HttpResponse::ServiceUnavailable().json(json!({
+        "ready": false,
+        "service": "nullrouter-dashboard-host",
+        "missing": missing,
     }))
 }
 
