@@ -82,6 +82,13 @@ nullrouter-procctl = { path = "crates/procctl" }
 # SIGKILL, which makes cloudflared abandon its edge connections instead of unregistering them.
 libc = "0.2"
 # Optional pinning of a supervised binary to a known-good digest.
+# State-file encryption at rest. ChaCha20-Poly1305 rather than AES-GCM: pure Rust with no system
+# OpenSSL, and constant-time without needing AES hardware, which a small VM may not have.
+chacha20poly1305 = "0.10"
+# HKDF-SHA256 to turn an operator-supplied key of any length into the 32 bytes the cipher needs.
+hkdf = "0.12"
+# Wipes the derived key from memory on drop, so it does not linger in a core dump.
+zeroize = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hex = "0.4"
 # Cursor's Connect-RPC frames arrive gzip-, zlib-, or raw-deflate-compressed depending on the frame.

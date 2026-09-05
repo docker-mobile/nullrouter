@@ -18,6 +18,10 @@ pub enum StoreError {
     Poisoned,
     #[error("state io failed: {0}")]
     Io(#[from] std::io::Error),
+    /// Encryption at rest could not be applied or reversed. Surfaced rather than folded into `Io`
+    /// so an operator with a mismatched key gets the message that names the variable to fix.
+    #[error(transparent)]
+    AtRest(#[from] crate::at_rest::AtRestError),
     #[error("state json failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("secure random generation failed")]
@@ -583,7 +587,12 @@ impl StateStore {
     pub fn file(path: &Path) -> Result<Self, StoreError> {
         let mut snapshot = if path.exists() {
             let bytes = std::fs::read(path)?;
-            serde_json::from_slice(&bytes)?
+            // Decrypted only when the bytes are actually ciphertext, decided by the file's own magic
+            // prefix rather than by whether a key happens to be configured. That is what lets an
+            // existing cleartext deployment set a key and have its next save encrypt the file, with
+            // no migration step and no flag day.
+            let plain = crate::at_rest::open(&bytes)?;
+            serde_json::from_slice(&plain)?
         } else {
             StateSnapshot::default()
         };
@@ -1666,6 +1675,10 @@ impl StateStore {
             std::fs::create_dir_all(parent)?;
         }
         let payload = serde_json::to_vec_pretty(snapshot)?;
+        // Sealed when a key is configured, written as-is otherwise. The mode-600 write below applies
+        // either way: encryption protects the bytes once they leave this host in a backup or a
+        // support bundle, and the file mode protects them while they sit here.
+        let payload = crate::at_rest::seal(&payload)?;
         write_private(path, &payload)?;
         Ok(())
     }
@@ -2037,6 +2050,128 @@ mod persist_permission_tests {
             entries,
             vec!["nullrouter-state.json".to_owned()],
             "{entries:?}"
+        );
+    }
+}
+#[cfg(all(test, unix))]
+mod at_rest_wiring_tests {
+    use super::StateStore;
+
+    /// Sets the state key for one case and restores it.
+    struct Key(Option<std::ffi::OsString>);
+
+    impl Key {
+        fn set(value: Option<&str>) -> Self {
+            let saved = std::env::var_os(crate::at_rest::KEY_VAR);
+            match value {
+                // SAFETY: these cases run single-threaded and restore the variable on drop.
+                Some(key) => unsafe { std::env::set_var(crate::at_rest::KEY_VAR, key) },
+                // SAFETY: as above.
+                None => unsafe { std::env::remove_var(crate::at_rest::KEY_VAR) },
+            }
+            Self(saved)
+        }
+    }
+
+    impl Drop for Key {
+        fn drop(&mut self) {
+            match &self.0 {
+                // SAFETY: as above.
+                Some(previous) => unsafe { std::env::set_var(crate::at_rest::KEY_VAR, previous) },
+                // SAFETY: as above.
+                None => unsafe { std::env::remove_var(crate::at_rest::KEY_VAR) },
+            }
+        }
+    }
+
+    /// End-to-end rather than against `at_rest` alone: the module being correct says nothing about
+    /// whether `persist` and `file` actually call it. This is the test that would have caught the
+    /// wiring being absent.
+    #[test]
+    fn a_stored_secret_is_not_readable_on_disk_and_survives_a_reload() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        let secret = "sk-live-must-not-appear-on-disk";
+
+        {
+            let _key = Key::set(Some("operator-key-from-a-secret-manager"));
+            let store = StateStore::file(&path).expect("open store");
+            store
+                .save_translator_log("1_req_client.json", secret)
+                .expect("write a secret into state");
+            store.flush_if_dirty().expect("flush");
+
+            let raw = std::fs::read(&path).expect("read the file back");
+            assert!(
+                crate::at_rest::is_sealed(&raw),
+                "the file on disk is not sealed"
+            );
+            assert!(
+                !String::from_utf8_lossy(&raw).contains(secret),
+                "the secret is readable in the state file"
+            );
+
+            // Reopening with the same key must return it, or encryption has cost the operator their
+            // data rather than protected it.
+            let reopened = StateStore::file(&path).expect("reopen with the key");
+            assert_eq!(
+                reopened
+                    .translator_log("1_req_client.json")
+                    .expect("read back")
+                    .as_deref(),
+                Some(secret)
+            );
+        }
+
+        // Without the key, opening must fail loudly rather than silently starting empty -- an empty
+        // start would overwrite the sealed file on the next save and destroy every credential.
+        let _no_key = Key::set(None);
+        assert!(
+            StateStore::file(&path).is_err(),
+            "a sealed file opened without the key must refuse, not read as empty"
+        );
+    }
+
+    #[test]
+    fn an_existing_cleartext_file_is_adopted_without_a_migration_step() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        let secret = "carried-across-from-cleartext";
+
+        // Written with no key configured, as an existing deployment would have.
+        {
+            let _no_key = Key::set(None);
+            let store = StateStore::file(&path).expect("open store");
+            store
+                .save_translator_log("2_req_source.json", secret)
+                .expect("write");
+            store.flush_if_dirty().expect("flush");
+            let raw = std::fs::read(&path).expect("read");
+            assert!(
+                !crate::at_rest::is_sealed(&raw),
+                "should still be cleartext"
+            );
+        }
+
+        // The operator now sets a key. The existing file must load, and the next save must seal it.
+        let _key = Key::set(Some("newly-adopted-key"));
+        let store = StateStore::file(&path).expect("cleartext must still load once a key is set");
+        assert_eq!(
+            store
+                .translator_log("2_req_source.json")
+                .expect("read back")
+                .as_deref(),
+            Some(secret)
+        );
+        store
+            .save_translator_log("3_req_openai.json", "another")
+            .expect("write");
+        store.flush_if_dirty().expect("flush");
+
+        let raw = std::fs::read(&path).expect("read");
+        assert!(
+            crate::at_rest::is_sealed(&raw),
+            "the next save after adopting a key must seal the file"
         );
     }
 }

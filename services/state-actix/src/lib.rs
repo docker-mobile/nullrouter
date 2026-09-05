@@ -1,4 +1,5 @@
 mod api_keys;
+mod at_rest;
 mod console_logs;
 mod internal;
 mod migrate;
