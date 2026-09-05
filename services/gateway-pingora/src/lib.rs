@@ -3,6 +3,7 @@ mod config;
 mod policy;
 mod proxy;
 mod routing;
+pub mod throttle;
 
 pub use auth::{AuthClient, AuthClientError};
 pub use config::{GatewayConfig, GatewayConfigError, GatewayUpstreamAddrs, RouteKind, Upstream};
