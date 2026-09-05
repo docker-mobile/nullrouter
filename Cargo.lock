@@ -3390,6 +3390,7 @@ dependencies = [
  "actix-rt",
  "actix-web",
  "getrandom 0.3.4",
+ "libc",
  "nullrouter-contracts",
  "nullrouter-logship",
  "rusqlite",

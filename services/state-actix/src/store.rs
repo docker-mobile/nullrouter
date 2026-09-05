@@ -1666,9 +1666,47 @@ impl StateStore {
             std::fs::create_dir_all(parent)?;
         }
         let payload = serde_json::to_vec_pretty(snapshot)?;
-        std::fs::write(path, payload)?;
+        write_private(path, &payload)?;
         Ok(())
     }
+}
+
+/// Write `payload` to `path` so that only the owner can read it, and so a crash cannot truncate it.
+///
+/// This file holds provider API keys and OAuth refresh tokens in cleartext. `fs::write` creates with
+/// `0o666 & !umask`, which on a stock Linux image is `0o644` -- every local account can read the
+/// credentials. It is also not atomic: `fs::write` truncates first, so a crash between truncate and
+/// the final byte leaves a half-written file that fails to parse on the next start, losing every
+/// connection the operator had configured.
+///
+/// The mode is set on the temporary file's own descriptor before the rename, not on `path` after it.
+/// Setting it afterwards leaves a window in which the real path exists world-readable, and `chmod`
+/// by path can follow something else into place. `rename` carries the mode with it and replaces the
+/// target atomically, so a reader sees either the whole previous file or the whole new one.
+fn write_private(path: &std::path::Path, payload: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    // Alongside the target, not in a temp dir: `rename` is only atomic within one filesystem.
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let temp = std::path::PathBuf::from(temp);
+
+    let mut file = std::fs::File::create(&temp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    // On failure the temporary is removed rather than left behind: a stale `.tmp` next to the state
+    // file looks like a partial write that someone should investigate.
+    let written = file
+        .write_all(payload)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| std::fs::rename(&temp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
 }
 
 #[derive(Debug, Clone)]
@@ -1916,5 +1954,89 @@ mod persistence_tests {
         assert!(store.flush_if_dirty().expect("flush deferred write"));
         let after_flush = std::fs::read_to_string(&path).expect("flushed snapshot exists");
         assert!(after_flush.contains("deferred"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod persist_permission_tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::write_private;
+
+    /// Set a permissive umask for the duration of a write, then restore it.
+    ///
+    /// Without this the assertion would pass on a host whose umask already forbids group and other
+    /// access, proving nothing. `0o000` is the most permissive setting there is, so a mode of
+    /// `0o600` afterwards can only have come from the code setting it deliberately.
+    struct PermissiveUmask(libc::mode_t);
+
+    impl PermissiveUmask {
+        fn apply() -> Self {
+            // SAFETY: `umask` cannot fail and touches only this process's file-creation mask. It is
+            // restored on drop, and these cases write from one thread.
+            Self(unsafe { libc::umask(0o000) })
+        }
+    }
+
+    impl Drop for PermissiveUmask {
+        fn drop(&mut self) {
+            // SAFETY: as above, restoring what was replaced.
+            unsafe { libc::umask(self.0) };
+        }
+    }
+
+    fn mode_of(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path)
+            .map(|meta| meta.permissions().mode() & 0o777)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn a_written_state_file_is_readable_only_by_its_owner() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        let _umask = PermissiveUmask::apply();
+
+        write_private(&path, b"{}").expect("first write");
+        assert_eq!(
+            mode_of(&path),
+            0o600,
+            "mode is {:o}; other local accounts can read stored credentials",
+            mode_of(&path)
+        );
+
+        // The first write creates; every later one replaces by rename. A rename that dropped the
+        // mode would expose the file from the second save onward, which one write cannot catch.
+        write_private(&path, b"{\"a\":1}").expect("second write");
+        assert_eq!(
+            mode_of(&path),
+            0o600,
+            "mode after rewrite is {:o}",
+            mode_of(&path)
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("read back"),
+            b"{\"a\":1}",
+            "the rename must publish the new content, not the old"
+        );
+    }
+
+    #[test]
+    fn no_temporary_survives_a_successful_write() {
+        // A leftover `.tmp` is a second copy of the same credentials sitting beside the real file.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        write_private(&path, b"{}").expect("write");
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["nullrouter-state.json".to_owned()],
+            "{entries:?}"
+        );
     }
 }

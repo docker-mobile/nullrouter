@@ -31,6 +31,9 @@ tracing.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
+# For `umask`, so the permission test proves the code narrows the mode rather than
+# inheriting a strict environment.
+libc.workspace = true
 actix-rt.workspace = true
 tempfile.workspace = true
 
