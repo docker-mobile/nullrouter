@@ -18,7 +18,9 @@ use crate::{
     },
     errors::{ApiError, protocol_error},
     lockout::{FailureState, LockState},
+    oidc::{self, OidcConfig},
     responses,
+    saml::SamlConfig,
     session::SessionCodec,
 };
 
@@ -87,20 +89,45 @@ fn health() -> Ready<HttpResponse> {
 /// So please do not "fix" this back into a settings lookup. The field stays only
 /// because the login page reads it, and it must never report `false` — a client
 /// that sees `requireLogin: false` would skip the login screen.
-fn status(service: web::Data<AuthService>, request: HttpRequest) -> Ready<HttpResponse> {
+/// Whether single sign-on is usable, answered by the same predicates the flows themselves use.
+///
+/// This is deliberately not a separate configuration flag. `oidc_configured` used to be a hardcoded
+/// `false`, which meant an operator could set a valid issuer, client id and secret, have
+/// `/api/auth/oidc/start` work perfectly, and still never see a sign-in button — the login screen
+/// reads this field to decide whether to offer one. Asking `OidcConfig::from_settings` and
+/// `SamlConfig::from_settings` is what keeps the answer and the behaviour from drifting apart:
+/// if a flow can run, the button appears, because the same function decided both.
+async fn sso_availability(service: &AuthService) -> (bool, bool, String) {
+    // A state service that cannot be reached is reported as "no SSO" rather than as an error. The
+    // password form still works, so degrading to it beats a login screen that will not render.
+    let Ok(settings) = service.auth_settings().await else {
+        return (false, false, oidc::normalize_login_label(""));
+    };
+    let oidc = OidcConfig::from_settings(&settings);
+    let saml = SamlConfig::from_settings(&settings).is_some();
+    let label = oidc.as_ref().map_or_else(
+        || oidc::normalize_login_label(""),
+        |config| config.login_label.clone(),
+    );
+    (oidc.is_some(), saml, label)
+}
+
+async fn status(service: web::Data<AuthService>, request: HttpRequest) -> HttpResponse {
     let service = service.into_inner();
     let authenticated = request
         .cookie(SessionCodec::cookie_name())
         .is_some_and(|cookie| service.session().verify(cookie.value(), service.now()));
     drop(request);
-    ready(responses::json(
+    let (oidc_configured, saml_configured, oidc_login_label) = sso_availability(&service).await;
+    responses::json(
         StatusCode::OK,
         &AuthStatusResponse {
             authenticated,
             require_login: true,
             auth_mode: "password",
-            oidc_configured: false,
-            oidc_login_label: "Sign in with OIDC",
+            oidc_configured,
+            oidc_login_label,
+            saml_configured,
             has_password: service.config().has_configured_password_hash(),
             display_name: "Password user",
             login_method: "Password",
@@ -108,7 +135,7 @@ fn status(service: web::Data<AuthService>, request: HttpRequest) -> Ready<HttpRe
             oidc_email: None,
             oidc_login: false,
         },
-    ))
+    )
 }
 
 fn login(

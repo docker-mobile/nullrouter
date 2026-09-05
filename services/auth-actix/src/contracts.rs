@@ -39,7 +39,11 @@ pub(crate) struct AuthStatusResponse {
     pub(crate) require_login: bool,
     pub(crate) auth_mode: &'static str,
     pub(crate) oidc_configured: bool,
-    pub(crate) oidc_login_label: &'static str,
+    /// Owned, not `&'static str`: an operator sets this label in settings, so it is runtime data.
+    /// It was a literal while `oidc_configured` was hardcoded `false` and the field could never be
+    /// anything but the placeholder.
+    pub(crate) oidc_login_label: String,
+    pub(crate) saml_configured: bool,
     pub(crate) has_password: bool,
     pub(crate) display_name: &'static str,
     pub(crate) login_method: &'static str,

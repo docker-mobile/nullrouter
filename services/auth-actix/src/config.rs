@@ -55,6 +55,11 @@ pub struct AuthConfig {
     public_origin: Option<String>,
 }
 
+/// The password a local development run gets when the operator sets nothing.
+///
+/// Named rather than inlined because two places have to agree on it: the value handed to a dev
+/// instance, and the production guard that refuses to start when this is what is in force.
+const DEFAULT_DEV_PASSWORD: &str = "123456";
 #[derive(Debug, Error)]
 pub enum AuthConfigError {
     #[error("session secret must contain at least 32 bytes")]
@@ -69,6 +74,17 @@ pub enum AuthConfigError {
     NonLoopbackStateValidationUrl,
     #[error("invalid environment value for {0}")]
     InvalidEnvironment(&'static str),
+    #[error(
+        "NULLROUTER_ENV=production requires an explicit dashboard password: set \
+         NULLROUTER_AUTH_PASSWORD_HASH to a bcrypt hash, or INITIAL_PASSWORD to a value that is \
+         not the built-in default"
+    )]
+    DefaultPasswordInProduction,
+    #[error(
+        "NULLROUTER_ENV=production requires a persistent session secret: set \
+         NULLROUTER_AUTH_SESSION_SECRET, or every restart signs all operators out"
+    )]
+    EphemeralSecretInProduction,
     #[error("state HTTP client could not be created")]
     StateClient,
 }
@@ -94,8 +110,19 @@ impl AuthConfig {
     }
 
     pub fn from_env() -> Result<Self, AuthConfigError> {
+        // `NULLROUTER_ENV=production` is an explicit assertion by the operator that this instance is
+        // not a laptop. It does not change any default silently: it refuses to start on the two
+        // settings that are safe locally and indefensible in production, and it flips the cookie
+        // default to secure. Local development keeps working untouched.
+        let production = env::var("NULLROUTER_ENV")
+            .map(|value| value.trim().eq_ignore_ascii_case("production"))
+            .unwrap_or(false);
+
         let session_secret = match env::var("NULLROUTER_AUTH_SESSION_SECRET") {
             Ok(secret) => secret.into_bytes(),
+            Err(env::VarError::NotPresent) if production => {
+                return Err(AuthConfigError::EphemeralSecretInProduction);
+            }
             Err(env::VarError::NotPresent) => random::<[u8; 32]>().to_vec(),
             Err(env::VarError::NotUnicode(_)) => {
                 return Err(AuthConfigError::InvalidEnvironment(
@@ -105,9 +132,22 @@ impl AuthConfig {
         };
         let password = match env::var("NULLROUTER_AUTH_PASSWORD_HASH") {
             Ok(hash) if !hash.trim().is_empty() => PasswordConfig::BcryptHash(hash),
-            Ok(_) | Err(env::VarError::NotPresent) => PasswordConfig::Plaintext(
-                env::var("INITIAL_PASSWORD").unwrap_or_else(|_| "123456".to_owned()),
-            ),
+            Ok(_) | Err(env::VarError::NotPresent) => {
+                let configured = env::var("INITIAL_PASSWORD").ok();
+                let password = configured
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(DEFAULT_DEV_PASSWORD);
+                // Compared against the default rather than merely checking that the variable is
+                // set: `INITIAL_PASSWORD=123456` is the same exposure as not setting it at all, and
+                // an operator who has pasted the documented example into their deployment has not
+                // chosen a password.
+                if production && password == DEFAULT_DEV_PASSWORD {
+                    return Err(AuthConfigError::DefaultPasswordInProduction);
+                }
+                PasswordConfig::Plaintext(password.to_owned())
+            }
             Err(env::VarError::NotUnicode(_)) => {
                 return Err(AuthConfigError::InvalidEnvironment(
                     "NULLROUTER_AUTH_PASSWORD_HASH",
@@ -115,7 +155,10 @@ impl AuthConfig {
             }
         };
         let mut config = Self::new(session_secret, password)?;
-        config.secure_cookie = env_bool("AUTH_COOKIE_SECURE", false)?;
+        // Defaults to on in production, so a session cookie is never sent over plaintext HTTP
+        // unless an operator explicitly asks for that. Still overridable either way: a deployment
+        // terminating TLS at a proxy that speaks HTTP to this service internally needs `false`.
+        config.secure_cookie = env_bool("AUTH_COOKIE_SECURE", production)?;
         config.session_ttl = Duration::from_secs(env_u64(
             "NULLROUTER_AUTH_SESSION_TTL_SECONDS",
             24 * 60 * 60,
@@ -230,7 +273,11 @@ impl AuthConfig {
         self.session_ttl
     }
 
-    pub(crate) const fn secure_cookie(&self) -> bool {
+    /// Whether the session cookie is marked `Secure`.
+    ///
+    /// Public so a deployment check can assert it, which is the point of the production guard: a
+    /// setting that cannot be observed from outside the crate cannot be tested from outside either.
+    pub const fn secure_cookie(&self) -> bool {
         self.secure_cookie
     }
 
