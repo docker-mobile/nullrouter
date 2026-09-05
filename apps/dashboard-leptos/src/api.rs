@@ -140,6 +140,8 @@ pub enum Save {
     Saving,
     Saved,
     Failed(ApiError),
+    /// Refused with wording of its own. See [`submit_reporting`].
+    Refused(String),
 }
 
 impl Save {
@@ -147,9 +149,22 @@ impl Save {
         matches!(self, Self::Saving)
     }
 
+    /// The transport or status failure, when that is what went wrong.
+    ///
+    /// A [`Self::Refused`] write reports `None` here: its explanation is a sentence from the server,
+    /// not one of these variants. Use [`Self::message`] to render either kind.
     pub const fn failure(&self) -> Option<ApiError> {
         match self {
             Self::Failed(error) => Some(*error),
+            Self::Idle | Self::Saving | Self::Saved | Self::Refused(_) => None,
+        }
+    }
+
+    /// What to show the user about a failed write, whichever kind of failure it was.
+    pub fn message(&self) -> Option<String> {
+        match self {
+            Self::Failed(error) => Some(error.message().to_owned()),
+            Self::Refused(reason) => Some(reason.clone()),
             Self::Idle | Self::Saving | Self::Saved => None,
         }
     }
@@ -386,6 +401,57 @@ where
     });
 }
 
+/// The error envelope every route refuses with.
+///
+/// The services answer a rejected write as `{"error": "…"}`, and that sentence is usually the only
+/// thing that says what to change.
+#[derive(serde::Deserialize)]
+struct Refusal {
+    #[serde(default)]
+    error: String,
+}
+
+/// What a refusal should say.
+///
+/// Prefers the server's own sentence, falling back to the status message when the body carried
+/// nothing usable -- an HTML error page from a proxy, or an empty body. Always returns something
+/// displayable, so a caller never has to render empty space where a reason belongs.
+pub fn refusal_message(response: &DetailedResponse) -> String {
+    decode::<Refusal>(&response.body)
+        .ok()
+        .map(|refusal| refusal.error)
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or_else(|| ApiError::Status(response.status).message().to_owned())
+}
+
+/// Run a write, keeping the server's own explanation when it refuses.
+///
+/// [`submit`] folds a non-2xx into [`ApiError::Status`], whose wording is deliberately generic
+/// because most panels have nothing more specific to say. Some routes are the exception: a duplicate
+/// combo name, an unknown pricing field, or a negative rate each come back as a sentence naming the
+/// problem, and a status code throws that away. Those failures land in [`Save::Refused`].
+///
+/// `on_success` runs only when the write was accepted, so a rejected write cannot leave a panel
+/// claiming it was applied.
+pub fn submit_reporting<F, Fut, S>(state: WriteSignal<Save>, send: F, on_success: S)
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<DetailedResponse, ApiError>> + 'static,
+    S: FnOnce(String) + 'static,
+{
+    state.set(Save::Saving);
+    spawn(async move {
+        match send().await {
+            Ok(response) if response.ok => {
+                state.set(Save::Saved);
+                on_success(response.body);
+            }
+            Ok(response) => state.set(Save::Refused(refusal_message(&response))),
+            Err(error) => state.set(Save::Failed(error)),
+        }
+    });
+}
+
 /// Spawn a future on the browser's task queue.
 #[cfg(target_arch = "wasm32")]
 fn spawn<F: std::future::Future<Output = ()> + 'static>(future: F) {
@@ -401,7 +467,9 @@ fn spawn<F: std::future::Future<Output = ()> + 'static>(future: F) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiError, Hydrate, Method, Save, decode, encode};
+    use super::{
+        ApiError, DetailedResponse, Hydrate, Method, Save, decode, encode, refusal_message,
+    };
 
     #[test]
     fn hydrate_starts_loading_and_holds_nothing() {
@@ -511,6 +579,61 @@ mod tests {
             Some(ApiError::Network)
         );
         assert!(!Save::Failed(ApiError::Network).is_saving());
+    }
+
+    #[test]
+    fn a_refusal_is_not_reported_as_a_transport_failure() {
+        // `failure()` drives the retry affordance, and a refused write is not a request to retry
+        // unchanged.
+        let refused = Save::Refused("Combo name already exists".to_owned());
+        assert!(refused.failure().is_none());
+        assert!(!refused.is_saving());
+    }
+
+    #[test]
+    fn both_kinds_of_failed_write_have_something_to_show() {
+        assert_eq!(
+            Save::Refused("Combo name already exists".to_owned()).message(),
+            Some("Combo name already exists".to_owned())
+        );
+        assert_eq!(
+            Save::Failed(ApiError::Network).message(),
+            Some(ApiError::Network.message().to_owned())
+        );
+        // A write that has not failed has nothing to say.
+        assert_eq!(Save::Idle.message(), None);
+        assert_eq!(Save::Saving.message(), None);
+        assert_eq!(Save::Saved.message(), None);
+    }
+
+    #[test]
+    fn a_refusal_prefers_the_servers_own_wording() {
+        let response = DetailedResponse {
+            status: 400,
+            ok: false,
+            retry_after: None,
+            body: r#"{"error":"Combo name already exists"}"#.to_owned(),
+        };
+        assert_eq!(refusal_message(&response), "Combo name already exists");
+    }
+
+    #[test]
+    fn a_refusal_without_a_usable_body_falls_back_to_the_status() {
+        // A proxy's HTML error page, an empty body, or an envelope with a blank message: each still
+        // has to produce a sentence rather than empty space.
+        for body in ["", "<html>502 Bad Gateway</html>", r#"{"error":"  "}"#] {
+            let response = DetailedResponse {
+                status: 503,
+                ok: false,
+                retry_after: None,
+                body: body.to_owned(),
+            };
+            assert_eq!(
+                refusal_message(&response),
+                ApiError::Status(503).message(),
+                "body {body:?} should fall back"
+            );
+        }
     }
 
     #[test]

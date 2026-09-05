@@ -123,23 +123,68 @@ pub fn PanelError(
     }
 }
 
+/// Send a write and await it, keeping the server's own explanation when it refuses.
+///
+/// The `await`-shaped counterpart to [`crate::api::submit_reporting`], for a panel that drives its
+/// own task rather than a [`crate::api::Save`] signal. Both extract the reason the same way, through
+/// [`crate::api::refusal_message`], so a refusal reads identically whichever one reported it.
+///
+/// The `Err` is always displayable: the server's sentence when the body carried one, and the status
+/// message when it did not.
+pub async fn write_reporting(
+    method: crate::api::Method,
+    path: &str,
+    body: Option<&str>,
+) -> Result<String, String> {
+    let response = crate::api::request_detailed(method, path, body)
+        .await
+        .map_err(|error| error.message().to_owned())?;
+
+    if response.ok {
+        return Ok(response.body);
+    }
+    Err(crate::api::refusal_message(&response))
+}
+
+pub mod catalog;
+pub mod cli_tools;
+pub mod combos;
+pub mod controls;
+pub mod headroom;
 pub mod keys;
 pub mod login;
 pub mod logs;
+pub mod models;
+pub mod oauth_import;
 pub mod overview;
+pub mod pricing;
+pub mod provider_nodes;
 pub mod providers;
+pub mod proxy_pools;
+pub mod pxpipe;
 pub mod settings;
 pub mod status;
+pub mod translator;
+pub mod tunnel;
 pub mod types;
 pub mod usage;
 
+pub use cli_tools::CliTools;
+pub use combos::Combos;
+pub use headroom::Headroom;
 pub use keys::Keys;
 pub use login::Login;
 pub use logs::Logs;
+pub use models::Models;
 pub use overview::Overview;
+pub use pricing::Pricing;
+pub use provider_nodes::ProviderNodes;
 pub use providers::Providers;
+pub use proxy_pools::ProxyPools;
+pub use pxpipe::Pxpipe;
 pub use settings::Settings;
 pub use status::StatusPage;
+pub use tunnel::Tunnel;
 pub use usage::Usage;
 
 /// Shown for any path the router does not recognise.

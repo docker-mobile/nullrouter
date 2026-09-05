@@ -68,9 +68,21 @@ pub fn App() -> impl leptos::IntoView {
                 <ParentRoute path=path!("/dashboard") view=shell::DashboardFrame>
                     <Route path=path!("") view=routes::Overview />
                     <Route path=path!("providers") view=routes::Providers />
+                    <Route path=path!("models") view=routes::Models />
+                    <Route path=path!("combos") view=routes::Combos />
+                    <Route path=path!("pricing") view=routes::Pricing />
                     <Route path=path!("keys") view=routes::Keys />
                     <Route path=path!("usage") view=routes::Usage />
                     <Route path=path!("logs") view=routes::Logs />
+                    <Route path=path!("cli-tools") view=routes::CliTools />
+                    <Route path=path!("pxpipe") view=routes::Pxpipe />
+                    <Route path=path!("headroom") view=routes::Headroom />
+                    <Route path=path!("tunnel") view=routes::tunnel::Tunnel />
+                    <Route path=path!("proxy-pools") view=routes::proxy_pools::ProxyPools />
+                    <Route path=path!("nodes") view=routes::provider_nodes::ProviderNodes />
+                    <Route path=path!("import") view=routes::oauth_import::OauthImport />
+                    <Route path=path!("translator") view=routes::translator::Translator />
+                    <Route path=path!("catalog") view=routes::catalog::Catalog />
                     <Route path=path!("settings") view=routes::Settings />
                     <Route path=path!("*rest") view=routes::StatusPage />
                 </ParentRoute>

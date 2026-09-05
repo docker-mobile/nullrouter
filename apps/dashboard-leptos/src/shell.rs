@@ -43,6 +43,21 @@ pub const NAV_ITEMS: &[NavItem] = &[
         icon: "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z",
     },
     NavItem {
+        key: "nav.models",
+        path: "/dashboard/models",
+        icon: "M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z",
+    },
+    NavItem {
+        key: "nav.combos",
+        path: "/dashboard/combos",
+        icon: "M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z",
+    },
+    NavItem {
+        key: "nav.pricing",
+        path: "/dashboard/pricing",
+        icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z",
+    },
+    NavItem {
         key: "nav.keys",
         path: "/dashboard/keys",
         icon: "M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z",
@@ -56,6 +71,51 @@ pub const NAV_ITEMS: &[NavItem] = &[
         key: "nav.logs",
         path: "/dashboard/logs",
         icon: "M20 2H4c-1.1 0-2 .9-2 2v16l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z",
+    },
+    NavItem {
+        key: "nav.cli_tools",
+        path: "/dashboard/cli-tools",
+        icon: "M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zM6.5 9.5 5 11l2.5 2.5L5 16l1.5 1.5L10.5 13 6.5 9.5zM12 16h6v-1.5h-6V16z",
+    },
+    NavItem {
+        key: "nav.pxpipe",
+        path: "/dashboard/pxpipe",
+        icon: "M17 4h-3V2h-4v2H7v6l3 3v5h4v-5l3-3V4zm-2 5.2-3 3-3-3V6h6v3.2zM11 20h2v2h-2v-2z",
+    },
+    NavItem {
+        key: "nav.headroom",
+        path: "/dashboard/headroom",
+        icon: "M12 2 4 6v6c0 4.4 3.4 8.5 8 10 4.6-1.5 8-5.6 8-10V6l-8-4zm0 2.2 6 3v4.8c0 3.4-2.5 6.6-6 7.9-3.5-1.3-6-4.5-6-7.9V7.2l6-3zM9 11h6v2H9v-2zm0-3h6v2H9V8z",
+    },
+    NavItem {
+        key: "nav.tunnel",
+        path: "/dashboard/tunnel",
+        icon: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z",
+    },
+    NavItem {
+        key: "nav.proxy_pools",
+        path: "/dashboard/proxy-pools",
+        icon: "M4 4h4v4H4V4zm6 0h4v4h-4V4zm6 0h4v4h-4V4zM4 10h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4zM4 16h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z",
+    },
+    NavItem {
+        key: "nav.nodes",
+        path: "/dashboard/nodes",
+        icon: "M12 2l4 4-4 4-4-4 4-4zm-8 8l4 4-4 4-4-4 4-4zm16 0l4 4-4 4-4-4 4-4zm-8 8l4 4-4 4-4-4 4-4z",
+    },
+    NavItem {
+        key: "nav.import",
+        path: "/dashboard/import",
+        icon: "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z",
+    },
+    NavItem {
+        key: "nav.translator",
+        path: "/dashboard/translator",
+        icon: "M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z",
+    },
+    NavItem {
+        key: "nav.catalog",
+        path: "/dashboard/catalog",
+        icon: "M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z",
     },
     NavItem {
         key: "nav.settings",
