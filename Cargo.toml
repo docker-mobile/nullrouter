@@ -117,7 +117,9 @@ thiserror = "2"
 toml = { version = "0.8", features = ["preserve_order"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# `json` for structured output: an enterprise SIEM ingests fields, and regex over a human-readable
+# line breaks whenever a message is reworded.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"

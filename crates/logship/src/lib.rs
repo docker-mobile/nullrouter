@@ -81,6 +81,7 @@ pub fn install(service: &'static str) {
 /// The gateway wants `nullrouter_gateway=info` rather than a bare `info`, because at `info` across
 /// every crate a Pingora process logs its own internals on the request path.
 pub fn install_with_default_filter(service: &'static str, default_filter: &str) {
+    use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
 
@@ -90,11 +91,37 @@ pub fn install_with_default_filter(service: &'static str, default_filter: &str) 
 
     // `try_init`, not `init`: a second call — a test binary, or a service that also sets one up —
     // must not abort the process over its log plumbing.
+    //
+    // The formatter is chosen rather than fixed. A SIEM ingests fields; a human reads lines. Which
+    // one is running is a deployment fact, not something this crate can decide, so `boxed()` erases
+    // the two layer types to one and the variable picks.
+    let format = if json_requested() {
+        // Flattened: `audit`, `event` and `peer` become top-level keys rather than living inside a
+        // nested `fields` object, so a collector's field selector is `audit` and not `fields.audit`.
+        tracing_subscriber::fmt::layer()
+            .json()
+            .flatten_event(true)
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::layer().boxed()
+    };
+
     let _ = tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(format)
         .with(shipper)
         .try_init();
+}
+
+/// Whether structured output was asked for.
+///
+/// Defaults to the human-readable formatter: someone running `./run.sh` to try the router is the
+/// common case, and JSON in a terminal is unreadable. A deployment shipping to a log pipeline sets
+/// `NULLROUTER_LOG_FORMAT=json`.
+fn json_requested() -> bool {
+    std::env::var("NULLROUTER_LOG_FORMAT")
+        .map(|value| value.trim().eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
 }
 
 /// The state service's address, from the same variable the other services read.
@@ -378,5 +405,132 @@ mod tests {
         // Malformed input must not panic; the remainder is dropped because there is no terminator
         // to resume at.
         assert_eq!(strip_ansi("a\u{1b}[31"), "a");
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use std::sync::{Arc, Mutex};
+
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    use super::json_requested;
+
+    /// Collects rendered records so a case can parse them.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<String>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if let Ok(mut guard) = self.0.lock() {
+                guard.push(String::from_utf8_lossy(buf).into_owned());
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn a_json_record_parses_and_keeps_its_fields_at_the_top_level() {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .flatten_event(true)
+                .with_writer(captured.clone()),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(
+                audit = true,
+                event = "auth.login.succeeded",
+                peer = "10.0.0.7",
+                "ok"
+            );
+        });
+
+        let line = captured
+            .0
+            .lock()
+            .ok()
+            .and_then(|guard| guard.first().cloned())
+            .unwrap_or_default();
+
+        // Parsed rather than substring-matched. A formatter that quietly emitted human-readable text
+        // would satisfy `contains("audit")` and break every downstream consumer.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&line).unwrap_or_else(|error| panic!("not JSON: {error}: {line}"));
+
+        // Top-level, not nested under `fields`: a collector's selector is `audit`, not `fields.audit`.
+        assert_eq!(
+            parsed.get("audit"),
+            Some(&serde_json::Value::Bool(true)),
+            "{line}"
+        );
+        assert_eq!(
+            parsed.get("event").and_then(serde_json::Value::as_str),
+            Some("auth.login.succeeded"),
+            "{line}"
+        );
+        assert_eq!(
+            parsed.get("peer").and_then(serde_json::Value::as_str),
+            Some("10.0.0.7"),
+            "{line}"
+        );
+        // A boolean, not the string "true": a SIEM filtering `audit=true` needs the type to survive.
+        assert!(
+            parsed
+                .get("audit")
+                .is_some_and(serde_json::Value::is_boolean),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn the_default_is_human_readable() {
+        // Someone running the router locally is the common case, and JSON in a terminal is
+        // unreadable. Asserted so the default cannot be flipped without a test saying so.
+        let vars = ["NULLROUTER_LOG_FORMAT"];
+        let saved: Vec<_> = vars
+            .iter()
+            .map(|name| (*name, std::env::var_os(name)))
+            .collect();
+        for name in vars {
+            // SAFETY: this test module runs these cases in one thread and restores every variable.
+            unsafe { std::env::remove_var(name) };
+        }
+
+        assert!(!json_requested(), "unset must mean human-readable");
+
+        // SAFETY: as above.
+        unsafe { std::env::set_var("NULLROUTER_LOG_FORMAT", "json") };
+        assert!(json_requested());
+        // Case and whitespace are what an operator actually types into a compose file.
+        // SAFETY: as above.
+        unsafe { std::env::set_var("NULLROUTER_LOG_FORMAT", "  JSON  ") };
+        assert!(json_requested());
+        // SAFETY: as above.
+        unsafe { std::env::set_var("NULLROUTER_LOG_FORMAT", "text") };
+        assert!(!json_requested());
+
+        for (name, value) in saved {
+            match value {
+                // SAFETY: as above.
+                Some(previous) => unsafe { std::env::set_var(name, previous) },
+                // SAFETY: as above.
+                None => unsafe { std::env::remove_var(name) },
+            }
+        }
     }
 }
