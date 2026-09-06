@@ -1916,6 +1916,12 @@ mod persistence_tests {
         // being written, set dirty=true, and have that bit cleared afterwards — leaving B only in
         // memory forever. Pause durable persistence at exactly that point. With the production
         // lock order, the deferred writer cannot obtain the snapshot lock until A is durable.
+        //
+        // The guard is held because this case inspects the file as text. It asserts no key of its
+        // own, but it has to be sure no *other* case's key is in force while it reads: with one set,
+        // the bytes on disk are ciphertext and `read_to_string` fails on invalid UTF-8, which is how
+        // this case first started failing intermittently once sealing existed.
+        let _key = crate::at_rest::KeyGuard::set(None);
         let tempdir = tempfile::tempdir().expect("temporary state directory");
         let path = tempdir.path().join("state.json");
         let store = StateStore::file(&path).expect("state store");
@@ -2056,33 +2062,10 @@ mod persist_permission_tests {
 #[cfg(all(test, unix))]
 mod at_rest_wiring_tests {
     use super::StateStore;
-
-    /// Sets the state key for one case and restores it.
-    struct Key(Option<std::ffi::OsString>);
-
-    impl Key {
-        fn set(value: Option<&str>) -> Self {
-            let saved = std::env::var_os(crate::at_rest::KEY_VAR);
-            match value {
-                // SAFETY: these cases run single-threaded and restore the variable on drop.
-                Some(key) => unsafe { std::env::set_var(crate::at_rest::KEY_VAR, key) },
-                // SAFETY: as above.
-                None => unsafe { std::env::remove_var(crate::at_rest::KEY_VAR) },
-            }
-            Self(saved)
-        }
-    }
-
-    impl Drop for Key {
-        fn drop(&mut self) {
-            match &self.0 {
-                // SAFETY: as above.
-                Some(previous) => unsafe { std::env::set_var(crate::at_rest::KEY_VAR, previous) },
-                // SAFETY: as above.
-                None => unsafe { std::env::remove_var(crate::at_rest::KEY_VAR) },
-            }
-        }
-    }
+    // The crate-wide guard, not a local copy: the key is process-global and these cases run in
+    // parallel with the ones in `at_rest` and in `persistence_tests`, so isolation requires all three
+    // to serialise on one lock.
+    use crate::at_rest::KeyGuard as Key;
 
     /// End-to-end rather than against `at_rest` alone: the module being correct says nothing about
     /// whether `persist` and `file` actually call it. This is the test that would have caught the

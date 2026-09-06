@@ -155,36 +155,61 @@ pub(crate) fn open(bytes: &[u8]) -> Result<Vec<u8>, AtRestError> {
         .map_err(|_| AtRestError::Undecryptable)
 }
 
+/// Sets [`KEY_VAR`] for one case and restores whatever was there.
+///
+/// Lives outside `mod tests` because two other modules in this crate need the same guard, and the
+/// lock has to be the *same* lock for all of them. An environment variable is process-global while
+/// the test harness runs cases on parallel threads, so a per-module guard is not isolation: one
+/// case's key leaks into another's read, and a case that expects no key at all sees one. That is not
+/// hypothetical -- it turned an unrelated persistence test, which reads the file as UTF-8, into an
+/// intermittent failure as soon as sealing became possible.
+#[cfg(test)]
+pub(crate) struct KeyGuard {
+    saved: Option<std::ffi::OsString>,
+    /// Held for the guard's life so no other case can observe a half-applied change.
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl KeyGuard {
+    /// Serialises every case that touches the key, across all three test modules.
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // A case that panics while holding this would poison it; recovering keeps one failure from
+        // cascading into "every other case also failed", which hides the original.
+        LOCK.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn set(value: Option<&str>) -> Self {
+        let lock = Self::lock();
+        let saved = std::env::var_os(KEY_VAR);
+        match value {
+            // SAFETY: the lock above serialises every writer of this variable in the test binary,
+            // and the value is restored on drop.
+            Some(key) => unsafe { std::env::set_var(KEY_VAR, key) },
+            // SAFETY: as above.
+            None => unsafe { std::env::remove_var(KEY_VAR) },
+        }
+        Self { saved, _lock: lock }
+    }
+}
+
+#[cfg(test)]
+impl Drop for KeyGuard {
+    fn drop(&mut self) {
+        match &self.saved {
+            // SAFETY: as in `set` -- still holding the lock, so no reader is mid-flight.
+            Some(previous) => unsafe { std::env::set_var(KEY_VAR, previous) },
+            // SAFETY: as above.
+            None => unsafe { std::env::remove_var(KEY_VAR) },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AtRestError, KEY_VAR, MAGIC, is_sealed, open, seal};
-
-    /// Sets the key for one case and restores whatever was there.
-    struct Key(Option<std::ffi::OsString>);
-
-    impl Key {
-        fn set(value: Option<&str>) -> Self {
-            let saved = std::env::var_os(KEY_VAR);
-            match value {
-                // SAFETY: this module's cases run in one thread and restore the variable on drop.
-                Some(key) => unsafe { std::env::set_var(KEY_VAR, key) },
-                // SAFETY: as above.
-                None => unsafe { std::env::remove_var(KEY_VAR) },
-            }
-            Self(saved)
-        }
-    }
-
-    impl Drop for Key {
-        fn drop(&mut self) {
-            match &self.0 {
-                // SAFETY: as above.
-                Some(previous) => unsafe { std::env::set_var(KEY_VAR, previous) },
-                // SAFETY: as above.
-                None => unsafe { std::env::remove_var(KEY_VAR) },
-            }
-        }
-    }
+    use super::{AtRestError, KEY_VAR, KeyGuard as Key, MAGIC, is_sealed, open, seal};
 
     const SECRET: &[u8] = br#"{"apiKeys":[{"key":"sk-live-do-not-leak-this"}]}"#;
 
