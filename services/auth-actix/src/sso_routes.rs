@@ -103,6 +103,16 @@ fn redirect_clearing_oidc(service: &AuthService, origin: &str, path: &str) -> Ht
     response.finish()
 }
 
+/// The peer address, as a string for the audit trail.
+///
+/// `"unknown"` rather than an omitted field: a record whose shape changes depending on whether the
+/// socket had an address is harder for a collector to query than one where the value says so.
+fn peer_label(request: &HttpRequest) -> String {
+    request
+        .peer_addr()
+        .map_or_else(|| "unknown".to_owned(), |address| address.ip().to_string())
+}
+
 /// `?error=` on `/login`, percent-encoded.
 fn login_error_path(code: &str) -> String {
     format!(
@@ -228,8 +238,22 @@ async fn oidc_callback(
     let origin = origin_for(&service, &request);
     let query = query.map(web::Query::into_inner).unwrap_or_default();
 
+    let peer = peer_label(&request);
+
     // The provider declined. Upstream forwards its code verbatim.
     if let Some(error) = query.error.as_deref().filter(|error| !error.is_empty()) {
+        // The provider's own code, not one of ours: it distinguishes a user who pressed "cancel"
+        // (`access_denied`) from a client the IdP has disabled (`unauthorized_client`), and only the
+        // second is an operator's problem.
+        tracing::warn!(
+            audit = true,
+            event = "auth.sso.failed",
+            method = "oidc",
+            %peer,
+            reason = "provider_declined",
+            provider_error = %error,
+            "the identity provider declined the sign-in before returning a code"
+        );
         return redirect_clearing_oidc(&service, &origin, &login_error_path(error));
     }
 
@@ -237,16 +261,13 @@ async fn oidc_callback(
     let stored_state = cookie_value(oidc::STATE_COOKIE);
     let stored_nonce = cookie_value(oidc::NONCE_COOKIE);
     let verifier = cookie_value(oidc::VERIFIER_COOKIE);
+    let cookies = FlowCookies {
+        state: stored_state.as_deref(),
+        nonce: stored_nonce.as_deref(),
+        verifier: verifier.as_deref(),
+    };
 
-    let outcome = oidc_callback_inner(
-        &service,
-        &origin,
-        &query,
-        stored_state.as_deref(),
-        stored_nonce.as_deref(),
-        verifier.as_deref(),
-    )
-    .await;
+    let outcome = oidc_callback_inner(&service, &origin, &peer, &query, cookies).await;
 
     match outcome {
         Ok(token) => {
@@ -262,8 +283,33 @@ async fn oidc_callback(
             response.cookie(service.session().session_cookie(token));
             response.finish()
         }
-        Err(error) => redirect_clearing_oidc(&service, &origin, &login_error_path(error.code())),
+        Err(error) => {
+            // Warn rather than info: a burst of these is either an attack on the callback or an IdP
+            // that has drifted out of agreement with this config, and both want attention. The
+            // `Display` text carries the specific cause -- which claim failed, which endpoint could
+            // not be reached -- because the stable `code` alone is not enough to fix anything.
+            tracing::warn!(
+                audit = true,
+                event = "auth.sso.failed",
+                method = "oidc",
+                %peer,
+                reason = error.code(),
+                detail = %error,
+                "an OIDC callback was refused before a session was created"
+            );
+            redirect_clearing_oidc(&service, &origin, &login_error_path(error.code()))
+        }
     }
+}
+
+/// The three cookies that bind one OIDC callback to the browser that started it.
+///
+/// Grouped so they cannot be passed independently of each other: a missing nonce or verifier is as
+/// fatal as a state mismatch, and treating them as optional arguments would make that easy to miss.
+struct FlowCookies<'a> {
+    state: Option<&'a str>,
+    nonce: Option<&'a str>,
+    verifier: Option<&'a str>,
 }
 
 /// The callback's decision, returning a session token only on full success.
@@ -274,10 +320,9 @@ async fn oidc_callback(
 async fn oidc_callback_inner(
     service: &AuthService,
     origin: &str,
+    peer: &str,
     query: &CallbackQuery,
-    stored_state: Option<&str>,
-    stored_nonce: Option<&str>,
-    verifier: Option<&str>,
+    cookies: FlowCookies<'_>,
 ) -> Result<String, OidcError> {
     fn non_empty(value: Option<&str>) -> Option<&str> {
         value.filter(|value| !value.is_empty())
@@ -293,9 +338,9 @@ async fn oidc_callback_inner(
     // cookie is as fatal as a mismatch: without the nonce there is nothing to
     // bind the id_token to, and without the verifier PKCE is not being used.
     let (Some(stored_state), Some(stored_nonce), Some(verifier)) = (
-        non_empty(stored_state),
-        non_empty(stored_nonce),
-        non_empty(verifier),
+        non_empty(cookies.state),
+        non_empty(cookies.nonce),
+        non_empty(cookies.verifier),
     ) else {
         return Err(OidcError::InvalidState);
     };
@@ -338,10 +383,33 @@ async fn oidc_callback_inner(
             now_seconds: service.now(),
         },
     )?;
-    // Claims are read only to be dropped for now: the session token carries no
-    // identity beyond "authenticated", so recording them would be storing state
-    // nothing reads. Verification is the part that matters, and it has happened.
-    drop((oidc::pick_display_name(&claims), oidc::pick_email(&claims)));
+    // The session token deliberately carries no identity beyond "authenticated", so these claims are
+    // not stored. They are recorded to the audit trail instead, which is the thing that reads them:
+    // without this, an enterprise signing in through its own IdP produced a trail that could not name
+    // the human who authenticated -- the single most useful field in an incident review, arriving for
+    // free in a token that had already been verified and was being discarded.
+    //
+    // `subject` is included because it is the IdP's stable identifier: a display name or an email can
+    // be reassigned between people, and only `sub` reliably distinguishes them after the fact.
+    //
+    // A claim the provider did not assert says so, rather than rendering as an empty value: `email=`
+    // is ambiguous between "no email" and a field the renderer truncated, and a reviewer should not
+    // have to guess which.
+    let email = oidc::pick_email(&claims);
+    tracing::info!(
+        audit = true,
+        event = "auth.sso.succeeded",
+        method = "oidc",
+        %peer,
+        subject = claims.sub.as_deref().unwrap_or("(not asserted)"),
+        display_name = %oidc::pick_display_name(&claims),
+        email = if email.is_empty() {
+            "(not asserted)"
+        } else {
+            email.as_str()
+        },
+        "dashboard sign-in succeeded through the configured identity provider"
+    );
 
     service
         .session()
@@ -586,6 +654,20 @@ async fn saml_acs(
         Ok(never) => match never {},
         Err(error) => error,
     };
+
+    // Every SAML assertion is refused -- `consume_response` returns `Infallible` on success, so this
+    // build cannot mint a session from one -- and the refusal is still an audit event. An enterprise
+    // that has pointed its IdP here needs the trail to show the attempts arriving and being turned
+    // away, rather than nothing at all, which reads identically to "the IdP was never configured".
+    tracing::warn!(
+        audit = true,
+        event = "auth.sso.failed",
+        method = "saml",
+        peer = %peer_label(&request),
+        reason = error.code(),
+        detail = %error,
+        "a SAML assertion was refused"
+    );
 
     // The refusal is a 501 with a body, not a bare redirect, when the caller
     // asked for JSON — an operator testing their IdP needs to see *why*. A
