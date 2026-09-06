@@ -36,8 +36,14 @@ const KEY_LEN: usize = 32;
 /// The variable holding the operator's key material.
 pub(crate) const KEY_VAR: &str = "NULLROUTER_STATE_KEY";
 
+/// Why sealing or opening the state file failed.
+///
+/// `pub` and re-exported from the crate root because [`crate::StoreError`] carries it: a caller
+/// outside this crate can receive the variant, and a wrapped error it cannot name or match on is not
+/// a usable error surface. The variants are the three an operator can act on -- a key that is absent,
+/// one that does not match, and a file that was cut short.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum AtRestError {
+pub enum AtRestError {
     #[error(
         "the state file is encrypted but {KEY_VAR} is not set; set it to the same value used when \
          the file was written, or the stored credentials cannot be read"

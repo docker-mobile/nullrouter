@@ -9,6 +9,9 @@ mod routes;
 mod store;
 mod usage;
 
+// `AtRestError` is re-exported because `StoreError` wraps it: without this a caller outside the crate
+// could receive the variant but not name the type inside it.
+pub use at_rest::AtRestError;
 pub use store::{FLUSH_INTERVAL, ProviderConnection, StateStore, StoreError};
 
 pub const SERVICE_NAME: &str = "nullrouter-state";
