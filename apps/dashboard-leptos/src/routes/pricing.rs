@@ -15,7 +15,7 @@
 use leptos::prelude::*;
 
 use crate::api::{Hydrate, Method, Save, encode, load_with, request_detailed, submit_reporting};
-use crate::routes::types::{PriceFields, PriceRow, price_rows};
+use crate::routes::types::{PriceFields, PriceRow, encode_query, price_rows};
 use crate::routes::{PageHeader, Panel};
 
 /// The flattened table.
@@ -77,33 +77,6 @@ fn rate_label(rate: Option<f64>) -> String {
 /// A rate for an input field: blank when there is nothing stored.
 fn rate_value(rate: Option<f64>) -> String {
     rate.map(|value| value.to_string()).unwrap_or_default()
-}
-
-/// Percent-encode a query parameter value.
-///
-/// The reset below identifies a model by query string, and the names are not this panel's to choose:
-/// the override form accepts whatever the user types, and the endpoint stores it verbatim. A name
-/// carrying a space or an `&` would otherwise build a request that resets the wrong entry, or none.
-///
-/// Only the unreserved set from RFC 3986 is passed through; everything else, non-ASCII included, is
-/// encoded byte by byte.
-fn encode_query(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push('%');
-            out.push(hex_digit(byte >> 4));
-            out.push(hex_digit(byte & 0x0F));
-        }
-    }
-    out
-}
-
-/// One uppercase hex digit for the low nibble of `value`.
-fn hex_digit(value: u8) -> char {
-    char::from_digit(u32::from(value & 0x0F), 16).map_or('0', |digit| digit.to_ascii_uppercase())
 }
 
 /// Serialize a one-model pricing update into the nested shape the endpoint takes.
@@ -538,10 +511,8 @@ fn RateCell(value: ReadSignal<String>, set: WriteSignal<String>) -> impl IntoVie
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Rate, encode_query, fields_from_entries, parse_rate, patch_body, rate_label, rate_value,
-    };
-    use crate::routes::types::PriceFields;
+    use super::{Rate, fields_from_entries, parse_rate, patch_body, rate_label, rate_value};
+    use crate::routes::types::{PriceFields, encode_query};
 
     #[test]
     fn a_plain_model_name_needs_no_encoding() {

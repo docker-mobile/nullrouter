@@ -108,6 +108,39 @@ pub(crate) struct StateSnapshot {
     /// whoever reads them back.
     #[serde(default)]
     pub(crate) translator_logs: BTreeMap<String, String>,
+    /// Model ids an operator has held back, keyed by provider alias.
+    ///
+    /// Persisted rather than kept per-process: disabling a model is a decision about the install, and
+    /// one that came back on the next restart would be worse than not offering the control at all.
+    #[serde(default)]
+    pub(crate) disabled_models: BTreeMap<String, Vec<String>>,
+    /// Models an operator has declared on a provider that does not advertise them.
+    #[serde(default)]
+    pub(crate) custom_models: Vec<CustomModel>,
+    /// Alternative names for a model, as `alias -> model`.
+    ///
+    /// Keyed by alias because that is the direction every lookup goes: a request arrives naming the
+    /// alias and has to resolve to the real model. One model may have several aliases.
+    #[serde(default)]
+    pub(crate) model_aliases: BTreeMap<String, String>,
+}
+
+/// A model an operator added by hand to a provider's catalogue.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomModel {
+    pub provider_alias: String,
+    pub id: String,
+    /// Upstream's `type`, free-form: `chat`, `embedding`, and others appear in the wild.
+    ///
+    /// Renamed explicitly because `camelCase` would make this `modelType`, and the wire name a client
+    /// sends is `type` -- a rename here is the difference between reading the field and silently
+    /// defaulting it.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub model_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -898,6 +931,131 @@ impl StateStore {
             snapshot.combos.retain(|combo| combo.id != id);
             snapshot.combos.len() != original_len
         })
+    }
+
+    /// Every provider's held-back model ids.
+    pub(crate) fn disabled_models(&self) -> Result<BTreeMap<String, Vec<String>>, StoreError> {
+        self.with_snapshot(|snapshot| snapshot.disabled_models.clone())
+    }
+
+    /// One provider's held-back model ids, empty when it has none.
+    pub(crate) fn disabled_models_for(
+        &self,
+        provider_alias: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        self.with_snapshot(|snapshot| {
+            snapshot
+                .disabled_models
+                .get(provider_alias)
+                .cloned()
+                .unwrap_or_default()
+        })
+    }
+
+    /// Replace one provider's held-back set.
+    ///
+    /// A replace rather than a merge, because the caller sends the whole set: with a merge there
+    /// would be no way to re-enable a model except by naming it in a separate delete, and the UI
+    /// edits the list as a list.
+    ///
+    /// An empty list removes the key instead of storing an empty vector, so a provider with nothing
+    /// disabled does not appear in the map at all -- the same shape it had before it was ever set.
+    pub(crate) fn set_disabled_models(
+        &self,
+        provider_alias: &str,
+        ids: Vec<String>,
+    ) -> Result<Vec<String>, StoreError> {
+        self.write_snapshot(|snapshot| {
+            let mut ids: Vec<String> = ids
+                .into_iter()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| !id.is_empty())
+                .collect();
+            ids.sort();
+            ids.dedup();
+            if ids.is_empty() {
+                snapshot.disabled_models.remove(provider_alias);
+            } else {
+                snapshot
+                    .disabled_models
+                    .insert(provider_alias.to_owned(), ids.clone());
+            }
+            ids
+        })
+    }
+
+    /// Re-enable everything for one provider. `false` when it had nothing disabled.
+    pub(crate) fn clear_disabled_models(&self, provider_alias: &str) -> Result<bool, StoreError> {
+        self.write_snapshot(|snapshot| snapshot.disabled_models.remove(provider_alias).is_some())
+    }
+
+    pub(crate) fn custom_models(&self) -> Result<Vec<CustomModel>, StoreError> {
+        self.with_snapshot(|snapshot| snapshot.custom_models.clone())
+    }
+
+    /// Add a model, or update the one already at this `(provider_alias, id)`.
+    ///
+    /// Returns whether a new entry was added, which is what upstream's `added` field reports. The
+    /// pair is the identity: the same id on two providers is two different models, and re-adding the
+    /// same pair with a new name is an edit rather than a duplicate.
+    pub(crate) fn add_custom_model(
+        &self,
+        provider_alias: String,
+        id: String,
+        model_type: Option<String>,
+        name: Option<String>,
+    ) -> Result<(CustomModel, bool), StoreError> {
+        self.write_snapshot(|snapshot| {
+            let existing = snapshot
+                .custom_models
+                .iter_mut()
+                .find(|model| model.provider_alias == provider_alias && model.id == id);
+            if let Some(model) = existing {
+                model.model_type = model_type;
+                model.name = name;
+                return (model.clone(), false);
+            }
+            let model = CustomModel {
+                provider_alias,
+                id,
+                model_type,
+                name,
+                created_at: timestamp(),
+            };
+            snapshot.custom_models.push(model.clone());
+            (model, true)
+        })
+    }
+
+    /// Remove one model. `false` when the pair was not present.
+    pub(crate) fn delete_custom_model(
+        &self,
+        provider_alias: &str,
+        id: &str,
+    ) -> Result<bool, StoreError> {
+        self.write_snapshot(|snapshot| {
+            let before = snapshot.custom_models.len();
+            snapshot
+                .custom_models
+                .retain(|model| !(model.provider_alias == provider_alias && model.id == id));
+            snapshot.custom_models.len() != before
+        })
+    }
+
+    pub(crate) fn model_aliases(&self) -> Result<BTreeMap<String, String>, StoreError> {
+        self.with_snapshot(|snapshot| snapshot.model_aliases.clone())
+    }
+
+    /// Point `alias` at `model`, replacing any earlier target.
+    pub(crate) fn set_model_alias(&self, alias: String, model: String) -> Result<(), StoreError> {
+        self.write_snapshot(|snapshot| {
+            snapshot.model_aliases.insert(alias, model);
+        })
+    }
+
+    /// Remove one alias. `false` when it was not set.
+    pub(crate) fn delete_model_alias(&self, alias: &str) -> Result<bool, StoreError> {
+        self.write_snapshot(|snapshot| snapshot.model_aliases.remove(alias).is_some())
     }
 
     pub(crate) fn list_proxy_pools(

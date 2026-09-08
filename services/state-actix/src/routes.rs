@@ -46,6 +46,31 @@ pub(crate) fn configure(config: &mut web::ServiceConfig) {
                 .route(web::delete().to(delete_combo))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         )
+        // The model settings an operator owns. These used to answer `success: true` from the API
+        // service and store nothing, so every `GET` came back empty however many writes preceded it.
+        .service(
+            web::resource("/api/models/disabled")
+                .route(web::get().to(disabled_models))
+                .route(web::post().to(disable_models))
+                .route(web::delete().to(enable_models))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/models/custom")
+                .route(web::get().to(custom_models))
+                .route(web::post().to(add_custom_model))
+                .route(web::delete().to(delete_custom_model))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/models/alias")
+                // `PUT` rather than `POST`, matching upstream. `POST` is a 405 here, which is what a
+                // client written against upstream expects.
+                .route(web::put().to(set_model_alias))
+                .route(web::get().to(model_aliases))
+                .route(web::delete().to(delete_model_alias))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
         .service(
             web::resource("/api/proxy-pools")
                 .route(web::get().to(list_proxy_pools))
@@ -530,6 +555,248 @@ async fn update_settings(store: web::Data<StateStore>, body: web::Bytes) -> Http
         StatusCode::OK,
         store.update_settings(update).map(SettingsView::from),
     )
+}
+
+// ── model settings ──
+//
+// The wire shapes are upstream's and are matched field for field, including the two that look
+// inconsistent: `disabled` is a map for the whole-catalogue read but a bare `ids` array when one
+// provider is named, and adding a custom model answers with both `success` and `added`. A client
+// written against upstream has to keep working.
+
+#[derive(Debug, Serialize)]
+struct DisabledModelsResponse {
+    disabled: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+struct DisabledProviderResponse {
+    ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DisabledModelsRequest {
+    #[serde(rename = "providerAlias")]
+    provider_alias: Option<String>,
+    ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+struct SuccessResponse {
+    success: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct CustomModelsResponse<T> {
+    models: T,
+}
+
+#[derive(Debug, Deserialize)]
+struct CustomModelRequest {
+    #[serde(rename = "providerAlias")]
+    provider_alias: Option<String>,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    model_type: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CustomModelAddResponse {
+    success: bool,
+    added: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AliasListResponse {
+    aliases: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AliasRequest {
+    model: Option<String>,
+    alias: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AliasSetResponse {
+    success: bool,
+    model: String,
+    alias: String,
+}
+
+/// `GET /api/models/disabled`, optionally narrowed to one provider.
+async fn disabled_models(
+    store: web::Data<StateStore>,
+    query: web::Query<BTreeMap<String, String>>,
+) -> HttpResponse {
+    if let Some(alias) = query
+        .get("providerAlias")
+        .map(String::as_str)
+        .filter(|alias| !alias.is_empty())
+    {
+        return store_json(
+            StatusCode::OK,
+            store
+                .disabled_models_for(alias)
+                .map(|ids| DisabledProviderResponse { ids }),
+        );
+    }
+    store_json(
+        StatusCode::OK,
+        store
+            .disabled_models()
+            .map(|disabled| DisabledModelsResponse { disabled }),
+    )
+}
+
+/// `POST /api/models/disabled` -- replace one provider's held-back set.
+async fn disable_models(store: web::Data<StateStore>, body: web::Bytes) -> HttpResponse {
+    let request = match parse_json::<DisabledModelsRequest>(&body) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let Some(alias) = trim_optional(request.provider_alias) else {
+        return bad_request("providerAlias and ids[] required");
+    };
+    // An absent `ids` is a malformed request; an empty one is "disable nothing", which is how the
+    // last model gets re-enabled from an editor that only ever sends the whole list.
+    let Some(ids) = request.ids else {
+        return bad_request("providerAlias and ids[] required");
+    };
+    match store.set_disabled_models(&alias, ids) {
+        Ok(_) => responses::json(StatusCode::OK, &SuccessResponse { success: true }),
+        Err(_) => internal_error(),
+    }
+}
+
+/// `DELETE /api/models/disabled?providerAlias=…` -- re-enable everything for one provider.
+async fn enable_models(
+    store: web::Data<StateStore>,
+    query: web::Query<BTreeMap<String, String>>,
+) -> HttpResponse {
+    let Some(alias) = query
+        .get("providerAlias")
+        .map(String::as_str)
+        .filter(|alias| !alias.is_empty())
+    else {
+        return bad_request("providerAlias required");
+    };
+    // Answers `success: true` whether or not anything was disabled: the caller asked for a state, and
+    // that state now holds. Reporting a 404 for "already enabled" would make a retry look like a
+    // failure.
+    match store.clear_disabled_models(alias) {
+        Ok(_) => responses::json(StatusCode::OK, &SuccessResponse { success: true }),
+        Err(_) => internal_error(),
+    }
+}
+
+async fn custom_models(store: web::Data<StateStore>) -> HttpResponse {
+    store_json(
+        StatusCode::OK,
+        store
+            .custom_models()
+            .map(|models| CustomModelsResponse { models }),
+    )
+}
+
+async fn add_custom_model(store: web::Data<StateStore>, body: web::Bytes) -> HttpResponse {
+    let request = match parse_json::<CustomModelRequest>(&body) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let (Some(alias), Some(id)) = (
+        trim_optional(request.provider_alias),
+        trim_optional(request.id),
+    ) else {
+        return bad_request("providerAlias and id required");
+    };
+    match store.add_custom_model(
+        alias,
+        id,
+        trim_optional(request.model_type),
+        trim_optional(request.name),
+    ) {
+        Ok((_, added)) => responses::json(
+            StatusCode::OK,
+            &CustomModelAddResponse {
+                success: true,
+                added,
+            },
+        ),
+        Err(_) => internal_error(),
+    }
+}
+
+async fn delete_custom_model(
+    store: web::Data<StateStore>,
+    query: web::Query<BTreeMap<String, String>>,
+) -> HttpResponse {
+    let alias = query
+        .get("providerAlias")
+        .map(String::as_str)
+        .filter(|alias| !alias.is_empty());
+    let id = query
+        .get("id")
+        .map(String::as_str)
+        .filter(|id| !id.is_empty());
+    let (Some(alias), Some(id)) = (alias, id) else {
+        return bad_request("providerAlias and id required");
+    };
+    match store.delete_custom_model(alias, id) {
+        Ok(true) => responses::json(StatusCode::OK, &SuccessResponse { success: true }),
+        Ok(false) => not_found("Custom model not found"),
+        Err(_) => internal_error(),
+    }
+}
+
+async fn model_aliases(store: web::Data<StateStore>) -> HttpResponse {
+    store_json(
+        StatusCode::OK,
+        store
+            .model_aliases()
+            .map(|aliases| AliasListResponse { aliases }),
+    )
+}
+
+async fn set_model_alias(store: web::Data<StateStore>, body: web::Bytes) -> HttpResponse {
+    let request = match parse_json::<AliasRequest>(&body) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let (Some(model), Some(alias)) = (trim_optional(request.model), trim_optional(request.alias))
+    else {
+        return bad_request("model and alias required");
+    };
+    match store.set_model_alias(alias.clone(), model.clone()) {
+        Ok(()) => responses::json(
+            StatusCode::OK,
+            &AliasSetResponse {
+                success: true,
+                model,
+                alias,
+            },
+        ),
+        Err(_) => internal_error(),
+    }
+}
+
+async fn delete_model_alias(
+    store: web::Data<StateStore>,
+    query: web::Query<BTreeMap<String, String>>,
+) -> HttpResponse {
+    let Some(alias) = query
+        .get("alias")
+        .map(String::as_str)
+        .filter(|alias| !alias.is_empty())
+    else {
+        return bad_request("alias required");
+    };
+    match store.delete_model_alias(alias) {
+        Ok(true) => responses::json(StatusCode::OK, &SuccessResponse { success: true }),
+        Ok(false) => not_found("Alias not found"),
+        Err(_) => internal_error(),
+    }
 }
 
 fn parse_json<T>(body: &[u8]) -> Result<T, HttpResponse>

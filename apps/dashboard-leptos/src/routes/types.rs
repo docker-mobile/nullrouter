@@ -257,6 +257,15 @@ pub struct DisabledModels {
     pub disabled: std::collections::BTreeMap<String, Vec<String>>,
 }
 
+/// Alternative names for a model, as `alias -> model`.
+///
+/// Keyed by alias because that is the direction every lookup goes. The store uses the same shape.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ModelAliases {
+    #[serde(default)]
+    pub aliases: std::collections::BTreeMap<String, String>,
+}
+
 /// The outcome of `POST /api/models/test`.
 ///
 /// The route answers `200` even when the model did not work, with `ok` carrying the verdict, so
@@ -396,6 +405,33 @@ pub fn is_valid_combo_name(name: &str) -> bool {
         && name
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+/// Percent-encode a query parameter value.
+///
+/// The reset below identifies a model by query string, and the names are not this panel's to choose:
+/// the override form accepts whatever the user types, and the endpoint stores it verbatim. A name
+/// carrying a space or an `&` would otherwise build a request that resets the wrong entry, or none.
+///
+/// Only the unreserved set from RFC 3986 is passed through; everything else, non-ASCII included, is
+/// encoded byte by byte.
+pub fn encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push('%');
+            out.push(hex_digit(byte >> 4));
+            out.push(hex_digit(byte & 0x0F));
+        }
+    }
+    out
+}
+
+/// One uppercase hex digit for the low nibble of `value`.
+fn hex_digit(value: u8) -> char {
+    char::from_digit(u32::from(value & 0x0F), 16).map_or('0', |digit| digit.to_ascii_uppercase())
 }
 
 #[cfg(test)]

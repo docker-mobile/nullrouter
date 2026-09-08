@@ -257,19 +257,22 @@ async fn usage_routes_return_empty_metrics_and_validate_periods() -> TestResult 
 
 #[actix_rt::test]
 async fn catalog_and_model_routes_return_default_shapes_and_mutation_boundaries() -> TestResult {
-    // Given: model catalog mutations are not persisted in this deterministic slice.
+    // Given: this service owns the live catalogue and per-process availability. The three stored
+    // model settings -- `disabled`, `custom`, and `alias` -- are no longer registered here: they moved
+    // to `nullrouter-state`, because they have to survive a restart and this service has nowhere to
+    // put them. Their contract is asserted in that crate's `model_settings_contract` suite, against a
+    // store that is reopened from disk, which is the part this service could never have proved.
 
     // When: catalog and model metadata endpoints are requested.
     let (pricing_status, pricing) = get_json("/api/pricing").await?;
     let (tags_status, tags) = get_json("/api/tags").await?;
     let (availability_status, availability) = get_json("/api/models/availability").await?;
-    let (disabled_status, disabled) = get_json("/api/models/disabled").await?;
-    let (disabled_one_status, disabled_one) =
-        get_json("/api/models/disabled?providerAlias=openai").await?;
-    let (custom_status, custom) = get_json("/api/models/custom").await?;
-    let (alias_status, aliases) = get_json("/api/models/alias").await?;
-    let (alias_put_status, alias_put) =
-        request_json(actix_web::http::Method::PUT, "/api/models/alias", "{").await?;
+    let (clear_status, clear) = request_json(
+        actix_web::http::Method::POST,
+        "/api/models/availability",
+        "{",
+    )
+    .await?;
 
     // Then: all registered route families answer with JSON contract shapes.
     assert_eq!(pricing_status, StatusCode::OK);
@@ -283,16 +286,29 @@ async fn catalog_and_model_routes_return_default_shapes_and_mutation_boundaries(
     assert_eq!(availability_status, StatusCode::OK);
     assert_eq!(field(&availability, "models")?, &serde_json::json!([]));
     assert_eq!(field(&availability, "unavailableCount")?, 0);
-    assert_eq!(disabled_status, StatusCode::OK);
-    assert_eq!(field(&disabled, "disabled")?, &serde_json::json!({}));
-    assert_eq!(disabled_one_status, StatusCode::OK);
-    assert_eq!(field(&disabled_one, "ids")?, &serde_json::json!([]));
-    assert_eq!(custom_status, StatusCode::OK);
-    assert_eq!(field(&custom, "models")?, &serde_json::json!([]));
-    assert_eq!(alias_status, StatusCode::OK);
-    assert_eq!(field(&aliases, "aliases")?, &serde_json::json!({}));
-    assert_eq!(alias_put_status, StatusCode::BAD_REQUEST);
-    assert_eq!(field(&alias_put, "error")?, "Invalid JSON body");
+    // A malformed body is refused rather than accepted and ignored.
+    assert_eq!(clear_status, StatusCode::BAD_REQUEST);
+    assert!(field(&clear, "error").is_ok(), "{clear}");
+    Ok(())
+}
+
+#[actix_rt::test]
+async fn the_moved_model_settings_are_no_longer_served_here() -> TestResult {
+    // Given: a route this service no longer registers must not answer. The failure this guards against
+    // is a re-registered stub: a handler here would take precedence for any caller reaching this
+    // service directly, and would answer `success: true` while the stored copy went untouched.
+
+    for uri in [
+        "/api/models/disabled",
+        "/api/models/custom",
+        "/api/models/alias",
+    ] {
+        // When: it is requested against the API service.
+        let (status, _) = get_json(uri).await?;
+
+        // Then: it is not found here, rather than served from a second source of truth.
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+    }
     Ok(())
 }
 
