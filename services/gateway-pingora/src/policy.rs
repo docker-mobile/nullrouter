@@ -74,18 +74,85 @@ const HOST_ONLY_WRITE_PREFIXES: &[&str] = &[
     "/api/headroom/extras",
 ];
 
+/// What a signed-in principal is allowed to do.
+///
+/// Ordered, so "at least this much" is a comparison rather than a match. The gateway is where this has
+/// to be enforced: it is the only component that sees a request's route and its session's role at the
+/// same moment, and a check inside each service would be one implementation per service to keep in
+/// agreement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PrincipalRole {
+    /// Reads only.
+    Viewer,
+    /// Everything about how the router runs, but not who may sign in.
+    Operator,
+    /// Everything.
+    Admin,
+}
+
+impl PrincipalRole {
+    /// Parse the role a session token carried.
+    ///
+    /// Anything unrecognised is `Viewer`, not `Admin` and not an error. A token minted by a newer
+    /// build could name a role this one has never heard of, and the safe reading of an unknown claim
+    /// is the least privilege -- an unknown role that read as full access would be an escalation
+    /// delivered by a version skew.
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "admin" => Self::Admin,
+            "operator" => Self::Operator,
+            _ => Self::Viewer,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Viewer => "viewer",
+            Self::Operator => "operator",
+            Self::Admin => "admin",
+        }
+    }
+
+    /// Rank, so `satisfies` can compare inside a `const fn`.
+    ///
+    /// The derived `Ord` is not const, and `decision` is, which is worth keeping: it makes the whole
+    /// access decision a compile-time-checkable function of its inputs with no allocation.
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Viewer => 0,
+            Self::Operator => 1,
+            Self::Admin => 2,
+        }
+    }
+
+    /// Whether this role is at least `needed`.
+    pub const fn satisfies(self, needed: Self) -> bool {
+        self.rank() >= needed.rank()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessRequirement {
     Public,
     DashboardSession,
-    ApiSession,
+    /// An API session holding at least `least`.
+    ApiSession {
+        least: PrincipalRole,
+    },
     RuntimeApiKey,
     Forbidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthorizationState {
-    Authorized,
+    /// Authorized, carrying what the principal may do.
+    ///
+    /// `None` is a principal with no role claim: a `/v1` API key, or a dashboard session minted before
+    /// managed users existed. Both are treated as `Admin`, which is what they were -- reducing them
+    /// would break every un-migrated install and every runtime key at once.
+    Authorized {
+        role: Option<PrincipalRole>,
+    },
     Denied,
     Unavailable,
 }
@@ -122,7 +189,9 @@ impl AccessRequirement {
             RouteKind::Runtime | RouteKind::Auth => Self::Public,
             RouteKind::Dashboard => Self::DashboardSession,
             RouteKind::Api | RouteKind::Catalog | RouteKind::Events | RouteKind::State => {
-                Self::ApiSession
+                Self::ApiSession {
+                    least: least_role(path, method),
+                }
             }
         }
     }
@@ -132,13 +201,31 @@ impl AccessRequirement {
             Self::Public => AccessDecision::Allow,
             Self::Forbidden => AccessDecision::Forbidden,
             Self::DashboardSession => match state {
-                AuthorizationState::Authorized => AccessDecision::Allow,
+                AuthorizationState::Authorized { .. } => AccessDecision::Allow,
                 AuthorizationState::Denied | AuthorizationState::Unavailable => {
                     AccessDecision::RedirectToLogin
                 }
             },
-            Self::ApiSession | Self::RuntimeApiKey => match state {
-                AuthorizationState::Authorized => AccessDecision::Allow,
+            Self::RuntimeApiKey => match state {
+                AuthorizationState::Authorized { .. } => AccessDecision::Allow,
+                AuthorizationState::Denied | AuthorizationState::Unavailable => {
+                    AccessDecision::Unauthorized
+                }
+            },
+            Self::ApiSession { least } => match state {
+                // A principal with no role claim is the legacy full-access one; see
+                // `AuthorizationState::Authorized`.
+                AuthorizationState::Authorized { role: None } => AccessDecision::Allow,
+                AuthorizationState::Authorized { role: Some(role) } => {
+                    if role.satisfies(least) {
+                        AccessDecision::Allow
+                    } else {
+                        // Forbidden, not Unauthorized: the session is valid and signing in again with
+                        // the same account will not help. A 401 here would send the dashboard to the
+                        // login screen in a loop.
+                        AccessDecision::Forbidden
+                    }
+                }
                 AuthorizationState::Denied | AuthorizationState::Unavailable => {
                     AccessDecision::Unauthorized
                 }
@@ -178,7 +265,7 @@ pub fn authorization_request(
     requirement: AccessRequirement,
 ) -> Option<AuthorizeRequest> {
     match requirement {
-        AccessRequirement::DashboardSession | AccessRequirement::ApiSession => {
+        AccessRequirement::DashboardSession | AccessRequirement::ApiSession { .. } => {
             Some(AuthorizeRequest::Dashboard {
                 session_token: session_token(request),
             })
@@ -227,6 +314,26 @@ fn is_public_path(path: &str) -> bool {
         || path == "/api/health"
         || path == "/api/auth"
         || path.starts_with("/api/auth/")
+}
+
+/// The least role that may make this request.
+///
+/// Three rules, in order. Everything under `/api/users` is admin-only, because managing who can sign in
+/// is the one capability that can grant every other. Any mutating method needs at least operator, since
+/// a viewer that could change routing is not a viewer. Everything else is a read, which viewer covers.
+///
+/// `OPTIONS` counts as a read: a CORS preflight carries no body and changes nothing, and failing it
+/// makes the browser report a network error instead of the 403 the real request would return.
+fn least_role(path: &str, method: &Method) -> PrincipalRole {
+    if path == "/api/users" || path.starts_with("/api/users/") {
+        return PrincipalRole::Admin;
+    }
+    let mutating = !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS);
+    if mutating {
+        PrincipalRole::Operator
+    } else {
+        PrincipalRole::Viewer
+    }
 }
 
 fn is_internal_path(path: &str) -> bool {

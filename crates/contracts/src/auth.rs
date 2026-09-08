@@ -68,6 +68,13 @@ pub struct AuthorizeResponse {
     pub key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// What the principal may do: `admin`, `operator` or `viewer`.
+    ///
+    /// Absent for a runtime API key, which has no dashboard role, and for a dashboard session minted
+    /// before managed users existed. The gateway reads an absent role as the legacy full-access
+    /// principal, so an un-migrated install and every `/v1` key keep working.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

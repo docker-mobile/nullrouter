@@ -12,10 +12,36 @@ use std::{
 };
 
 use nullrouter_auth::{
-    ApiKeyValidator, AuthConfig, AuthService, Clock, LockoutConfig, PasswordConfig,
+    ApiKeyValidator, AuthConfig, AuthService, AuthSettings, AuthSettingsProvider, Clock,
+    LockoutConfig, PasswordConfig, SettingsError, UserDirectory, UsersError, Verdict,
 };
 
 pub(crate) const PASSWORD: &str = "g017-test-password";
+
+/// A directory reporting that no account exists, so the shared password is the way in.
+///
+/// This is the state every install starts in, and the one the password cases here are about. A test
+/// that needs accounts supplies its own directory instead.
+#[derive(Debug)]
+pub(crate) struct NoUsers;
+
+#[async_trait::async_trait]
+impl UserDirectory for NoUsers {
+    async fn verify(&self, _username: &str, _password: &str) -> Result<Verdict, UsersError> {
+        Ok(Verdict::NoUsersConfigured)
+    }
+}
+
+/// Settings with no SSO configured.
+#[derive(Debug)]
+pub(crate) struct NoSso;
+
+#[async_trait::async_trait]
+impl AuthSettingsProvider for NoSso {
+    async fn settings(&self) -> Result<AuthSettings, SettingsError> {
+        Ok(AuthSettings::default())
+    }
+}
 
 pub(crate) const fn peer(octet: u8) -> SocketAddr {
     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, octet)), 41000)
@@ -55,7 +81,13 @@ pub(crate) fn service(
     .with_lockout(lockout)
     .with_state_validation_url("http://127.0.0.1:9/internal/v1/keys/validate")?;
 
-    Ok(AuthService::with_dependencies(config, clock, validator)?)
+    Ok(AuthService::with_directory(
+        config,
+        clock,
+        validator,
+        Arc::new(NoSso),
+        Arc::new(NoUsers),
+    )?)
 }
 
 /// A service whose cookie is not `Secure`, so a test client over plaintext keeps it.
@@ -76,7 +108,13 @@ pub(crate) fn default_service(
     .with_lockout(lockout)
     .with_state_validation_url("http://127.0.0.1:9/internal/v1/keys/validate")?;
 
-    Ok(AuthService::with_dependencies(config, clock, validator)?)
+    Ok(AuthService::with_directory(
+        config,
+        clock,
+        validator,
+        Arc::new(NoSso),
+        Arc::new(NoUsers),
+    )?)
 }
 
 pub(crate) const fn default_lockout() -> LockoutConfig {

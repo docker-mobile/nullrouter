@@ -138,6 +138,20 @@ pub struct AuthStatus {
     pub display_name: String,
     #[serde(default)]
     pub login_method: String,
+    /// The signed-in account, absent on a shared-password session.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// `admin`, `operator` or `viewer`. Defaults to admin when the field is absent, which is what a
+    /// shared-password session is: the legacy full-access principal.
+    #[serde(default = "default_role")]
+    pub role: String,
+    /// Whether any managed account exists.
+    #[serde(default)]
+    pub users_configured: bool,
+}
+
+fn default_role() -> String {
+    "admin".to_owned()
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]

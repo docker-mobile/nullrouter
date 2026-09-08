@@ -20,6 +20,9 @@ nullrouter-logship.workspace = true
 rusqlite.workspace = true
 actix-web.workspace = true
 getrandom = "0.3"
+# Password hashing for managed users. The hash is stored here and verified here; it never crosses a
+# process boundary, so this is the one crate that needs it.
+bcrypt = "0.17"
 nullrouter-contracts.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -8,6 +8,7 @@ mod responses;
 mod routes;
 mod store;
 mod usage;
+mod users;
 
 // `AtRestError` is re-exported because `StoreError` wraps it: without this a caller outside the crate
 // could receive the variant but not name the type inside it.
@@ -24,4 +25,5 @@ pub fn configure(config: &mut actix_web::web::ServiceConfig) {
     provider_nodes::configure(config);
     internal::configure(config);
     console_logs::configure(config);
+    users::configure(config);
 }

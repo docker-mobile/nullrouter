@@ -142,7 +142,7 @@ fn public_internal_paths_are_denied() {
         // Then: the public port rejects the request before routing.
         assert_eq!(requirement, AccessRequirement::Forbidden, "{path}");
         assert_eq!(
-            requirement.decision(AuthorizationState::Authorized),
+            requirement.decision(AuthorizationState::Authorized { role: None }),
             AccessDecision::Forbidden,
             "{path}"
         );
@@ -165,7 +165,7 @@ fn host_only_route_rejects_non_loopback_peer() {
 
     // Then: the remote peer is forbidden while the local peer still needs a session.
     assert_eq!(remote, AccessRequirement::Forbidden);
-    assert_eq!(local, AccessRequirement::ApiSession);
+    assert!(matches!(local, AccessRequirement::ApiSession { .. }));
 }
 
 #[test]
@@ -188,15 +188,17 @@ fn cli_tool_config_writes_are_host_only_while_reads_are_not() {
             // elsewhere must not rewrite this host's dotfiles.
             assert_eq!(remote, AccessRequirement::Forbidden, "{method} {path}");
             assert_eq!(
-                remote.decision(AuthorizationState::Authorized),
+                remote.decision(AuthorizationState::Authorized { role: None }),
                 AccessDecision::Forbidden,
                 "{method} {path} allowed a remote peer holding a valid session"
             );
             // And the same write from this host still needs a session — host-only is not
             // a bypass.
-            assert_eq!(
-                config.access_requirement(path, &method, Some(LOOPBACK)),
-                AccessRequirement::ApiSession,
+            assert!(
+                matches!(
+                    config.access_requirement(path, &method, Some(LOOPBACK)),
+                    AccessRequirement::ApiSession { .. }
+                ),
                 "{method} {path}"
             );
         }
@@ -205,9 +207,11 @@ fn cli_tool_config_writes_are_host_only_while_reads_are_not() {
         // the dashboard's status pane is. Holding it to loopback would blank that pane for
         // every remote user while protecting nothing.
         for method in [Method::GET, Method::HEAD, Method::OPTIONS] {
-            assert_eq!(
-                config.access_requirement(path, &method, Some(REMOTE)),
-                AccessRequirement::ApiSession,
+            assert!(
+                matches!(
+                    config.access_requirement(path, &method, Some(REMOTE)),
+                    AccessRequirement::ApiSession { .. }
+                ),
                 "{method} {path} should stay readable with a session"
             );
         }
@@ -233,13 +237,15 @@ fn headroom_process_control_is_host_only_and_its_extras_writes_are_too() {
             // Then: refused before routing, and not a bypass from this host either.
             assert_eq!(remote, AccessRequirement::Forbidden, "{method} {path}");
             assert_eq!(
-                remote.decision(AuthorizationState::Authorized),
+                remote.decision(AuthorizationState::Authorized { role: None }),
                 AccessDecision::Forbidden,
                 "{method} {path} allowed a remote peer holding a valid session"
             );
-            assert_eq!(
-                config.access_requirement(path, &method, Some(LOOPBACK)),
-                AccessRequirement::ApiSession,
+            assert!(
+                matches!(
+                    config.access_requirement(path, &method, Some(LOOPBACK)),
+                    AccessRequirement::ApiSession { .. }
+                ),
                 "{method} {path}"
             );
         }
@@ -254,9 +260,11 @@ fn headroom_process_control_is_host_only_and_its_extras_writes_are_too() {
         );
     }
     for method in [Method::GET, Method::HEAD, Method::OPTIONS] {
-        assert_eq!(
-            config.access_requirement("/api/headroom/extras", &method, Some(REMOTE)),
-            AccessRequirement::ApiSession,
+        assert!(
+            matches!(
+                config.access_requirement("/api/headroom/extras", &method, Some(REMOTE)),
+                AccessRequirement::ApiSession { .. }
+            ),
             "{method} /api/headroom/extras is the compression pane and should stay readable"
         );
     }
@@ -299,15 +307,17 @@ fn every_tunnel_route_is_host_only_including_its_reads() {
             // Then: it is refused before routing.
             assert_eq!(remote, AccessRequirement::Forbidden, "{method} {path}");
             assert_eq!(
-                remote.decision(AuthorizationState::Authorized),
+                remote.decision(AuthorizationState::Authorized { role: None }),
                 AccessDecision::Forbidden,
                 "{method} {path} allowed a remote peer holding a valid session"
             );
 
             // And from this host it still needs a session: host-only is not a bypass.
-            assert_eq!(
-                config.access_requirement(path, &method, Some(LOOPBACK)),
-                AccessRequirement::ApiSession,
+            assert!(
+                matches!(
+                    config.access_requirement(path, &method, Some(LOOPBACK)),
+                    AccessRequirement::ApiSession { .. }
+                ),
                 "{method} {path}"
             );
         }
@@ -351,12 +361,15 @@ fn pxpipe_install_and_start_are_host_only() {
         // on another machine must not install software on this host.
         assert_eq!(remote, AccessRequirement::Forbidden, "{path}");
         assert_eq!(
-            remote.decision(AuthorizationState::Authorized),
+            remote.decision(AuthorizationState::Authorized { role: None }),
             AccessDecision::Forbidden,
             "{path} allowed a remote peer holding a valid session"
         );
         // And a local caller still needs a session — host-only is not a bypass.
-        assert_eq!(local, AccessRequirement::ApiSession, "{path}");
+        assert!(
+            matches!(local, AccessRequirement::ApiSession { .. }),
+            "{path}"
+        );
     }
 }
 
@@ -374,9 +387,11 @@ fn the_read_only_pxpipe_routes_stay_reachable_with_a_session() {
         "/api/pxpipe/stop",
         "/api/pxpipe/restart",
     ] {
-        assert_eq!(
-            config.access_requirement(path, &Method::GET, Some(REMOTE)),
-            AccessRequirement::ApiSession,
+        assert!(
+            matches!(
+                config.access_requirement(path, &Method::GET, Some(REMOTE)),
+                AccessRequirement::ApiSession { .. }
+            ),
             "{path}"
         );
     }
@@ -389,7 +404,7 @@ fn runtime_key_enforcement_allows_valid_key() {
     let requirement = config.access_requirement("/v1/models", &Method::GET, Some(REMOTE));
 
     // When: Auth validates the managed key.
-    let decision = requirement.decision(AuthorizationState::Authorized);
+    let decision = requirement.decision(AuthorizationState::Authorized { role: None });
 
     // Then: the runtime request may proceed.
     assert_eq!(requirement, AccessRequirement::RuntimeApiKey);

@@ -102,11 +102,23 @@ impl ProxyHttp for GatewayProxy {
         }
 
         let state = match requirement {
+            // Neither consults the auth service: `Public` needs no principal, and `Forbidden` is
+            // already refused by `decision` regardless of what a principal would have been.
             crate::policy::AccessRequirement::Public
-            | crate::policy::AccessRequirement::Forbidden => AuthorizationState::Authorized,
+            | crate::policy::AccessRequirement::Forbidden => {
+                AuthorizationState::Authorized { role: None }
+            }
             _ => match authorization_request(session.req_header(), requirement) {
                 Some(request) => match self.auth_client.authorize(&request).await {
-                    Ok(response) if response.authorized => AuthorizationState::Authorized,
+                    Ok(response) if response.authorized => AuthorizationState::Authorized {
+                        // Absent for a runtime API key and for a session minted before managed users
+                        // existed. Both mean "no role claim", which `decision` reads as the legacy
+                        // full-access principal.
+                        role: response
+                            .role
+                            .as_deref()
+                            .map(crate::policy::PrincipalRole::parse),
+                    },
                     Ok(_) => AuthorizationState::Denied,
                     Err(_) => AuthorizationState::Unavailable,
                 },

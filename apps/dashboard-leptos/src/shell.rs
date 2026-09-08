@@ -63,6 +63,11 @@ pub const NAV_ITEMS: &[NavItem] = &[
         icon: "M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z",
     },
     NavItem {
+        key: "nav.users",
+        path: "/dashboard/users",
+        icon: "M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z",
+    },
+    NavItem {
         key: "nav.usage",
         path: "/dashboard/usage",
         icon: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z",
@@ -328,9 +333,61 @@ fn Header(collapsed: ReadSignal<bool>, set_collapsed: WriteSignal<bool>) -> impl
 
             <div class="flex-1" />
 
+            <AccountBadge />
             <LanguagePicker />
             <ThemeToggle />
         </header>
+    }
+}
+
+/// Who is signed in, and what they may do.
+///
+/// The role is shown rather than only used, because it is the answer to "why is that button refusing
+/// me". A viewer who can see `Viewer` next to their name has an explanation; one who only sees a 403
+/// has a bug report.
+///
+/// Renders nothing until the status arrives. A placeholder name would be a guess, and this is the one
+/// label on screen that must not be one.
+#[component]
+fn AccountBadge() -> impl IntoView {
+    use crate::api::{Hydrate, load};
+    use crate::routes::types::AuthStatus;
+
+    let locale = crate::i18n::use_locale();
+    let (status, set_status) = signal(Hydrate::<AuthStatus>::Loading);
+    load("/api/auth/status", set_status);
+
+    view! {
+        {move || {
+            let Hydrate::Ready(status) = status.get() else {
+                return None;
+            };
+            if !status.authenticated {
+                return None;
+            }
+            let name = if status.display_name.is_empty() {
+                locale.get("users.never").to_owned()
+            } else {
+                status.display_name.clone()
+            };
+            // Literal keys, because `i18n-gen` finds keys by scanning for `get("`.
+            let role = match status.role.as_str() {
+                "admin" => locale.get("users.role_admin").to_owned(),
+                "operator" => locale.get("users.role_operator").to_owned(),
+                _ => locale.get("users.role_viewer").to_owned(),
+            };
+            // The long form names what the role means; the badge shows only the word, since the row is
+            // narrow and the full sentence belongs in a tooltip.
+            let short = status.role;
+            Some(view! {
+                <div class="hidden sm:flex flex-col items-end leading-tight" title=role>
+                    <span class="text-xs font-medium">{name}</span>
+                    <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {short}
+                    </span>
+                </div>
+            })
+        }}
     }
 }
 

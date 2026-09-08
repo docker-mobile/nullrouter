@@ -168,6 +168,7 @@ pub mod translator;
 pub mod tunnel;
 pub mod types;
 pub mod usage;
+pub mod users;
 
 pub use cli_tools::CliTools;
 pub use combos::Combos;
@@ -186,6 +187,7 @@ pub use settings::Settings;
 pub use status::StatusPage;
 pub use tunnel::Tunnel;
 pub use usage::Usage;
+pub use users::Users;
 
 /// Shown for any path the router does not recognise.
 #[component]

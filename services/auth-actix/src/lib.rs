@@ -12,6 +12,7 @@ pub mod session;
 pub mod settings_client;
 mod sso_routes;
 pub mod state_client;
+pub mod users_client;
 
 use std::sync::{Arc, Mutex};
 
@@ -19,6 +20,7 @@ pub use clock::{Clock, SystemClock};
 pub use config::{AuthConfig, AuthConfigError, LockoutConfig, PasswordConfig};
 pub use settings_client::{AuthSettings, AuthSettingsProvider, SettingsError};
 pub use state_client::{ApiKeyValidation, ApiKeyValidator, StateValidationError};
+pub use users_client::{UserDirectory, UsersError, Verdict, VerifiedUser};
 
 use lockout::LockoutStore;
 use oidc::OidcHttp;
@@ -26,6 +28,7 @@ use password::PasswordVerifier;
 use session::SessionCodec;
 use settings_client::HttpAuthSettingsProvider;
 use state_client::HttpApiKeyValidator;
+use users_client::HttpUserDirectory;
 
 pub const SERVICE_NAME: &str = "nullrouter-auth";
 pub const DEFAULT_HOST: &str = "127.0.0.1";
@@ -44,6 +47,7 @@ struct AuthServiceInner {
     lockout: Mutex<LockoutStore>,
     key_validator: ValidatorBackend,
     settings: SettingsBackend,
+    directory: DirectoryBackend,
     oidc_http: Option<OidcHttp>,
 }
 
@@ -57,6 +61,11 @@ enum SettingsBackend {
     Custom(Arc<dyn AuthSettingsProvider>),
 }
 
+enum DirectoryBackend {
+    Http(HttpUserDirectory),
+    Custom(Arc<dyn UserDirectory>),
+}
+
 impl AuthService {
     pub fn from_config(config: AuthConfig) -> Result<Self, AuthConfigError> {
         config.validate()?;
@@ -68,11 +77,16 @@ impl AuthService {
             config.state_auth_settings_url().clone(),
             config.state_timeout(),
         )?;
+        let directory = HttpUserDirectory::new(
+            config.state_users_verify_url().clone(),
+            config.state_timeout(),
+        )?;
         Self::new_inner(
             config,
             Arc::new(SystemClock),
             ValidatorBackend::Http(validator),
             SettingsBackend::Http(settings),
+            DirectoryBackend::Http(directory),
         )
     }
 
@@ -85,11 +99,16 @@ impl AuthService {
             config.state_auth_settings_url().clone(),
             config.state_timeout(),
         )?;
+        let directory = HttpUserDirectory::new(
+            config.state_users_verify_url().clone(),
+            config.state_timeout(),
+        )?;
         Self::new_inner(
             config,
             clock,
             ValidatorBackend::Custom(key_validator),
             SettingsBackend::Http(settings),
+            DirectoryBackend::Http(directory),
         )
     }
 
@@ -104,11 +123,37 @@ impl AuthService {
         key_validator: Arc<dyn ApiKeyValidator>,
         settings: Arc<dyn AuthSettingsProvider>,
     ) -> Result<Self, AuthConfigError> {
+        let directory = HttpUserDirectory::new(
+            config.state_users_verify_url().clone(),
+            config.state_timeout(),
+        )?;
         Self::new_inner(
             config,
             clock,
             ValidatorBackend::Custom(key_validator),
             SettingsBackend::Custom(settings),
+            DirectoryBackend::Http(directory),
+        )
+    }
+
+    /// Build a service with a caller-supplied credential directory.
+    ///
+    /// The sign-in path is the one place where "the credential store is down" and "that password is
+    /// wrong" must not look alike, and that distinction is only testable with a directory a test
+    /// controls.
+    pub fn with_directory(
+        config: AuthConfig,
+        clock: Arc<dyn Clock>,
+        key_validator: Arc<dyn ApiKeyValidator>,
+        settings: Arc<dyn AuthSettingsProvider>,
+        directory: Arc<dyn UserDirectory>,
+    ) -> Result<Self, AuthConfigError> {
+        Self::new_inner(
+            config,
+            clock,
+            ValidatorBackend::Custom(key_validator),
+            SettingsBackend::Custom(settings),
+            DirectoryBackend::Custom(directory),
         )
     }
 
@@ -117,6 +162,7 @@ impl AuthService {
         clock: Arc<dyn Clock>,
         key_validator: ValidatorBackend,
         settings: SettingsBackend,
+        directory: DirectoryBackend,
     ) -> Result<Self, AuthConfigError> {
         config.validate()?;
         Ok(Self {
@@ -133,6 +179,7 @@ impl AuthService {
                 clock,
                 key_validator,
                 settings,
+                directory,
             }),
         })
     }
@@ -165,6 +212,31 @@ impl AuthService {
             ValidatorBackend::Http(validator) => validator.validate(api_key).await,
             ValidatorBackend::Custom(validator) => validator.validate(api_key).await,
         }
+    }
+
+    /// Check a username and password against the managed accounts.
+    pub(crate) async fn verify_user(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<Verdict, UsersError> {
+        match &self.inner.directory {
+            DirectoryBackend::Http(directory) => directory.verify(username, password).await,
+            DirectoryBackend::Custom(directory) => directory.verify(username, password).await,
+        }
+    }
+
+    /// Whether any managed account exists.
+    ///
+    /// Asked with an empty credential, which can never match: the answer that matters is the
+    /// `sharedPasswordActive` flag the directory returns alongside the refusal. An unreachable store
+    /// reports `true` -- the safe reading, because it makes the dashboard show the migration notice
+    /// rather than claim accounts are configured when that could not be checked.
+    pub(crate) async fn users_configured(&self) -> bool {
+        !matches!(
+            self.verify_user("", "").await,
+            Ok(Verdict::NoUsersConfigured) | Err(_)
+        )
     }
 
     /// The stored SSO configuration, secrets included.

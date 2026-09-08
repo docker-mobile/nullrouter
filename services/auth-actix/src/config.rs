@@ -7,6 +7,9 @@ use thiserror::Error;
 const MIN_SESSION_SECRET_BYTES: usize = 32;
 const DEFAULT_STATE_VALIDATION_URL: &str = "http://127.0.0.1:20134/internal/v1/keys/validate";
 const DEFAULT_STATE_AUTH_SETTINGS_URL: &str = "http://127.0.0.1:20134/internal/v1/auth-settings";
+/// Where a username and password are checked against the managed accounts. Under `/internal`, which
+/// the gateway refuses, so it is reachable only on loopback.
+const DEFAULT_STATE_USERS_VERIFY_URL: &str = "http://127.0.0.1:20134/internal/v1/users/verify";
 /// Fallback public origin, used to build the OIDC `redirect_uri` and the SAML ACS
 /// URL when the request carries no usable host. Matches the dashboard's port.
 const DEFAULT_PUBLIC_ORIGIN: &str = "http://localhost:20128";
@@ -45,6 +48,7 @@ pub struct AuthConfig {
     lockout: LockoutConfig,
     state_validation_url: Url,
     state_auth_settings_url: Url,
+    state_users_verify_url: Url,
     state_timeout: Duration,
     /// Timeout for calls out to an identity provider. Longer than the loopback
     /// state timeout, since discovery and the token exchange cross the internet.
@@ -93,6 +97,7 @@ impl AuthConfig {
     pub fn new(session_secret: Vec<u8>, password: PasswordConfig) -> Result<Self, AuthConfigError> {
         let state_validation_url = parse_state_url(DEFAULT_STATE_VALIDATION_URL)?;
         let state_auth_settings_url = parse_state_url(DEFAULT_STATE_AUTH_SETTINGS_URL)?;
+        let state_users_verify_url = parse_state_url(DEFAULT_STATE_USERS_VERIFY_URL)?;
         let config = Self {
             session_secret,
             password,
@@ -101,6 +106,7 @@ impl AuthConfig {
             lockout: LockoutConfig::default(),
             state_validation_url,
             state_auth_settings_url,
+            state_users_verify_url,
             state_timeout: Duration::from_secs(2),
             oidc_timeout: Duration::from_secs(10),
             public_origin: None,
@@ -184,6 +190,9 @@ impl AuthConfig {
         }
         if let Ok(url) = env::var("NULLROUTER_STATE_AUTH_SETTINGS_URL") {
             config.state_auth_settings_url = parse_state_url(&url)?;
+        }
+        if let Ok(url) = env::var("NULLROUTER_STATE_USERS_VERIFY_URL") {
+            config.state_users_verify_url = parse_state_url(&url)?;
         }
         // Upstream reads BASE_URL for the same purpose.
         config.public_origin = ["NULLROUTER_PUBLIC_ORIGIN", "BASE_URL"]
@@ -287,6 +296,10 @@ impl AuthConfig {
 
     pub(crate) const fn state_validation_url(&self) -> &Url {
         &self.state_validation_url
+    }
+
+    pub(crate) const fn state_users_verify_url(&self) -> &Url {
+        &self.state_users_verify_url
     }
 
     pub(crate) const fn state_auth_settings_url(&self) -> &Url {

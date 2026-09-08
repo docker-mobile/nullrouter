@@ -682,7 +682,9 @@ fn ConnectionTable(
                             {locale.get("providers.col_status").to_owned()}
                         </th>
                         <th class="px-3 py-2 text-right">
-                            {locale.get("providers.col_actions").to_owned()}
+                            <span class="sr-only">
+                                {locale.get("providers.col_actions").to_owned()}
+                            </span>
                         </th>
                     </tr>
                 </thead>

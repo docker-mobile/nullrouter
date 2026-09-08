@@ -123,6 +123,12 @@ pub(crate) struct StateSnapshot {
     /// alias and has to resolve to the real model. One model may have several aliases.
     #[serde(default)]
     pub(crate) model_aliases: BTreeMap<String, String>,
+    /// Accounts that can sign in to the dashboard.
+    ///
+    /// Empty on an install that has never created one, which is what keeps the legacy shared password
+    /// working: there would otherwise be no way in after an upgrade.
+    #[serde(default)]
+    pub(crate) users: Vec<crate::users::UserRecord>,
 }
 
 /// A model an operator added by hand to a provider's catalogue.

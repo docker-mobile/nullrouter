@@ -33,9 +33,12 @@ fn migration_requires_a_session_not_public_access() {
             peer,
             false,
         );
+        // A legacy import writes provider credentials, so it needs at least operator.
         assert_eq!(
             requirement,
-            AccessRequirement::ApiSession,
+            AccessRequirement::ApiSession {
+                least: nullrouter_gateway::PrincipalRole::Operator,
+            },
             "import must be session-gated (peer={peer:?})"
         );
         // Without authorization it must not be allowed through.
@@ -50,8 +53,17 @@ fn migration_requires_a_session_not_public_access() {
         );
         // With a valid session it proceeds.
         assert_eq!(
-            requirement.decision(AuthorizationState::Authorized),
+            requirement.decision(AuthorizationState::Authorized {
+                role: Some(nullrouter_gateway::PrincipalRole::Operator)
+            }),
             AccessDecision::Allow
+        );
+        // And a viewer does not get to run it.
+        assert_eq!(
+            requirement.decision(AuthorizationState::Authorized {
+                role: Some(nullrouter_gateway::PrincipalRole::Viewer)
+            }),
+            AccessDecision::Forbidden
         );
     }
 }
@@ -68,8 +80,10 @@ fn the_internal_import_endpoint_stays_unreachable_publicly() {
     );
     assert_eq!(requirement, AccessRequirement::Forbidden);
     assert_eq!(
-        requirement.decision(AuthorizationState::Authorized),
+        requirement.decision(AuthorizationState::Authorized {
+            role: Some(nullrouter_gateway::PrincipalRole::Admin)
+        }),
         AccessDecision::Forbidden,
-        "even an authorized session must not reach the internal endpoint"
+        "even an admin session must not reach the internal endpoint"
     );
 }
