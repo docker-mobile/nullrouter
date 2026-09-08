@@ -188,9 +188,7 @@ fn Sidebar(collapsed: ReadSignal<bool>) -> impl IntoView {
             )
         }>
             <div class="h-14 flex items-center gap-2.5 px-4 shrink-0">
-                <div class="size-7 rounded-md bg-primary grid place-items-center shrink-0">
-                    <span class="text-primary-foreground text-xs font-bold tracking-tighter">"nr"</span>
-                </div>
+                <Logo />
                 <span class=move || {
                     // Fade the wordmark rather than removing it, so the collapse reads as one motion
                     // instead of text vanishing a frame before the panel finishes narrowing.
@@ -210,6 +208,47 @@ fn Sidebar(collapsed: ReadSignal<bool>) -> impl IntoView {
                     .collect_view()}
             </nav>
         </aside>
+    }
+}
+
+/// The brand mark: three lanes in, one decision node, one lane out, struck through.
+///
+/// The same geometry as `assets/favicon.svg`, so the tab icon and the sidebar agree. Drawn inline
+/// rather than loaded as an `<img>` because it has to take the theme's colours -- the plate is
+/// `bg-primary` and the lanes are `primary-foreground`, which no external SVG can read.
+///
+/// This replaces a plate with the letters "nr" in it. That version resolved a different sans-serif on
+/// every platform and, at the 28px it is drawn here, the two glyphs merged into a smudge.
+#[component]
+fn Logo() -> impl IntoView {
+    view! {
+        <div class="size-7 rounded-md bg-primary grid place-items-center shrink-0">
+            <svg
+                class="size-5 text-primary-foreground"
+                viewBox="0 0 32 32"
+                fill="none"
+                aria-hidden="true"
+            >
+                <g
+                    stroke="currentColor"
+                    stroke-width="2.4"
+                    stroke-linecap="round"
+                >
+                    <path d="M5 9h6l4 4" />
+                    <path d="M5 16h6" />
+                    <path d="M5 23h6l4-4" />
+                    <path d="M20 16h7" />
+                </g>
+                <circle cx="16" cy="16" r="3.4" fill="currentColor" />
+                <path
+                    d="M12.2 19.8 19.8 12.2"
+                    stroke="var(--color-primary, currentColor)"
+                    stroke-width="2.4"
+                    stroke-linecap="round"
+                    class="text-primary"
+                />
+            </svg>
+        </div>
     }
 }
 
@@ -289,10 +328,80 @@ fn Header(collapsed: ReadSignal<bool>, set_collapsed: WriteSignal<bool>) -> impl
 
             <div class="flex-1" />
 
+            <LanguagePicker />
             <ThemeToggle />
         </header>
     }
 }
+
+/// Picks the interface language.
+///
+/// Writes the preference through `POST /api/locale`, which sets the `locale` cookie, and then reloads.
+/// The reload is the point rather than a shortcut: [`crate::i18n`] resolves the locale once at startup
+/// and holds it for the session on purpose, because a language that changes under a half-finished form
+/// moves every label and button the operator was looking at. Reloading makes the swap a deliberate,
+/// visible transition instead of a surprise.
+///
+/// A native `<select>` rather than a custom menu: it gets keyboard behaviour, scrolling for 35 items,
+/// and the platform's own type-ahead for free, and this list is long enough that type-ahead matters.
+#[component]
+fn LanguagePicker() -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let current = locale.tag.clone();
+    let label = locale.get("language.change").to_owned();
+
+    view! {
+        <label class="relative">
+            <span class="sr-only">{locale.get("language.label").to_owned()}</span>
+            <select
+                class="h-9 rounded-md border border-input bg-background px-2 text-sm \
+                       text-muted-foreground transition-colors hover:text-foreground"
+                title=label.clone()
+                aria-label=label
+                prop:value=current.clone()
+                on:change=move |ev| {
+                    let tag = event_target_value(&ev);
+                    if tag.is_empty() {
+                        return;
+                    }
+                    leptos::task::spawn_local(async move { apply_language(&tag).await });
+                }
+            >
+                {crate::i18n::LANGUAGE_NAMES
+                    .iter()
+                    .map(|(tag, name)| {
+                        let selected = *tag == current;
+                        view! {
+                            <option value=*tag selected=selected>
+                                {*name}
+                            </option>
+                        }
+                    })
+                    .collect_view()}
+            </select>
+        </label>
+    }
+}
+
+/// Store the choice, then reload so the new catalogue is the one the session starts with.
+///
+/// The reload happens even when the write failed. The alternative is worse: the select already shows
+/// the new language, so leaving the page on the old one puts the control and the interface into
+/// disagreement with no way for the operator to tell which is real. A reload re-reads the cookie, so
+/// whatever actually persisted is what appears.
+#[cfg(target_arch = "wasm32")]
+async fn apply_language(tag: &str) {
+    if let Ok(body) = crate::api::encode(&serde_json::json!({ "locale": tag })) {
+        let _ = crate::api::post("/api/locale", &body).await;
+    }
+    if let Some(window) = web_sys::window() {
+        let _ = window.location().reload();
+    }
+}
+
+/// Native builds have no document to reload.
+#[cfg(not(target_arch = "wasm32"))]
+async fn apply_language(_tag: &str) {}
 
 /// Cycles System → Light → Dark.
 ///

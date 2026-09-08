@@ -92,6 +92,57 @@ pub const AVAILABLE: [&str; 35] = [
     "uk", "ur", "vi", "zh-CN", "zh-TW",
 ];
 
+/// Each available tag with its name in its own language.
+///
+/// Endonyms rather than English names: someone looking for their own language scans for the word they
+/// would write, and "Deutsch" is findable in a list where "German" is not if you do not read English.
+/// Kept beside [`AVAILABLE`] so the two cannot drift; the test below pins that they agree.
+pub const LANGUAGE_NAMES: [(&str, &str); 35] = [
+    ("ar", "العربية"),
+    ("bn", "বাংলা"),
+    ("cs", "Čeština"),
+    ("da", "Dansk"),
+    ("de", "Deutsch"),
+    ("el", "Ελληνικά"),
+    ("en-US", "English"),
+    ("es", "Español"),
+    ("fa", "فارسی"),
+    ("fi", "Suomi"),
+    ("fr", "Français"),
+    ("he", "עברית"),
+    ("hi", "हिन्दी"),
+    ("hu", "Magyar"),
+    ("id", "Bahasa Indonesia"),
+    ("it", "Italiano"),
+    ("ja", "日本語"),
+    ("km", "ខ្មែរ"),
+    ("ko", "한국어"),
+    ("nl", "Nederlands"),
+    ("no", "Norsk"),
+    ("pl", "Polski"),
+    ("pt-BR", "Português (Brasil)"),
+    ("pt-PT", "Português (Portugal)"),
+    ("ro", "Română"),
+    ("ru", "Русский"),
+    ("sv", "Svenska"),
+    ("th", "ไทย"),
+    ("tl", "Tagalog"),
+    ("tr", "Türkçe"),
+    ("uk", "Українська"),
+    ("ur", "اردو"),
+    ("vi", "Tiếng Việt"),
+    ("zh-CN", "简体中文"),
+    ("zh-TW", "繁體中文"),
+];
+
+/// The endonym for a tag, falling back to the tag itself.
+pub fn language_name(tag: &str) -> &str {
+    LANGUAGE_NAMES
+        .iter()
+        .find(|(candidate, _)| *candidate == tag)
+        .map_or(tag, |(_, name)| *name)
+}
+
 /// Resolve a browser or cookie tag to a file that actually exists.
 ///
 /// Browsers send region-qualified tags (`de-DE`, `en-GB`, `zh-Hans-CN`) while most catalogues are
@@ -261,7 +312,35 @@ async fn load_locale(tag: &str) -> Result<Locale, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AVAILABLE, Locale, resolve_tag};
+    use super::{AVAILABLE, LANGUAGE_NAMES, Locale, language_name, resolve_tag};
+
+    #[test]
+    fn every_available_locale_has_an_endonym() {
+        // The picker renders `LANGUAGE_NAMES`, so a tag missing here is a language the operator
+        // cannot select even though its file ships. A tag here that is not available would offer a
+        // choice that 404s on selection.
+        for tag in AVAILABLE {
+            assert!(
+                LANGUAGE_NAMES
+                    .iter()
+                    .any(|(candidate, _)| *candidate == tag),
+                "{tag} has a locale file but no name in the picker"
+            );
+        }
+        for (tag, name) in LANGUAGE_NAMES {
+            assert!(
+                AVAILABLE.contains(&tag),
+                "{tag} is offered as {name} but has no locale file"
+            );
+            assert!(!name.is_empty(), "{tag} has an empty name");
+        }
+    }
+
+    #[test]
+    fn an_unknown_tag_names_itself() {
+        assert_eq!(language_name("en-US"), "English");
+        assert_eq!(language_name("klingon"), "klingon");
+    }
 
     #[test]
     fn an_exact_tag_is_used_as_is() {

@@ -68,6 +68,7 @@ pub fn App() -> impl leptos::IntoView {
                 <ParentRoute path=path!("/dashboard") view=shell::DashboardFrame>
                     <Route path=path!("") view=routes::Overview />
                     <Route path=path!("providers") view=routes::Providers />
+                    <Route path=path!("providers/:id") view=routes::providers::Provider />
                     <Route path=path!("models") view=routes::Models />
                     <Route path=path!("combos") view=routes::Combos />
                     <Route path=path!("pricing") view=routes::Pricing />
