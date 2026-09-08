@@ -55,7 +55,8 @@ fn field<'a>(json: &'a Value, name: &str) -> TestResult<&'a Value> {
 
 #[actix_rt::test]
 async fn locale_and_oauth_gap_routes_return_json_contracts() -> TestResult {
-    // Given: no locale persistence or OAuth credential store is available.
+    // Given: no OAuth credential store is available. The locale reads as the default here because no
+    // cookie is sent -- it is held in one now, and that round trip is asserted in `locale_preference`.
 
     // When: remaining locale and OAuth helper routes are requested.
     let (locale_status, locale) = get_json("/api/locale").await?;
