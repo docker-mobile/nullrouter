@@ -410,6 +410,8 @@ struct ProxyPoolRequest {
     #[serde(rename = "type")]
     proxy_type: Option<String>,
     test_status: Option<String>,
+    last_tested_at: Option<String>,
+    last_error: Option<String>,
 }
 
 async fn list_proxy_pools(
@@ -940,6 +942,9 @@ fn proxy_pool_update_from_request(
         }),
         is_active: request.is_active,
         strict_proxy: request.strict_proxy,
+        test_status: request.test_status,
+        last_tested_at: request.last_tested_at,
+        last_error: request.last_error.map(Some),
     })
 }
 

@@ -206,7 +206,77 @@ const IFLOW: ImportSpec = ImportSpec {
 };
 
 /// Every form-driven import, in the order the page shows them.
-const FORMS: [ImportSpec; 6] = [GITLAB, KIRO_API_KEY, KIRO_OAUTH, CODEX, CURSOR, IFLOW];
+/// `POST /api/oauth/grok-cli/bulk-import`. Grok OAuth / device tokens.
+const GROK_CLI: ImportSpec = ImportSpec {
+    path: "/api/oauth/grok-cli/bulk-import",
+    title: "import.grok_title",
+    hint: "import.grok_hint",
+    fields: &[
+        FieldSpec {
+            key: "accessToken",
+            label: "import.field_access_token",
+            secret: true,
+            required: true,
+        },
+        FieldSpec {
+            key: "refreshToken",
+            label: "import.field_refresh_token",
+            secret: true,
+            required: false,
+        },
+        FieldSpec {
+            key: "email",
+            label: "import.field_email",
+            secret: false,
+            required: false,
+        },
+        FieldSpec {
+            key: "displayName",
+            label: "import.field_name",
+            secret: false,
+            required: false,
+        },
+    ],
+};
+
+/// `POST /api/oauth/xiaomi-mimo/api-key`. Xiaomi `MiMo` API key or desktop credentials.
+const XIAOMI_MIMO: ImportSpec = ImportSpec {
+    path: "/api/oauth/xiaomi-mimo/api-key",
+    title: "import.mimo_title",
+    hint: "import.mimo_hint",
+    fields: &[
+        FieldSpec {
+            key: "apiKey",
+            label: "import.field_api_key",
+            secret: true,
+            required: true,
+        },
+        FieldSpec {
+            key: "uid",
+            label: "import.field_uid",
+            secret: false,
+            required: false,
+        },
+        FieldSpec {
+            key: "baseUrl",
+            label: "import.field_base_url",
+            secret: false,
+            required: false,
+        },
+    ],
+};
+
+/// Every form-driven import, in the order the page shows them.
+const FORMS: [ImportSpec; 8] = [
+    GITLAB,
+    KIRO_API_KEY,
+    KIRO_OAUTH,
+    CODEX,
+    CURSOR,
+    IFLOW,
+    GROK_CLI,
+    XIAOMI_MIMO,
+];
 
 /// A single import's answer.
 ///

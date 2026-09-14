@@ -526,6 +526,44 @@ impl StateClient {
     /// Written through state rather than held locally so a deployed relay appears in the same list
     /// the dashboard's pane reads and the runtime selects from — a pool the runtime cannot see is a
     /// relay nothing routes through.
+    /// Read one proxy pool by id.
+    pub(crate) async fn get_proxy_pool(&self, id: &str) -> Option<Value> {
+        let url = format!("{}/api/proxy-pools/{}", self.base, urlencode(id));
+        match self.client.get(&url).send().await {
+            Ok(response) if response.status().is_success() => {
+                let body = response.json::<Value>().await.ok()?;
+                Some(body.get("proxyPool").cloned().unwrap_or(body))
+            }
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), id, "fetching proxy pool failed");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, id, "fetching proxy pool failed");
+                None
+            }
+        }
+    }
+
+    /// Update one proxy pool by id.
+    pub(crate) async fn update_proxy_pool(&self, id: &str, patch: &Value) -> Option<Value> {
+        let url = format!("{}/api/proxy-pools/{}", self.base, urlencode(id));
+        match self.client.put(&url).json(patch).send().await {
+            Ok(response) if response.status().is_success() => {
+                let body = response.json::<Value>().await.ok()?;
+                Some(body.get("proxyPool").cloned().unwrap_or(body))
+            }
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), id, "updating proxy pool failed");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, id, "updating proxy pool failed");
+                None
+            }
+        }
+    }
+
     pub(crate) async fn create_proxy_pool(&self, pool: &Value) -> Option<Value> {
         let url = format!("{}/api/proxy-pools", self.base);
         match self.client.post(&url).json(pool).send().await {

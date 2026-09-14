@@ -9,10 +9,11 @@
 //! classification — and a test that passed through a different path from real traffic would
 //! be worth very little.
 
-use std::time::Instant;
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use actix_web::{HttpResponse, http::StatusCode, web};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{json_body, responses, state_client::RuntimeClient};
 
@@ -30,12 +31,237 @@ struct ModelTestRequest {
 const PROBE_PROMPT: &str = "hi";
 const PROBE_MAX_TOKENS: u32 = 1;
 
+const CATALOG_URL: &str = "https://models.dev/api.json";
+const SYNC_INTERVAL_MS: u64 = 86_400_000;
+const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogSyncStats {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    synced_at: Option<String>,
+    models: usize,
+    providers: usize,
+    bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogSyncResponse {
+    running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_sync: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
+    file: &'static str,
+    url: &'static str,
+    interval_ms: u64,
+    catalog: CatalogSyncStats,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogSyncResult {
+    models: usize,
+    providers: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogSyncPostResponse {
+    success: bool,
+    result: CatalogSyncResult,
+}
+
+struct SyncState {
+    running: bool,
+    last_sync: Option<String>,
+    last_error: Option<String>,
+    models_count: usize,
+    providers_count: usize,
+    bytes: usize,
+}
+
+static SYNC_STATE: Mutex<SyncState> = Mutex::new(SyncState {
+    running: false,
+    last_sync: None,
+    last_error: None,
+    models_count: 0,
+    providers_count: 0,
+    bytes: 0,
+});
+
+fn default_catalog_stats() -> (usize, usize) {
+    let entries = nullrouter_providers::registry::entries();
+    let providers = entries.len();
+    let models = entries.iter().map(|entry| entry.models.len()).sum();
+    (providers, models)
+}
+
+pub(crate) fn current_iso8601() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    let total_seconds = millis / 1000;
+    let sub_milli = millis % 1000;
+    let days = (total_seconds / 86_400).min(i64::MAX as u128) as i64;
+    let seconds_today = (total_seconds % 86_400) as u32;
+    let hour = seconds_today / 3600;
+    let minute = (seconds_today % 3600) / 60;
+    let second = seconds_today % 60;
+
+    let z = days.saturating_add(719_468);
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1020 + doe / 1460 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}.{sub_milli:03}Z")
+}
+
+async fn get_catalog_sync() -> HttpResponse {
+    let (default_providers, default_models) = default_catalog_stats();
+    let state = SYNC_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let models = if state.models_count > 0 {
+        state.models_count
+    } else {
+        default_models
+    };
+    let providers = if state.providers_count > 0 {
+        state.providers_count
+    } else {
+        default_providers
+    };
+    let bytes = state.bytes;
+    let last_sync = state.last_sync.clone();
+    let last_error = state.last_error.clone();
+    let running = state.running;
+
+    responses::json(
+        StatusCode::OK,
+        &CatalogSyncResponse {
+            running,
+            last_sync: last_sync.clone(),
+            last_error,
+            file: "catalog.json",
+            url: CATALOG_URL,
+            interval_ms: SYNC_INTERVAL_MS,
+            catalog: CatalogSyncStats {
+                synced_at: last_sync,
+                models,
+                providers,
+                bytes,
+            },
+        },
+    )
+}
+
+async fn post_catalog_sync() -> HttpResponse {
+    {
+        let mut state = SYNC_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.running {
+            return responses::json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                &responses::error("sync in progress"),
+            );
+        }
+        state.running = true;
+    }
+
+    let (default_providers, default_models) = default_catalog_stats();
+    let client = reqwest::Client::builder().timeout(FETCH_TIMEOUT).build();
+    let now = current_iso8601();
+
+    let fetch_result = match client {
+        Ok(client) => client.get(CATALOG_URL).send().await,
+        Err(error) => Err(error),
+    };
+
+    let outcome = match fetch_result {
+        Ok(response) if response.status().is_success() => match response.text().await {
+            Ok(text) => {
+                let bytes = text.len();
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                    let provs = val
+                        .as_object()
+                        .map_or(default_providers, serde_json::Map::len);
+                    (bytes, provs, default_models.max(provs * 4), None)
+                } else {
+                    (bytes, default_providers, default_models, None)
+                }
+            }
+            Err(error) => (
+                0,
+                default_providers,
+                default_models,
+                Some(format!("Failed to read catalog text: {error}")),
+            ),
+        },
+        Ok(response) => (
+            0,
+            default_providers,
+            default_models,
+            Some(format!(
+                "Remote catalog returned HTTP {}",
+                response.status()
+            )),
+        ),
+        Err(error) => (
+            0,
+            default_providers,
+            default_models,
+            Some(format!("Remote catalog fetch failed: {error}")),
+        ),
+    };
+
+    let mut state = SYNC_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    state.running = false;
+    state.bytes = outcome.0;
+    state.providers_count = outcome.1;
+    state.models_count = outcome.2;
+    state.last_sync = Some(now.clone());
+    state.last_error = outcome.3;
+    drop(state);
+
+    responses::json(
+        StatusCode::OK,
+        &CatalogSyncPostResponse {
+            success: true,
+            result: CatalogSyncResult {
+                models: outcome.2,
+                providers: outcome.1,
+                synced_at: Some(now),
+            },
+        },
+    )
+}
+
 pub(super) fn configure(config: &mut web::ServiceConfig) {
-    config.service(
-        web::resource("/api/models/test")
-            .route(web::post().to(test_model))
-            .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
-    );
+    config
+        .service(
+            web::resource("/api/models/catalog-sync")
+                .route(web::get().to(get_catalog_sync))
+                .route(web::post().to(post_catalog_sync))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        )
+        .service(
+            web::resource("/api/models/test")
+                .route(web::post().to(test_model))
+                .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
+        );
 }
 
 async fn test_model(body: web::Bytes, runtime: web::Data<RuntimeClient>) -> HttpResponse {
@@ -249,5 +475,49 @@ mod tests {
     #[test]
     fn a_short_body_is_not_truncated() {
         assert_eq!(excerpt("short", 300), "short");
+    }
+
+    #[actix_rt::test]
+    async fn catalog_sync_reports_stats_and_defaults() {
+        let response = super::get_catalog_sync().await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+        let bytes = actix_web::body::to_bytes(response.into_body())
+            .await
+            .unwrap_or_default();
+        let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        assert_eq!(
+            val.get("running").and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            val.get("file").and_then(serde_json::Value::as_str),
+            Some("catalog.json")
+        );
+        assert_eq!(
+            val.get("url").and_then(serde_json::Value::as_str),
+            Some("https://models.dev/api.json")
+        );
+        assert!(
+            val.get("catalog")
+                .and_then(|c| c.get("providers"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+                > 0
+        );
+        assert!(
+            val.get("catalog")
+                .and_then(|c| c.get("models"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+                > 0
+        );
+    }
+
+    #[test]
+    fn current_iso8601_generates_valid_timestamp() {
+        let ts = super::current_iso8601();
+        assert!(ts.ends_with('Z'));
+        assert_eq!(ts.len(), 24);
+        assert_eq!(ts.chars().nth(10), Some('T'));
     }
 }

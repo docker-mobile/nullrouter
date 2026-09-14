@@ -1879,6 +1879,320 @@ fn refuse(status: StatusCode, error: impl Into<String>) -> HttpResponse {
     )
 }
 
+pub(super) async fn grok_cli_bulk_import(
+    state: web::Data<crate::StateClient>,
+    body: web::Bytes,
+) -> HttpResponse {
+    let parsed = match json_body::parse::<Value>(&body) {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+
+    let accounts: Vec<&Value> = match &parsed {
+        Value::Array(items) => items.iter().collect(),
+        Value::Object(_fields) => match parsed.get("accounts") {
+            Some(Value::Array(items)) => items.iter().collect(),
+            _other => vec![&parsed],
+        },
+        _other => Vec::new(),
+    };
+
+    if accounts.is_empty() {
+        return refuse(StatusCode::BAD_REQUEST, "No accounts provided");
+    }
+    if accounts.len() > BULK_IMPORT_MAX {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "No more than {BULK_IMPORT_MAX} accounts may be imported at once; {} were sent",
+                accounts.len()
+            ),
+        );
+    }
+
+    let mut results = Vec::with_capacity(accounts.len());
+    let mut succeeded = 0_usize;
+    let mut failed = 0_usize;
+
+    for (index, raw) in accounts.into_iter().enumerate() {
+        match grok_cli_import_one(&state, raw).await {
+            Ok((id, email)) => {
+                succeeded += 1;
+                results.push(serde_json::json!({
+                    "index": index,
+                    "ok": true,
+                    "id": id,
+                    "email": email,
+                }));
+            }
+            Err(error) => {
+                failed += 1;
+                results.push(serde_json::json!({
+                    "index": index,
+                    "ok": false,
+                    "error": error,
+                }));
+            }
+        }
+    }
+
+    responses::json(
+        StatusCode::OK,
+        &serde_json::json!({
+            "total": results.len(),
+            "success": succeeded,
+            "failed": failed,
+            "results": results,
+        }),
+    )
+}
+
+async fn grok_cli_import_one(
+    state: &crate::StateClient,
+    raw: &Value,
+) -> Result<(String, Option<String>), String> {
+    let Some(fields) = raw.as_object() else {
+        return Err("Item is not an object".to_owned());
+    };
+
+    let access_token = fields
+        .get("accessToken")
+        .or_else(|| fields.get("access_token"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if access_token.is_empty() {
+        return Err("Missing access_token / accessToken".to_owned());
+    }
+
+    let refresh_token = fields
+        .get("refreshToken")
+        .or_else(|| fields.get("refresh_token"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let id_token = fields
+        .get("idToken")
+        .or_else(|| fields.get("id_token"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let email = fields
+        .get("email")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| email_from_jwt(id_token.unwrap_or(access_token)));
+
+    let expires_in = fields
+        .get("expiresIn")
+        .or_else(|| fields.get("expires_in"))
+        .and_then(Value::as_i64);
+
+    let expires_at = fields
+        .get("expiresAt")
+        .or_else(|| fields.get("expires_at"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| expires_in.map(expires_in_seconds));
+
+    let display_name = fields
+        .get("displayName")
+        .or_else(|| fields.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| email.clone())
+        .unwrap_or_else(|| "grok-cli".to_owned());
+
+    let mut specific = fields
+        .get("providerSpecificData")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    specific.insert(
+        "authMethod".to_owned(),
+        Value::String("device_code".to_owned()),
+    );
+    if let Some(id_tok) = id_token {
+        specific.insert("idToken".to_owned(), Value::String(id_tok.to_owned()));
+    }
+    if let Some(ref em) = email {
+        specific.insert("email".to_owned(), Value::String(em.clone()));
+    }
+
+    let connection_payload = serde_json::json!({
+        "provider": "grok-cli",
+        "authType": "oauth",
+        "accessToken": access_token,
+        "refreshToken": refresh_token,
+        "expiresAt": expires_at,
+        "email": email,
+        "name": display_name,
+        "displayName": display_name,
+        "testStatus": "active",
+        "providerSpecificData": specific,
+    });
+
+    let created = state
+        .create_provider_connection(&connection_payload)
+        .await
+        .ok_or_else(|| "nullrouter-state did not record the connection".to_owned())?;
+
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok((id, email))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct XiaomiMimoKeyRequest {
+    api_key: Option<String>,
+    uid: Option<String>,
+    base_url: Option<String>,
+}
+
+pub(super) async fn xiaomi_mimo_api_key(
+    state: web::Data<crate::StateClient>,
+    body: web::Bytes,
+) -> HttpResponse {
+    let request = match json_body::parse::<XiaomiMimoKeyRequest>(&body) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let Some(key) = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    else {
+        return refuse(StatusCode::BAD_REQUEST, "API key is required");
+    };
+    if !key.starts_with("sk-") {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "Invalid key format — expected sk- prefix",
+        );
+    }
+
+    let effective_base = request
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(|u| u.trim_end_matches('/').to_owned())
+        .unwrap_or_else(|| "https://api.xiaomimimo.com/v1".to_owned());
+
+    let uid = request
+        .uid
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty());
+    let email = uid.map(|u| format!("{u}@xiaomi"));
+    let display_name = uid
+        .map(|u| format!("Xiaomi {u}"))
+        .unwrap_or_else(|| "Xiaomi MiMo".to_owned());
+
+    let connection_payload = serde_json::json!({
+        "provider": "xiaomi-mimo",
+        "authType": "api_key",
+        "apiKey": key,
+        "accessToken": key,
+        "refreshToken": Value::Null,
+        "expiresAt": expires_in_days(API_KEY_HORIZON_DAYS),
+        "email": email,
+        "name": display_name,
+        "displayName": display_name,
+        "testStatus": "active",
+        "providerSpecificData": {
+            "uid": uid,
+            "baseUrl": effective_base,
+            "authMethod": "api_key",
+            "provider": "API Key",
+        }
+    });
+
+    let Some(created) = state.create_provider_connection(&connection_payload).await else {
+        return refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "nullrouter-state did not record the connection",
+        );
+    };
+
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    responses::json(
+        StatusCode::OK,
+        &serde_json::json!({
+            "success": true,
+            "validated": true,
+            "connection": {
+                "id": id,
+                "provider": "xiaomi-mimo",
+                "email": email,
+                "displayName": display_name,
+            }
+        }),
+    )
+}
+
+fn read_mimo_local_auth() -> Option<(String, String, Option<String>, String)> {
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.trim().is_empty())?;
+    let path = format!("{home}/.local/share/mimocode/auth.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let parsed = serde_json::from_str::<Value>(&content).ok()?;
+    let xiaomi = parsed.get("xiaomi")?;
+    let key = xiaomi.get("key")?.as_str()?.trim();
+    if !key.starts_with("sk-") {
+        return None;
+    }
+    let meta = xiaomi.get("metadata");
+    let uid = meta
+        .and_then(|m| m.get("uid"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let base_url = meta
+        .and_then(|m| m.get("base_url"))
+        .and_then(Value::as_str)
+        .unwrap_or("https://api.xiaomimimo.com/v1")
+        .to_owned();
+    Some((key.to_owned(), path, uid, base_url))
+}
+
+pub(super) async fn xiaomi_mimo_auto_import() -> HttpResponse {
+    if let Some((key, path, uid, base_url)) = read_mimo_local_auth() {
+        return responses::json(
+            StatusCode::OK,
+            &serde_json::json!({
+                "found": true,
+                "apiKey": key,
+                "uid": uid,
+                "baseUrl": base_url,
+                "source": path,
+            }),
+        );
+    }
+
+    responses::json(
+        StatusCode::OK,
+        &serde_json::json!({
+            "found": false,
+            "error": "Xiaomi MiMo Desktop auth file not found. Make sure Xiaomi MiMo Desktop is installed and signed in."
+        }),
+    )
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -1915,5 +2229,49 @@ mod tests {
             verified_base("https://gitlab.example.com").as_deref(),
             Ok("https://gitlab.example.com")
         );
+    }
+
+    #[actix_rt::test]
+    async fn grok_cli_bulk_import_empty_rejected() {
+        let app = actix_web::test::init_service(
+            actix_web::App::new()
+                .app_data(actix_web::web::Data::new(crate::StateClient::new(
+                    "http://127.0.0.1:9",
+                )))
+                .route(
+                    "/api/oauth/grok-cli/bulk-import",
+                    actix_web::web::post().to(super::grok_cli_bulk_import),
+                ),
+        )
+        .await;
+
+        let req = actix_web::test::TestRequest::post()
+            .uri("/api/oauth/grok-cli/bulk-import")
+            .set_json(serde_json::json!([]))
+            .to_request();
+        let resp = actix_web::test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_rt::test]
+    async fn xiaomi_mimo_api_key_requires_sk_prefix() {
+        let app = actix_web::test::init_service(
+            actix_web::App::new()
+                .app_data(actix_web::web::Data::new(crate::StateClient::new(
+                    "http://127.0.0.1:9",
+                )))
+                .route(
+                    "/api/oauth/xiaomi-mimo/api-key",
+                    actix_web::web::post().to(super::xiaomi_mimo_api_key),
+                ),
+        )
+        .await;
+
+        let req = actix_web::test::TestRequest::post()
+            .uri("/api/oauth/xiaomi-mimo/api-key")
+            .set_json(serde_json::json!({"apiKey": "invalid-prefix"}))
+            .to_request();
+        let resp = actix_web::test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 }

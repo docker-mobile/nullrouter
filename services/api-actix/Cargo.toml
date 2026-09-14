@@ -29,6 +29,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 # Codex, jcode, deepseek-tui and grok-build keep TOML configs.
 toml.workspace = true
+uuid.workspace = true
 tracing.workspace = true
 # The tunnel manager polls tailscaled's socket rather than sleeping a fixed interval.
 tokio = { workspace = true, features = ["time"] }

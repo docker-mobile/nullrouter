@@ -1144,6 +1144,15 @@ impl StateStore {
             if let Some(proxy_type) = input.proxy_type {
                 pool.proxy_type = proxy_type;
             }
+            if let Some(test_status) = input.test_status {
+                pool.test_status = test_status;
+            }
+            if let Some(last_tested_at) = input.last_tested_at {
+                pool.last_tested_at = Some(last_tested_at);
+            }
+            if let Some(last_error) = input.last_error {
+                pool.last_error = last_error;
+            }
             pool.updated_at = timestamp();
             Some(pool.clone())
         })
@@ -1948,6 +1957,9 @@ pub(crate) struct ProxyPoolUpdate {
     pub proxy_type: Option<String>,
     pub is_active: Option<bool>,
     pub strict_proxy: Option<bool>,
+    pub test_status: Option<String>,
+    pub last_tested_at: Option<String>,
+    pub last_error: Option<Option<String>>,
 }
 
 /// A settings patch: `None` means the request did not mention the field.

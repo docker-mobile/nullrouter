@@ -110,9 +110,7 @@ pub fn ProxyPools() -> impl IntoView {
             on_retry=Callback::new(move |()| reload())
             children=move |data: PoolsList| view! { <PoolTable rows=data.proxy_pools reload=reload /> }
         />
-        <p class="mt-3 text-sm text-muted-foreground">
-            {locale.get("pools.test_unsupported").to_owned()}
-        </p>
+
         <DeploySection reload=reload />
     }
 }
@@ -317,6 +315,42 @@ fn PoolLine(row: PoolRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> i
     let label_confirm_delete = locale.get("pools.confirm_delete").to_owned();
     let label_cancel = locale.get("pools.cancel").to_owned();
 
+    let (testing, set_testing) = signal(false);
+    let (test_feedback, set_test_feedback) = signal(Option::<String>::None);
+
+    let test_action = move || {
+        set_testing.set(true);
+        set_test_feedback.set(None);
+        let path = format!("/api/proxy-pools/{}/test", id.get_value());
+        submit_reporting(
+            set_save,
+            move || async move { request_detailed(Method::Post, &path, None).await },
+            move |raw: String| {
+                set_testing.set(false);
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+                let ok = parsed
+                    .get("ok")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let ms = parsed
+                    .get("elapsedMs")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                if ok {
+                    set_test_feedback.set(Some(format!("✓ {ms}ms")));
+                } else {
+                    let err = parsed
+                        .get("error")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("failed");
+                    set_test_feedback.set(Some(format!("✗ {err}")));
+                }
+                reload();
+            },
+        );
+    };
+
     let toggle = move || {
         let path = format!("/api/proxy-pools/{}", id.get_value());
         let Ok(body) = encode(&UpdatePool { is_active: !active }) else {
@@ -397,6 +431,21 @@ fn PoolLine(row: PoolRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> i
             </td>
             <td class="px-3 py-2 text-right">
                 <div class="flex flex-col items-end gap-1.5">
+                    <button
+                        type="button"
+                        class="text-sm text-primary underline-offset-4 hover:underline disabled:opacity-50"
+                        disabled=move || testing.get() || save.get().is_saving()
+                        on:click=move |_| test_action()
+                    >
+                        {if testing.get() {
+                            locale.get("pools.testing").to_owned()
+                        } else {
+                            locale.get("pools.test").to_owned()
+                        }}
+                    </button>
+                    {move || test_feedback.get().map(|msg| view! {
+                        <span class="text-xs text-muted-foreground">{msg}</span>
+                    })}
                     <button
                         type="button"
                         class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
