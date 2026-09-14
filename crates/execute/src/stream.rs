@@ -135,7 +135,7 @@ where
             // delivered stay valid.
             break;
         };
-        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let text = String::from_utf8_lossy(&bytes);
         for line in buffer.push(&text) {
             if emit_line(
                 &line,
@@ -679,7 +679,7 @@ pub async fn collapse_stream_to_json(
     } else {
         while let Some(chunk) = body.next().await {
             let Ok(bytes) = chunk else { break };
-            let decoded = String::from_utf8_lossy(&bytes).into_owned();
+            let decoded = String::from_utf8_lossy(&bytes);
             for line in buffer.push(&decoded) {
                 if let Some(Frame::Data(payload)) =
                     nullrouter_translate::sse::parse_line(&line, encoding)

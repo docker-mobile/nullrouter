@@ -70,22 +70,22 @@ impl ProxyHttp for GatewayProxy {
         session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> PingoraResult<bool> {
-        let path = session.req_header().uri.path().to_owned();
+        let path = session.req_header().uri.path();
         let peer_ip = session
             .as_downstream()
             .client_addr()
             .and_then(|address| address.as_inet())
             .map(std::net::SocketAddr::ip);
         let method = session.req_header().method.clone();
-        let route = self.config.route_for_path(&path);
-        let requirement = self.config.access_requirement(&path, &method, peer_ip);
+        let route = self.config.route_for_path(path);
+        let requirement = self.config.access_requirement(path, &method, peer_ip);
         ctx.route = Some(route);
         ctx.client_ip = peer_ip;
 
         // Checked before authorization so a flood does not cost an auth service round-trip per
         // request -- which would make the gateway the amplifier for an attack on its own dependency.
         if let (Some(throttle), Some(peer)) = (self.throttle.as_ref(), peer_ip)
-            && crate::throttle::Throttle::governs(&path)
+            && crate::throttle::Throttle::governs(path)
             && let crate::throttle::Verdict::Throttle { retry_after } =
                 throttle.check(peer, std::time::Instant::now())
         {

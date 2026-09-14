@@ -205,6 +205,8 @@ impl Clone for UsageQueue {
     }
 }
 
+type CachedContext = Option<(std::time::Instant, std::sync::Arc<RoutingContext>)>;
+
 #[derive(Debug, Clone)]
 pub(crate) struct StateClient {
     client: reqwest::Client,
@@ -220,7 +222,7 @@ pub(crate) struct StateClient {
     /// any TTL above a millisecond collapses them. 250ms bounds how long a dashboard change takes to
     /// take effect, which is below the point a user would notice, and it needs no invalidation
     /// wiring between services to stay correct.
-    context: std::sync::Arc<std::sync::RwLock<Option<(std::time::Instant, RoutingContext)>>>,
+    context: std::sync::Arc<std::sync::RwLock<CachedContext>>,
     /// Bounds how many spawned usage POSTs can be awaiting state at once.
     ///
     /// Usage recording is fire-and-forget, and each POST can block for the five-second state
@@ -430,13 +432,13 @@ impl StateClient {
     /// Falls back to defaults when state is unreachable, so a state outage
     /// degrades routing rather than failing every request.
     /// Cached for [`CONTEXT_TTL`]; see the field comment on [`StateClient::context`].
-    pub(crate) async fn routing_context(&self) -> RoutingContext {
+    pub(crate) async fn routing_context(&self) -> std::sync::Arc<RoutingContext> {
         if let Some(cached) = self.cached_context() {
             return cached;
         }
-        let fresh = self.fetch_routing_context().await;
+        let fresh = std::sync::Arc::new(self.fetch_routing_context().await);
         if let Ok(mut slot) = self.context.write() {
-            *slot = Some((std::time::Instant::now(), fresh.clone()));
+            *slot = Some((std::time::Instant::now(), std::sync::Arc::clone(&fresh)));
         }
         fresh
     }
@@ -444,14 +446,11 @@ impl StateClient {
     /// The cached context, if it is still within the TTL.
     ///
     /// A poisoned lock is treated as a miss rather than a panic: the cost is a round trip.
-    fn cached_context(&self) -> Option<RoutingContext> {
-        let cached = {
-            let slot = self.context.read().ok()?;
-            let (read_at, context) = slot.as_ref()?;
-            (read_at.elapsed() < CONTEXT_TTL).then(|| context.clone())
-        };
-        // The guard is dropped at the block's end rather than at the function's, so the clone above
-        // is the only work done under the read lock.
+    fn cached_context(&self) -> Option<std::sync::Arc<RoutingContext>> {
+        let slot = self.context.read().ok()?;
+        let (read_at, context) = slot.as_ref()?;
+        let cached = (read_at.elapsed() < CONTEXT_TTL).then(|| std::sync::Arc::clone(context));
+        drop(slot);
         cached
     }
 

@@ -271,11 +271,11 @@ impl Runtime {
     /// A state outage reads as disabled, which is the safe default: dispatching the
     /// client's own body is always correct, and imaging it on a guess is not.
     async fn pxpipe_settings(&self) -> PxpipeSettings {
-        let settings = self.state.routing_context().await.settings;
+        let context = self.state.routing_context().await;
         PxpipeSettings {
-            enabled: settings.pxpipe_enabled,
-            min_chars: settings.pxpipe_min_chars,
-            timeout_ms: settings.pxpipe_timeout_ms,
+            enabled: context.settings.pxpipe_enabled,
+            min_chars: context.settings.pxpipe_min_chars,
+            timeout_ms: context.settings.pxpipe_timeout_ms,
         }
     }
 

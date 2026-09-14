@@ -72,8 +72,8 @@ async fn health(runtime: web::Data<Runtime>) -> HttpResponse {
 async fn start(runtime: web::Data<Runtime>) -> HttpResponse {
     let saver = runtime.token_saver().clone();
     if !saver.install_info().installed {
-        let settings = runtime.state_client().routing_context().await.settings;
-        if !settings.pxpipe_auto_install {
+        let context = runtime.state_client().routing_context().await;
+        if !context.settings.pxpipe_auto_install {
             return refused(
                 StatusCode::CONFLICT,
                 "NOT_INSTALLED",
