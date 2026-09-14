@@ -45,7 +45,8 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
     }
 
     if text.contains("data: ") {
-        let mut accumulated = String::new();
+        let mut accumulated_content = String::new();
+        let mut accumulated_reasoning = String::new();
         let mut err = None;
         for line in text.lines() {
             let trimmed = line.trim();
@@ -59,7 +60,13 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
                         .pointer("/choices/0/delta/content")
                         .and_then(serde_json::Value::as_str)
                     {
-                        accumulated.push_str(content);
+                        accumulated_content.push_str(content);
+                    } else if let Some(reasoning) = val
+                        .pointer("/choices/0/delta/reasoning_content")
+                        .or_else(|| val.pointer("/choices/0/delta/reasoning"))
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        accumulated_reasoning.push_str(reasoning);
                     } else if let Some(msg) = val
                         .pointer("/error/message")
                         .and_then(serde_json::Value::as_str)
@@ -69,8 +76,21 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
                 }
             }
         }
-        if !accumulated.is_empty() {
-            return (accumulated, err);
+        let total = if !accumulated_reasoning.is_empty() {
+            if accumulated_content.is_empty() {
+                format!("<think>\n{}\n</think>", accumulated_reasoning.trim())
+            } else {
+                format!(
+                    "<think>\n{}\n</think>\n\n{}",
+                    accumulated_reasoning.trim(),
+                    accumulated_content
+                )
+            }
+        } else {
+            accumulated_content
+        };
+        if !total.is_empty() {
+            return (total, err);
         }
         if let Some(e) = err {
             return (String::new(), Some(e));
@@ -78,10 +98,24 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
     }
 
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(text) {
-        if let Some(content) = val
+        let content = val
             .pointer("/choices/0/message/content")
             .and_then(serde_json::Value::as_str)
-        {
+            .unwrap_or_default();
+        let reasoning = val
+            .pointer("/choices/0/message/reasoning_content")
+            .or_else(|| val.pointer("/choices/0/message/reasoning"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !reasoning.is_empty() {
+            let combined = if content.is_empty() {
+                format!("<think>\n{}\n</think>", reasoning.trim())
+            } else {
+                format!("<think>\n{}\n</think>\n\n{content}", reasoning.trim())
+            };
+            return (combined, None);
+        }
+        if !content.is_empty() {
             return (content.to_owned(), None);
         }
         if let Some(msg) = val

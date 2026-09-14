@@ -41,12 +41,8 @@ pub fn parse_line(line: &str, encoding: Encoding) -> Option<Frame> {
         return serde_json::from_str(trimmed).ok().map(Frame::Data);
     }
 
-    // Upstream checks `line.charCodeAt(0) !== 100` — only lines starting with
-    // 'd' are considered, so `event:`/`id:`/`:` lines are skipped.
-    if !line.starts_with('d') {
-        return None;
-    }
-    let payload = line.get(5..)?.trim();
+    // Only `data:` lines are considered; `event:`, `id:`, comment `:` lines are skipped.
+    let payload = line.strip_prefix("data:")?.trim();
     if payload == "[DONE]" {
         return Some(Frame::Done);
     }
@@ -114,16 +110,31 @@ impl LineBuffer {
     }
 }
 
-/// Serialize a `data:` frame (upstream `sseChunk`).
+/// Serialize a `data:` frame (upstream `sseChunk`) in a single allocation.
 pub fn data_frame(payload: &Value) -> String {
-    let encoded = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_owned());
-    format!("data: {encoded}\n\n")
+    let mut out = Vec::with_capacity(128);
+    out.extend_from_slice(b"data: ");
+    if serde_json::to_writer(&mut out, payload).is_err() {
+        out.truncate(6);
+        out.extend_from_slice(b"{}");
+    }
+    out.extend_from_slice(b"\n\n");
+    String::from_utf8(out).unwrap_or_default()
 }
 
-/// Serialize a named-event frame, as the Responses API uses.
+/// Serialize a named-event frame in a single allocation.
 pub fn event_frame(event: &str, payload: &Value) -> String {
-    let encoded = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_owned());
-    format!("event: {event}\ndata: {encoded}\n\n")
+    let mut out = Vec::with_capacity(128 + event.len());
+    out.extend_from_slice(b"event: ");
+    out.extend_from_slice(event.as_bytes());
+    out.extend_from_slice(b"\ndata: ");
+    if serde_json::to_writer(&mut out, payload).is_err() {
+        let base = 7 + event.len() + 7;
+        out.truncate(base);
+        out.extend_from_slice(b"{}");
+    }
+    out.extend_from_slice(b"\n\n");
+    String::from_utf8(out).unwrap_or_default()
 }
 
 /// The terminal frame.
