@@ -65,11 +65,28 @@ fn authorize_response_omits_absent_optional_fields() -> TestResult {
         principal: None,
         key_id: None,
         reason: Some("invalid_api_key".to_owned()),
+        role: None,
     };
 
     assert_eq!(
         serde_json::to_value(response)?,
         json!({"authorized": false, "reason": "invalid_api_key"})
+    );
+
+    // An absent role is what a runtime API key and a pre-managed-users session both carry, and the
+    // gateway reads absence as the legacy full-access principal. It must stay absent rather than
+    // serialising as null, or a consumer testing `"role" in body` reads every such principal as
+    // carrying one.
+    let with_role = AuthorizeResponse {
+        authorized: true,
+        principal: Some("dashboard_session".to_owned()),
+        key_id: None,
+        reason: None,
+        role: Some("viewer".to_owned()),
+    };
+    assert_eq!(
+        serde_json::to_value(with_role)?,
+        json!({"authorized": true, "principal": "dashboard_session", "role": "viewer"})
     );
     Ok(())
 }

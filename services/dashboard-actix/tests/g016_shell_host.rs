@@ -46,65 +46,29 @@ async fn dashboard_shell_preloads_and_serves_local_fonts() -> TestResult {
 }
 
 #[actix_web::test]
-async fn dashboard_shell_css_exposes_frozen_layout_and_primitive_tokens() -> TestResult {
-    // Given: the CSS modules consumed by every hosted dashboard route.
+async fn dashboard_shell_css_exposes_current_token_layer() -> TestResult {
+    // Given: the compiled stylesheet the WASM dashboard mounts.
     let app =
         test::init_service(App::new().configure(DashboardConfig::default().into_configurer()))
             .await;
-    let cases = [
-        (
-            "/assets/dashboard/base.css",
-            [
-                "font-family: \"Inter\"",
-                "--shadow-elev:",
-                "--shadow-focus:",
-            ]
-            .as_slice(),
-        ),
-        (
-            "/assets/dashboard/sidebar.css",
-            ["width: 288px", ".nr-media-navigation", ".nr-media-nav-item"].as_slice(),
-        ),
-        (
-            "/assets/dashboard/workspace.css",
-            [
-                ".nr-header-control",
-                ".nr-header-popover",
-                ".nr-search-empty",
-                ".nr-search-field input::-webkit-search-cancel-button",
-            ]
-            .as_slice(),
-        ),
-        (
-            "/assets/dashboard/cards.css",
-            [
-                "border-radius: 14px",
-                "box-shadow: var(--shadow-soft)",
-                "grid-template-columns: auto minmax(0, 1fr) 32px",
-            ]
-            .as_slice(),
-        ),
-        (
-            "/assets/dashboard/responsive.css",
-            ["@media (max-width: 1023px)", "@media (min-width: 1024px)"].as_slice(),
-        ),
-        (
-            "/assets/dashboard/top-pages.css",
-            [".nr-top-page .nr-button"].as_slice(),
-        ),
-    ];
-
-    // When: each stylesheet is requested through the Actix asset boundary.
-    // Then: source-faithful shell and primitive markers are present.
-    for (path, expected) in cases {
-        let response =
-            test::call_service(&app, test::TestRequest::get().uri(path).to_request()).await;
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-        let body = to_bytes(response.into_body()).await?;
-        let css = std::str::from_utf8(&body)?;
-        for marker in expected {
-            assert!(css.contains(marker), "missing {marker:?} in {path}");
-        }
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/assets/dashboard/app.css")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body()).await?;
+    let css = std::str::from_utf8(&body)?;
+    for marker in [
+        "--background:",
+        "--sidebar:",
+        ".dark",
+        "prefers-reduced-motion",
+        "bg-background",
+    ] {
+        assert!(css.contains(marker), "missing {marker:?} in app.css");
     }
     Ok(())
 }

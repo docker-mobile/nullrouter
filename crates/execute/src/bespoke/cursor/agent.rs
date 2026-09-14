@@ -12,8 +12,10 @@
 //!
 //! The server asks for IDE file context mid-stream (`ExecServerMessage` field 10) and the client
 //! must answer on the *same open stream* before the answer continues. This module produces that
-//! empty-context acknowledgement; the caller is responsible for writing it back. 9router has no
-//! editor, so the acknowledgement is always empty rather than fabricated file contents.
+//! empty-context acknowledgement; the caller is responsible for writing it back. A router has no
+//! editor and no open files, so the acknowledgement is always empty rather than fabricated file
+//! contents — inventing context here would put text into the model's prompt that the user never
+//! wrote.
 
 use serde_json::Value;
 

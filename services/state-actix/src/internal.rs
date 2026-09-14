@@ -106,8 +106,8 @@ pub(crate) fn configure(config: &mut web::ServiceConfig) {
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         )
         .service(
-            web::resource("/internal/v1/migrate/9router")
-                .route(web::post().to(migrate_from_9router))
+            web::resource("/internal/v1/migrate/legacy")
+                .route(web::post().to(migrate_from_legacy))
                 .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
         );
 }
@@ -770,11 +770,11 @@ async fn auth_settings(store: web::Data<StateStore>) -> HttpResponse {
     )
 }
 
-/// Request body for a 9Router import.
+/// Request body for a legacy import.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MigrateRequest {
-    /// Explicit 9Router data directory; discovered when absent.
+    /// Explicit legacy data directory; discovered when absent.
     #[serde(default)]
     data_dir: Option<String>,
     /// Report what would be imported without writing anything.
@@ -782,11 +782,11 @@ struct MigrateRequest {
     dry_run: bool,
 }
 
-/// Import an existing 9Router installation.
+/// Import an existing legacy installation.
 ///
 /// Additive and non-destructive: existing records are kept and duplicates
 /// skipped, so this is safe to run more than once.
-async fn migrate_from_9router(
+async fn migrate_from_legacy(
     store: web::Data<StateStore>,
     request: Option<web::Json<MigrateRequest>>,
 ) -> HttpResponse {
@@ -800,8 +800,8 @@ async fn migrate_from_9router(
             StatusCode::NOT_FOUND,
             &json!({
                 "ok": false,
-                "error": "no_9router_installation",
-                "message": format!("No 9Router installation found. Searched: {searched}"),
+                "error": "no_legacy_installation",
+                "message": format!("No legacy installation found. Searched: {searched}"),
             }),
         ),
         Err(error) => responses::json(

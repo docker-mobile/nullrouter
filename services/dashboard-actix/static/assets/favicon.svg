@@ -1,11 +1,23 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="6" fill="url(#gradient)"/>
-  <text x="16" y="24" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="white" text-anchor="middle">9</text>
-  <defs>
-    <linearGradient id="gradient" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f97815"/>
-      <stop offset="1" stop-color="#c2590a"/>
-    </linearGradient>
-  </defs>
-</svg>
+  <!--
+    A routed path that terminates. Three inbound lanes converge on one node and a single lane leaves
+    it, which is what the router does: many clients, one decision point, one upstream chosen per
+    request. The slash through the node is the "null" half of the name.
 
+    No <text>: the previous mark drew the letters "nr", which meant the icon rendered differently on
+    every platform depending on which sans-serif was resolved, and at 16px the glyphs collapsed into a
+    grey smudge. Geometry renders identically everywhere and stays legible in a favicon.
+
+    `currentColor` on the plate so the mark takes the theme's foreground when inlined; the lanes are
+    drawn in the plate's own background colour so it works on light and dark alike.
+  -->
+  <rect width="32" height="32" rx="7" fill="currentColor"/>
+  <g stroke="var(--nr-logo-ink, #fff)" stroke-width="2" stroke-linecap="round" fill="none">
+    <path d="M5 9h6l4 4"/>
+    <path d="M5 16h6"/>
+    <path d="M5 23h6l4-4"/>
+    <path d="M20 16h7"/>
+  </g>
+  <circle cx="16" cy="16" r="3.4" fill="var(--nr-logo-ink, #fff)"/>
+  <path d="M12.2 19.8 19.8 12.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

@@ -1,10 +1,11 @@
 //! Running external binaries under tight, narrow control.
 //!
 //! This crate exists to manage `cloudflared` and `tailscaled` — two programs the router has
-//! to drive but does not own — without inheriting the way 9Router drives them. Upstream's
-//! approach, in `src/lib/tunnel/`, is a set of habits this crate refuses one by one:
+//! to drive but does not own. Driving a foreign binary invites a specific set of habits, each
+//! of which this crate refuses on purpose. The left column is what the convenient version of
+//! this code does; the right is what happens here instead:
 //!
-//! | upstream | here |
+//! | the convenient way | here |
 //! |---|---|
 //! | downloads `cloudflared` from `releases/latest`, `chmod 755`, runs it | never downloads; runs only an installed binary, and checks its ownership and permissions first ([`binary`]) |
 //! | passes the tunnel token as `--token <value>` in argv, visible in `/proc/*/cmdline` | credentials reach the child only through its environment, and cannot be printed ([`secret`]) |

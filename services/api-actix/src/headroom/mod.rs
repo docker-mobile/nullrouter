@@ -479,10 +479,17 @@ fn detect() -> Detection {
 
 // ── install log ─────────────────────────────────────────────────────────────
 
+/// The legacy product's data directory under `$HOME`. An external program's
+/// address on disk: renaming it means never finding an existing install.
+const LEGACY_DATA_DIR: &str = ".9router";
+
+/// The same directory in the Windows `%APPDATA%` layout, and the same rule.
+const LEGACY_DATA_DIR_WINDOWS: &str = "9router";
+
 /// Data directories to look for `headroom/install.log` in, most likely first.
 ///
-/// Same discovery `services/state-actix/src/migrate.rs` uses, and the same
-/// `DATA_DIR` override upstream reads.
+/// The same discovery `services/state-actix/src/migrate.rs` does, including the
+/// `DATA_DIR` override, so both agree on which install they are looking at.
 fn data_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(configured) = std::env::var("DATA_DIR")
@@ -491,10 +498,10 @@ fn data_dirs() -> Vec<PathBuf> {
         dirs.push(PathBuf::from(configured));
     }
     if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(Path::new(&home).join(".9router"));
+        dirs.push(Path::new(&home).join(LEGACY_DATA_DIR));
     }
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        dirs.push(Path::new(&appdata).join("9router"));
+        dirs.push(Path::new(&appdata).join(LEGACY_DATA_DIR_WINDOWS));
     }
     dirs
 }
@@ -502,10 +509,10 @@ fn data_dirs() -> Vec<PathBuf> {
 /// An existing `headroom/install.log`, if one is there.
 ///
 /// This service never writes it: installs are refused, so nothing here produces
-/// a log line. What it can find is a log some *other* process left — upstream
-/// 9Router running against the same data directory, or a `pip install` a user
-/// redirected there. Reading it is how the panel can show that history instead
-/// of an empty box it cannot explain.
+/// a log line. What it can find is a log some *other* process left — another
+/// router sharing the same data directory, or a `pip install` a user redirected
+/// there. Reading it is how the panel can show that history instead of an empty
+/// box it cannot explain.
 fn install_log_path() -> Option<PathBuf> {
     data_dirs()
         .into_iter()
@@ -704,7 +711,7 @@ fn install_spec(accepted: &[String]) -> String {
 
 // ── response shapes ─────────────────────────────────────────────────────────
 
-const EXTERNAL_PROXY: &str = "External Headroom proxies must be started outside 9Router";
+const EXTERNAL_PROXY: &str = "External Headroom proxies must be started outside nullrouter";
 
 /// What `installMessage` says now that installing works.
 const INSTALL_SUPPORTED: &str = "Installing extras runs pip against the interpreter reported in `python`, with a 15 minute \

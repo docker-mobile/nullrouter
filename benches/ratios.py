@@ -5,7 +5,7 @@ The ratios quoted in README.md and BENCHMARKS.md come from here rather than from
 by hand in prose. Both inputs are raw `benches/run.sh` output, so a reader can re-derive every
 published figure from the files in `benches/results/`:
 
-    benches/ratios.py benches/results/<9router>.txt benches/results/<nullrouter>.txt
+    benches/ratios.py benches/results/<baseline>.txt benches/results/<nullrouter>.txt
 
 It refuses to summarise a partial comparison. An earlier draft quoted a median over eleven cells
 because one cell had been rejected by the harness's own sanity check and remeasured by hand

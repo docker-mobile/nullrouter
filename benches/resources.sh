@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Memory and CPU cost of a running router, summed across its whole process tree.
 #
-# The tree is the point. nullrouter runs eight services; 9Router runs one Node process. A
+# The tree is the point. nullrouter runs eight services; the baseline runs one Node process. A
 # figure taken from whichever process looks like "the router" would flatter nullrouter by a
 # factor of eight, and that is the easiest way to build an unfair benchmark by accident.
 # This sums every process it is given and prints the count, so a reader can see it summed
 # the right number of things.
 #
 #   benches/resources.sh --label nullrouter --ports 20128,20129,20130,20131,20132,20133,20134,20135
-#   benches/resources.sh --label 9router --ports 20127
+#   benches/resources.sh --label baseline --ports 20127
 #
 # Run it while load is being applied, from a second shell. Idle numbers are not the
 # interesting ones -- a router that is doing nothing costs nothing.

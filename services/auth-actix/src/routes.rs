@@ -10,7 +10,7 @@ use actix_web::{
 };
 
 use crate::{
-    AuthService, SERVICE_NAME,
+    AuthService, SERVICE_NAME, Verdict,
     contracts::{
         AuthStatusResponse, AuthorizationKind, AuthorizeRequest, AuthorizeResponse, HealthResponse,
         LoginDeniedResponse, LoginLockedResponse, LoginRequest, LoginSuccessResponse,
@@ -18,15 +18,16 @@ use crate::{
     },
     errors::{ApiError, protocol_error},
     lockout::{FailureState, LockState},
+    oidc::{self, OidcConfig},
     responses,
-    session::SessionCodec,
+    saml::SamlConfig,
+    session::{NewSession, SessionCodec},
 };
 
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1_024;
 const MAX_PASSWORD_BYTES: usize = 1_024;
 const MAX_API_KEY_BYTES: usize = 4_096;
-const RESET_HINT: &str =
-    "Forgot password? Reset to default via 9Router CLI -> Settings -> Reset Password to Default.";
+const RESET_HINT: &str = "Forgot password? Reset to default via nullrouter CLI -> Settings -> Reset Password to Default.";
 
 pub(crate) fn configure(config: &mut web::ServiceConfig, service: AuthService) {
     config
@@ -81,51 +82,100 @@ fn health() -> Ready<HttpResponse> {
 /// `requireLogin` is a hard-coded `true` **by design, not by omission**.
 /// Dashboard login is unconditional in nullrouter: there is no setting behind
 /// this field, `GET /api/settings/require-login` has been removed, and
-/// `Settings` carries no `requireLogin` to read. 9Router lets an operator turn
-/// dashboard auth off entirely; this port deliberately does not.
+/// `Settings` carries no `requireLogin` to read. Turning dashboard auth off
+/// entirely is deliberately not offered — the dashboard holds provider
+/// credentials, so an unauthenticated one is a credential leak with a UI.
 ///
 /// So please do not "fix" this back into a settings lookup. The field stays only
 /// because the login page reads it, and it must never report `false` — a client
 /// that sees `requireLogin: false` would skip the login screen.
-fn status(service: web::Data<AuthService>, request: HttpRequest) -> Ready<HttpResponse> {
+/// Whether single sign-on is usable, answered by the same predicates the flows themselves use.
+///
+/// This is deliberately not a separate configuration flag. `oidc_configured` used to be a hardcoded
+/// `false`, which meant an operator could set a valid issuer, client id and secret, have
+/// `/api/auth/oidc/start` work perfectly, and still never see a sign-in button — the login screen
+/// reads this field to decide whether to offer one. Asking `OidcConfig::from_settings` and
+/// `SamlConfig::from_settings` is what keeps the answer and the behaviour from drifting apart:
+/// if a flow can run, the button appears, because the same function decided both.
+async fn sso_availability(service: &AuthService) -> (bool, bool, String) {
+    // A state service that cannot be reached is reported as "no SSO" rather than as an error. The
+    // password form still works, so degrading to it beats a login screen that will not render.
+    let Ok(settings) = service.auth_settings().await else {
+        return (false, false, oidc::normalize_login_label(""));
+    };
+    let oidc = OidcConfig::from_settings(&settings);
+    let saml = SamlConfig::from_settings(&settings).is_some();
+    let label = oidc.as_ref().map_or_else(
+        || oidc::normalize_login_label(""),
+        |config| config.login_label.clone(),
+    );
+    (oidc.is_some(), saml, label)
+}
+
+async fn status(service: web::Data<AuthService>, request: HttpRequest) -> HttpResponse {
     let service = service.into_inner();
-    let authenticated = request
+    let identity = request
         .cookie(SessionCodec::cookie_name())
-        .is_some_and(|cookie| service.session().verify(cookie.value(), service.now()));
+        .and_then(|cookie| service.session().identity(cookie.value(), service.now()));
     drop(request);
-    ready(responses::json(
+    let authenticated = identity.is_some();
+    let (oidc_configured, saml_configured, oidc_login_label) = sso_availability(&service).await;
+    // A shared-password session reports `admin`. It is the legacy full-access principal, and
+    // reporting anything less would hide controls from an operator who has not migrated yet.
+    let role = identity
+        .as_ref()
+        .and_then(|identity| identity.role.as_deref())
+        .map(|role| match role {
+            "admin" => "admin",
+            "operator" => "operator",
+            // An unrecognised role in a signed token is not trusted upward: it reads as the least
+            // privilege, so a token minted by a newer build naming a role this one does not know
+            // cannot come back as full access.
+            _ => "viewer",
+        })
+        .unwrap_or("admin");
+    let display_name = identity
+        .as_ref()
+        .and_then(|identity| identity.display_name.clone())
+        .unwrap_or_else(|| "Password user".to_owned());
+    let user_id = identity.and_then(|identity| identity.user_id);
+    responses::json(
         StatusCode::OK,
         &AuthStatusResponse {
             authenticated,
             require_login: true,
             auth_mode: "password",
-            oidc_configured: false,
-            oidc_login_label: "Sign in with OIDC",
+            oidc_configured,
+            oidc_login_label,
+            saml_configured,
             has_password: service.config().has_configured_password_hash(),
-            display_name: "Password user",
+            display_name,
             login_method: "Password",
             oidc_name: None,
             oidc_email: None,
             oidc_login: false,
+            user_id,
+            role,
+            users_configured: service.users_configured().await,
         },
-    ))
+    )
 }
 
-fn login(
+async fn login(
     service: web::Data<AuthService>,
     request: HttpRequest,
     body: web::Bytes,
-) -> Ready<HttpResponse> {
+) -> HttpResponse {
     let service = service.into_inner();
-    let response = match login_inner(&service, &request, &body) {
+    let response = match login_inner(&service, &request, &body).await {
         Ok(response) => response,
         Err(error) => error.error_response(),
     };
     drop((request, body));
-    ready(response)
+    response
 }
 
-fn login_inner(
+async fn login_inner(
     service: &AuthService,
     request: &HttpRequest,
     body: &[u8],
@@ -138,10 +188,21 @@ fn login_inner(
         .map_err(|_| ApiError::InternalStateUnavailable)?
         .check(peer, now);
     if let LockState::Locked { retry_after } = current_lock {
+        // Logged on every rejected attempt while locked, not only at the moment the lock is applied.
+        // A lockout that keeps being hit is an attack still in progress; one that is hit once is
+        // someone who mistyped. Only the repeated records distinguish them.
+        tracing::warn!(
+            audit = true,
+            event = "auth.login.locked_out",
+            %peer,
+            retry_after_seconds = retry_after,
+            "dashboard sign-in refused: address is locked out"
+        );
         return Ok(locked_response(retry_after));
     }
 
     let request = parse_json::<LoginRequest>(body)?;
+    let request_username = request.username.clone();
     let Some(password) = request
         .password
         .as_deref()
@@ -151,15 +212,75 @@ fn login_inner(
         return Err(ApiError::PasswordRequired);
     };
 
-    if service.password().verify(password) {
+    // A username means a managed account. Checked first so that once accounts exist, they are the
+    // only way in: the shared password is reachable only through the `NoUsersConfigured` arm below,
+    // which the state service reports only while the account table is empty.
+    let username = request_username
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let outcome = match username {
+        Some(username) => service.verify_user(username, password).await,
+        // No username supplied. Still ask, so an install with accounts refuses a bare password
+        // instead of falling through to the shared one.
+        None => service.verify_user("", password).await,
+    };
+
+    let session = match outcome {
+        Ok(Verdict::Authenticated(user)) => {
+            let display = if user.display_name.trim().is_empty() {
+                user.username.clone()
+            } else {
+                user.display_name.clone()
+            };
+            Some(NewSession {
+                user_id: Some(user.user_id),
+                display_name: Some(display),
+                role: Some(user.role),
+            })
+        }
+        // No account exists yet, so the shared password is still the way in. This is the whole
+        // migration path: an install that upgrades keeps working until an admin is created.
+        Ok(Verdict::NoUsersConfigured) if service.password().verify(password) => {
+            Some(NewSession::default())
+        }
+        Ok(Verdict::NoUsersConfigured | Verdict::Rejected) => None,
+        // The credential store is unreachable. Not a rejection: reporting "wrong password" for an
+        // outage sends an operator hunting a credential that is fine. The shared password is not
+        // accepted here either, because whether accounts exist is exactly what could not be read.
+        Err(_) => {
+            tracing::error!(
+                audit = true,
+                event = "auth.login.unavailable",
+                %peer,
+                "dashboard sign-in could not be decided: the credential store did not answer"
+            );
+            return Err(ApiError::InternalStateUnavailable);
+        }
+    };
+
+    if let Some(session) = session {
         service
             .lockout()
             .lock()
             .map_err(|_| ApiError::InternalStateUnavailable)?
             .record_success(peer);
+        // Every record carries `audit = true` so a collector can select these without pattern
+        // matching on message text, which changes. The peer address is included because "who signed
+        // in, from where" is the question an incident review starts from; the password never is, not
+        // even its length, since that narrows a brute-force search.
+        tracing::info!(
+            audit = true,
+            event = "auth.login.succeeded",
+            %peer,
+            method = if session.user_id.is_some() { "password" } else { "shared_password" },
+            subject = session.user_id.as_deref().unwrap_or("(shared password)"),
+            role = session.role.as_deref().unwrap_or("admin"),
+            "dashboard sign-in succeeded"
+        );
         let token = service
             .session()
-            .create_token(now)
+            .create_token_for(now, &session)
             .ok_or(ApiError::InternalStateUnavailable)?;
         return Ok(responses::json_with_cookie(
             StatusCode::OK,
@@ -176,11 +297,34 @@ fn login_inner(
         .lock()
         .map_err(|_| ApiError::InternalStateUnavailable)?
         .record_failure(peer, now);
+    // `warn`, not `info`: a failed sign-in is what a brute-force attempt looks like in aggregate, so
+    // it should survive a collector configured to drop info. `remaining_before_lock` is what turns a
+    // series of these into a rate, which is the signal worth alerting on.
+    tracing::warn!(
+        audit = true,
+        event = "auth.login.failed",
+        %peer,
+        method = "password",
+        // The attempted username, which is the field that separates one person mistyping from a
+        // sweep across accounts. Never the password.
+        attempted = request_username.as_deref().unwrap_or("(none supplied)"),
+        remaining_before_lock = failure.remaining_before_lock,
+        locked = matches!(failure.lock_state, LockState::Locked { .. }),
+        "dashboard sign-in failed"
+    );
     Ok(failed_login_response(failure))
 }
 
 fn logout(service: web::Data<AuthService>) -> Ready<HttpResponse> {
     let service = service.into_inner();
+    // No peer address: this handler does not take the request, and logout is unauthenticated by
+    // design -- it only clears a cookie. Recorded anyway so a session's end appears in the trail
+    // alongside its start.
+    tracing::info!(
+        audit = true,
+        event = "auth.logout",
+        "dashboard session cleared"
+    );
     ready(responses::json_with_cookie(
         StatusCode::OK,
         &LogoutResponse { success: true },
@@ -219,18 +363,22 @@ async fn authorize_inner(
 ) -> AuthorizeResponse {
     match request.kind() {
         AuthorizationKind::Dashboard => {
-            let token = request
+            let identity = request
                 .into_dashboard_token()
-                .filter(|token| !token.is_empty());
-            if token.is_some_and(|token| service.session().verify(&token, service.now())) {
-                AuthorizeResponse {
+                .filter(|token| !token.is_empty())
+                .and_then(|token| service.session().identity(&token, service.now()));
+            match identity {
+                Some(identity) => AuthorizeResponse {
                     authorized: true,
                     principal: Some("dashboard_session"),
                     key_id: None,
                     reason: None,
-                }
-            } else {
-                AuthorizeResponse::denied("invalid_session")
+                    // Absent on a shared-password session, which the gateway reads as full access:
+                    // that is what those sessions were, and reducing them would lock an un-migrated
+                    // install out of the settings needed to migrate.
+                    role: identity.role,
+                },
+                None => AuthorizeResponse::denied("invalid_session"),
             }
         }
         AuthorizationKind::Runtime => {
@@ -247,6 +395,10 @@ async fn authorize_inner(
                     principal: Some("api_key"),
                     key_id: validation.key_id,
                     reason: None,
+                    // A `/v1` inference key has no dashboard role. It never reaches `/api/*` anyway --
+                    // those routes require `ApiSession` and this principal is `RuntimeApiKey` -- so
+                    // there is no role for it to carry.
+                    role: None,
                 },
                 Ok(_) => AuthorizeResponse::denied("invalid_api_key"),
                 Err(_) => AuthorizeResponse::denied("state_unavailable"),

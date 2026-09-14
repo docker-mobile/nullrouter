@@ -181,10 +181,10 @@ async fn extras_reports_the_available_compression_extras_and_python_detection() 
 
 #[actix_rt::test]
 async fn extras_log_query_returns_the_install_log_tail() -> TestResult {
-    // Given: this build never writes an install log, but one may exist from
-    // upstream 9Router sharing the same data directory.
+    // Given: this build never writes an install log, but one may exist from another
+    // process sharing the same data directory.
 
-    // When: the panel polls for install progress the way upstream's UI does.
+    // When: the panel polls for install progress.
     let (status, body) = get_json("/api/headroom/extras?log=1").await?;
 
     // Then: a `log` string is always present — empty when no log exists, which
@@ -393,19 +393,28 @@ async fn no_route_claims_a_running_proxy_when_none_is_running() -> TestResult {
     // matters is unchanged from when these routes were refusals: nothing may report a live
     // proxy, because a user who believes compression is on is billed for full-size requests.
 
-    // When: each mutating route is called, then status is read.
-    let (extras_status, extras) = post_json("/api/headroom/extras", r#"{"extras":["ml"]}"#).await?;
+    // When: the proxy-lifecycle routes are called, then status is read.
+    //
+    // Order matters, and this is the whole reason the case is written this way. `/api/headroom/extras`
+    // *installs*: given a working pip and network it really fetches `headroom-ai[proxy,ml]`. Calling it
+    // first — as this case used to — destroyed the precondition the remaining assertions rest on, so
+    // `start` and `restart` then genuinely launched a proxy and returned 200. The guard at the top of
+    // the function could not catch that, because it samples the state before the install happens. So
+    // every route that must observe an absent binary is called before the one that can create it.
+    // Re-checked immediately before the requests, not only at function entry. A sibling in this
+    // binary (`an_empty_extras_list_still_installs_the_proxy_base` and its neighbours) really
+    // pip-installs, and if it finished while this case was waiting to be scheduled the contract
+    // is already unexercisable. The skip at the top of the function cannot see that.
+    if host_has_headroom() {
+        return Ok(());
+    }
     let (restart_status, restart) = post_json("/api/headroom/restart", "").await?;
     let (start_status, start) = post_json("/api/headroom/start", "").await?;
     let (stop_status, stop) = post_json("/api/headroom/stop", "").await?;
     let (status_status, status_body) = get_json("/api/headroom/status").await?;
 
-    // Then: the three that need the binary fail, and each names a cause.
-    for (status, body) in [
-        (extras_status, &extras),
-        (restart_status, &restart),
-        (start_status, &start),
-    ] {
+    // Then: the two that need an installed binary fail, and each names a cause.
+    for (status, body) in [(restart_status, &restart), (start_status, &start)] {
         assert!(
             status.is_client_error() || status.is_server_error(),
             "expected a failure with no binary installed, got {status}: {body}"

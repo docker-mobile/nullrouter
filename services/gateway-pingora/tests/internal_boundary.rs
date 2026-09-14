@@ -64,8 +64,12 @@ fn forbidden_internal_paths_resolve_to_a_forbidden_decision() {
         );
         // Regardless of authorization state, the decision stays Forbidden: a
         // valid session must not unlock the credential surface.
+        // Admin included deliberately: the point is that no role unlocks this surface.
         for state in [
-            AuthorizationState::Authorized,
+            AuthorizationState::Authorized { role: None },
+            AuthorizationState::Authorized {
+                role: Some(nullrouter_gateway::PrincipalRole::Admin),
+            },
             AuthorizationState::Denied,
             AuthorizationState::Unavailable,
         ] {

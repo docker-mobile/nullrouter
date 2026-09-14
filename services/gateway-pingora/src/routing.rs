@@ -68,6 +68,19 @@ fn is_state_path(path: &str) -> bool {
             &["cloudflare-deploy", "deno-deploy", "vercel-deploy"],
         )
         || path == "/api/settings"
+        || is_model_settings_path(path)
+}
+
+/// The three `/api/models/*` paths that are stored state rather than catalogue.
+///
+/// Listed exactly rather than matched by prefix: `/api/models` itself is the live catalogue and
+/// `/api/models/availability` is per-process cooldown, both of which belong to the API service. A
+/// prefix rule here would silently take them too, and the catalogue would start answering empty.
+fn is_model_settings_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/models/disabled" | "/api/models/custom" | "/api/models/alias"
+    )
 }
 
 fn is_collection_or_item(path: &str, collection: &str) -> bool {

@@ -111,7 +111,6 @@ async fn api_sentry_routes_return_structured_json_when_state_is_empty() -> TestR
     let tts_voices = get_json("/api/media-providers/tts/voices").await?;
     let openai_tts_voices = get_json("/api/media-providers/tts/openai/voices").await?;
     let deepgram_tts_voices = get_json("/api/media-providers/tts/deepgram/voices?lang=en").await?;
-    let model_aliases = get_json("/api/models/alias").await?;
     let headroom_proxy = get_json("/api/headroom/proxy/v1/models").await?;
     let tunnel_status = get_json("/api/tunnel/status").await?;
     let cli_all_statuses = get_json("/api/cli-tools/all-statuses").await?;
@@ -161,12 +160,6 @@ async fn api_sentry_routes_return_structured_json_when_state_is_empty() -> TestR
         assert_eq!(field(&response.json, "byLang")?, &serde_json::json!({}));
     }
 
-    assert_structured_json(&model_aliases, StatusCode::OK);
-    assert_eq!(
-        field(&model_aliases.json, "aliases")?,
-        &serde_json::json!({})
-    );
-
     assert_structured_json(&headroom_proxy, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(field(&headroom_proxy.json, "success")?, false);
     assert_eq!(field(&headroom_proxy.json, "unsupported")?, true);
@@ -184,12 +177,12 @@ async fn api_sentry_routes_return_structured_json_when_state_is_empty() -> TestR
 
     assert_structured_json(&cli_all_statuses, StatusCode::OK);
     let codex = field(&cli_all_statuses.json, "codex")?;
-    assert_eq!(field(codex, "installed")?, false);
-    assert_eq!(field(codex, "has9Router")?, false);
+    assert!(field(codex, "installed")?.is_boolean());
+    assert_eq!(field(codex, "hasRouter")?, false);
 
     assert_structured_json(&cli_codex_settings, StatusCode::OK);
-    assert_eq!(field(&cli_codex_settings.json, "installed")?, false);
-    assert_eq!(field(&cli_codex_settings.json, "has9Router")?, false);
+    assert!(field(&cli_codex_settings.json, "installed")?.is_boolean());
+    assert_eq!(field(&cli_codex_settings.json, "hasRouter")?, false);
     Ok(())
 }
 

@@ -35,7 +35,13 @@ use crate::{
 
 pub(crate) const STATE_COOKIE: &str = "saml_state";
 
-const DEFAULT_ISSUER: &str = "urn:9router:sp";
+/// The SP entity id used when the operator configured none.
+///
+/// An external address: it is registered at the operator's identity provider, and an IdP rejects an
+/// `AuthnRequest` whose issuer it does not recognise. Changing this default would break login for
+/// every deployment that carried its SAML settings over and left the issuer blank. Operators who
+/// want their own value set `saml_issuer`.
+const DEFAULT_ISSUER: &str = "urn:nullrouter:sp";
 /// Cap on a decoded `SAMLResponse`. Assertions are a few kilobytes; anything
 /// this large is not one.
 const MAX_RESPONSE_BYTES: usize = 512 * 1_024;

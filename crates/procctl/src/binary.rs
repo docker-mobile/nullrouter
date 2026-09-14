@@ -92,6 +92,24 @@ pub struct BinarySpec {
     pub search_dirs: &'static [&'static str],
 }
 
+/// Set to `off` to disable discovery entirely, so only [`BinarySpec::env_override`] can supply a
+/// path.
+///
+/// Two callers want this. An operator running locked down wants the guarantee that this service
+/// executes only binaries they named explicitly, rather than whatever appeared in a system
+/// directory after an unrelated package install. And a test asserting the not-installed path needs
+/// that state to be declarable: reading it from the host makes the result depend on whether the
+/// machine happens to have the binary, which is how a suite ends up passing on CI and opening a
+/// real tunnel on a developer's laptop.
+pub const DISCOVERY_VAR: &str = "NULLROUTER_BINARY_DISCOVERY";
+
+/// Whether scanning [`BinarySpec::candidates`] and [`BinarySpec::search_dirs`] is permitted.
+fn discovery_enabled() -> bool {
+    std::env::var(DISCOVERY_VAR)
+        .map(|value| !value.trim().eq_ignore_ascii_case("off"))
+        .unwrap_or(true)
+}
+
 /// Directories searched for tunnel binaries.
 ///
 /// Mirrors upstream's `EXTENDED_PATH` minus the inherited `$PATH`. The process
@@ -177,18 +195,23 @@ impl BinarySpec {
         }
 
         let mut searched = 0_usize;
-        for candidate in self.candidates {
-            searched += 1;
-            let path = PathBuf::from(candidate);
-            if usable(&path).is_ok() {
-                return self.finish(path, pin);
+        // With discovery off, the override above was the only way in, so an unset override means
+        // absent. Reported as `NotFound` with nothing searched, which is the truth: no location was
+        // consulted.
+        if discovery_enabled() {
+            for candidate in self.candidates {
+                searched += 1;
+                let path = PathBuf::from(candidate);
+                if usable(&path).is_ok() {
+                    return self.finish(path, pin);
+                }
             }
-        }
-        for dir in self.search_dirs {
-            searched += 1;
-            let path = Path::new(dir).join(self.name);
-            if usable(&path).is_ok() {
-                return self.finish(path, pin);
+            for dir in self.search_dirs {
+                searched += 1;
+                let path = Path::new(dir).join(self.name);
+                if usable(&path).is_ok() {
+                    return self.finish(path, pin);
+                }
             }
         }
         Err(BinaryError::NotFound {

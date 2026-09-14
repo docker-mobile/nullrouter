@@ -1,9 +1,1 @@
-@import url("./dashboard/base.css");
-@import url("./dashboard/sidebar.css");
-@import url("./dashboard/workspace.css");
-@import url("./dashboard/cards.css");
-@import url("./dashboard/forms.css");
-@import url("./dashboard/top-pages.css");
-@import url("./dashboard/top-auth.css");
-@import url("./dashboard/responsive.css");
-@import url("./dashboard/motion.css");
+@import url("./dashboard/app.css");

@@ -18,6 +18,10 @@ pub enum StoreError {
     Poisoned,
     #[error("state io failed: {0}")]
     Io(#[from] std::io::Error),
+    /// Encryption at rest could not be applied or reversed. Surfaced rather than folded into `Io`
+    /// so an operator with a mismatched key gets the message that names the variable to fix.
+    #[error(transparent)]
+    AtRest(#[from] crate::at_rest::AtRestError),
     #[error("state json failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("secure random generation failed")]
@@ -104,6 +108,45 @@ pub(crate) struct StateSnapshot {
     /// whoever reads them back.
     #[serde(default)]
     pub(crate) translator_logs: BTreeMap<String, String>,
+    /// Model ids an operator has held back, keyed by provider alias.
+    ///
+    /// Persisted rather than kept per-process: disabling a model is a decision about the install, and
+    /// one that came back on the next restart would be worse than not offering the control at all.
+    #[serde(default)]
+    pub(crate) disabled_models: BTreeMap<String, Vec<String>>,
+    /// Models an operator has declared on a provider that does not advertise them.
+    #[serde(default)]
+    pub(crate) custom_models: Vec<CustomModel>,
+    /// Alternative names for a model, as `alias -> model`.
+    ///
+    /// Keyed by alias because that is the direction every lookup goes: a request arrives naming the
+    /// alias and has to resolve to the real model. One model may have several aliases.
+    #[serde(default)]
+    pub(crate) model_aliases: BTreeMap<String, String>,
+    /// Accounts that can sign in to the dashboard.
+    ///
+    /// Empty on an install that has never created one, which is what keeps the legacy shared password
+    /// working: there would otherwise be no way in after an upgrade.
+    #[serde(default)]
+    pub(crate) users: Vec<crate::users::UserRecord>,
+}
+
+/// A model an operator added by hand to a provider's catalogue.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomModel {
+    pub provider_alias: String,
+    pub id: String,
+    /// Upstream's `type`, free-form: `chat`, `embedding`, and others appear in the wild.
+    ///
+    /// Renamed explicitly because `camelCase` would make this `modelType`, and the wire name a client
+    /// sends is `type` -- a rename here is the difference between reading the field and silently
+    /// defaulting it.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub model_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -583,7 +626,12 @@ impl StateStore {
     pub fn file(path: &Path) -> Result<Self, StoreError> {
         let mut snapshot = if path.exists() {
             let bytes = std::fs::read(path)?;
-            serde_json::from_slice(&bytes)?
+            // Decrypted only when the bytes are actually ciphertext, decided by the file's own magic
+            // prefix rather than by whether a key happens to be configured. That is what lets an
+            // existing cleartext deployment set a key and have its next save encrypt the file, with
+            // no migration step and no flag day.
+            let plain = crate::at_rest::open(&bytes)?;
+            serde_json::from_slice(&plain)?
         } else {
             StateSnapshot::default()
         };
@@ -889,6 +937,131 @@ impl StateStore {
             snapshot.combos.retain(|combo| combo.id != id);
             snapshot.combos.len() != original_len
         })
+    }
+
+    /// Every provider's held-back model ids.
+    pub(crate) fn disabled_models(&self) -> Result<BTreeMap<String, Vec<String>>, StoreError> {
+        self.with_snapshot(|snapshot| snapshot.disabled_models.clone())
+    }
+
+    /// One provider's held-back model ids, empty when it has none.
+    pub(crate) fn disabled_models_for(
+        &self,
+        provider_alias: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        self.with_snapshot(|snapshot| {
+            snapshot
+                .disabled_models
+                .get(provider_alias)
+                .cloned()
+                .unwrap_or_default()
+        })
+    }
+
+    /// Replace one provider's held-back set.
+    ///
+    /// A replace rather than a merge, because the caller sends the whole set: with a merge there
+    /// would be no way to re-enable a model except by naming it in a separate delete, and the UI
+    /// edits the list as a list.
+    ///
+    /// An empty list removes the key instead of storing an empty vector, so a provider with nothing
+    /// disabled does not appear in the map at all -- the same shape it had before it was ever set.
+    pub(crate) fn set_disabled_models(
+        &self,
+        provider_alias: &str,
+        ids: Vec<String>,
+    ) -> Result<Vec<String>, StoreError> {
+        self.write_snapshot(|snapshot| {
+            let mut ids: Vec<String> = ids
+                .into_iter()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| !id.is_empty())
+                .collect();
+            ids.sort();
+            ids.dedup();
+            if ids.is_empty() {
+                snapshot.disabled_models.remove(provider_alias);
+            } else {
+                snapshot
+                    .disabled_models
+                    .insert(provider_alias.to_owned(), ids.clone());
+            }
+            ids
+        })
+    }
+
+    /// Re-enable everything for one provider. `false` when it had nothing disabled.
+    pub(crate) fn clear_disabled_models(&self, provider_alias: &str) -> Result<bool, StoreError> {
+        self.write_snapshot(|snapshot| snapshot.disabled_models.remove(provider_alias).is_some())
+    }
+
+    pub(crate) fn custom_models(&self) -> Result<Vec<CustomModel>, StoreError> {
+        self.with_snapshot(|snapshot| snapshot.custom_models.clone())
+    }
+
+    /// Add a model, or update the one already at this `(provider_alias, id)`.
+    ///
+    /// Returns whether a new entry was added, which is what upstream's `added` field reports. The
+    /// pair is the identity: the same id on two providers is two different models, and re-adding the
+    /// same pair with a new name is an edit rather than a duplicate.
+    pub(crate) fn add_custom_model(
+        &self,
+        provider_alias: String,
+        id: String,
+        model_type: Option<String>,
+        name: Option<String>,
+    ) -> Result<(CustomModel, bool), StoreError> {
+        self.write_snapshot(|snapshot| {
+            let existing = snapshot
+                .custom_models
+                .iter_mut()
+                .find(|model| model.provider_alias == provider_alias && model.id == id);
+            if let Some(model) = existing {
+                model.model_type = model_type;
+                model.name = name;
+                return (model.clone(), false);
+            }
+            let model = CustomModel {
+                provider_alias,
+                id,
+                model_type,
+                name,
+                created_at: timestamp(),
+            };
+            snapshot.custom_models.push(model.clone());
+            (model, true)
+        })
+    }
+
+    /// Remove one model. `false` when the pair was not present.
+    pub(crate) fn delete_custom_model(
+        &self,
+        provider_alias: &str,
+        id: &str,
+    ) -> Result<bool, StoreError> {
+        self.write_snapshot(|snapshot| {
+            let before = snapshot.custom_models.len();
+            snapshot
+                .custom_models
+                .retain(|model| !(model.provider_alias == provider_alias && model.id == id));
+            snapshot.custom_models.len() != before
+        })
+    }
+
+    pub(crate) fn model_aliases(&self) -> Result<BTreeMap<String, String>, StoreError> {
+        self.with_snapshot(|snapshot| snapshot.model_aliases.clone())
+    }
+
+    /// Point `alias` at `model`, replacing any earlier target.
+    pub(crate) fn set_model_alias(&self, alias: String, model: String) -> Result<(), StoreError> {
+        self.write_snapshot(|snapshot| {
+            snapshot.model_aliases.insert(alias, model);
+        })
+    }
+
+    /// Remove one alias. `false` when it was not set.
+    pub(crate) fn delete_model_alias(&self, alias: &str) -> Result<bool, StoreError> {
+        self.write_snapshot(|snapshot| snapshot.model_aliases.remove(alias).is_some())
     }
 
     pub(crate) fn list_proxy_pools(
@@ -1317,10 +1490,12 @@ impl StateStore {
         })
     }
 
-    /// Create a combo during a 9Router import, preserving its original name.
+    /// Create a combo during a legacy import, preserving its original name.
     ///
-    /// Separate from `create_combo` so an import can carry the upstream `kind`
-    /// and model list without going through request validation.
+    /// Separate from `create_combo` so an import can carry the `kind` and model
+    /// list it read verbatim, without going through request validation. An
+    /// imported combo is existing configuration, not a new request: rejecting it
+    /// would drop a working combo rather than correct it.
     pub(crate) fn create_combo_from_import(
         &self,
         name: &str,
@@ -1342,7 +1517,7 @@ impl StateStore {
         })
     }
 
-    /// Apply settings read from a 9Router install.
+    /// Apply settings read from a legacy install.
     ///
     /// Only keys with a nullrouter equivalent are taken; anything else is
     /// ignored rather than guessed at.
@@ -1352,8 +1527,8 @@ impl StateStore {
     ) -> Result<(), StoreError> {
         let boolean = |key: &str| imported.get(key).and_then(Value::as_bool);
         let text = |key: &str| imported.get(key).and_then(Value::as_str).map(str::to_owned);
-        // 9Router stores this as a JSON number, but a SQLite settings row can
-        // carry it as text, so both spellings are read.
+        // The source stores this as a JSON number, but the same value arrives as
+        // text when it came out of a SQLite settings row, so both are read.
         let count = |key: &str| {
             imported
                 .get(key)
@@ -1404,7 +1579,8 @@ impl StateStore {
             if let Some(value) = count("stickyRoundRobinLimit") {
                 snapshot.settings.sticky_round_robin_limit = value;
             }
-            // Dashboard SSO configuration, under the same keys 9Router uses.
+            // Dashboard SSO configuration. These key spellings are the imported
+            // settings blob's own, so they are matched as-is.
             for (key, target) in [
                 ("oidcIssuerUrl", &mut snapshot.settings.oidc_issuer_url),
                 ("oidcClientId", &mut snapshot.settings.oidc_client_id),
@@ -1663,9 +1839,51 @@ impl StateStore {
             std::fs::create_dir_all(parent)?;
         }
         let payload = serde_json::to_vec_pretty(snapshot)?;
-        std::fs::write(path, payload)?;
+        // Sealed when a key is configured, written as-is otherwise. The mode-600 write below applies
+        // either way: encryption protects the bytes once they leave this host in a backup or a
+        // support bundle, and the file mode protects them while they sit here.
+        let payload = crate::at_rest::seal(&payload)?;
+        write_private(path, &payload)?;
         Ok(())
     }
+}
+
+/// Write `payload` to `path` so that only the owner can read it, and so a crash cannot truncate it.
+///
+/// This file holds provider API keys and OAuth refresh tokens in cleartext. `fs::write` creates with
+/// `0o666 & !umask`, which on a stock Linux image is `0o644` -- every local account can read the
+/// credentials. It is also not atomic: `fs::write` truncates first, so a crash between truncate and
+/// the final byte leaves a half-written file that fails to parse on the next start, losing every
+/// connection the operator had configured.
+///
+/// The mode is set on the temporary file's own descriptor before the rename, not on `path` after it.
+/// Setting it afterwards leaves a window in which the real path exists world-readable, and `chmod`
+/// by path can follow something else into place. `rename` carries the mode with it and replaces the
+/// target atomically, so a reader sees either the whole previous file or the whole new one.
+fn write_private(path: &std::path::Path, payload: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    // Alongside the target, not in a temp dir: `rename` is only atomic within one filesystem.
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let temp = std::path::PathBuf::from(temp);
+
+    let mut file = std::fs::File::create(&temp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    // On failure the temporary is removed rather than left behind: a stale `.tmp` next to the state
+    // file looks like a partial write that someone should investigate.
+    let written = file
+        .write_all(payload)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| std::fs::rename(&temp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
 }
 
 #[derive(Debug, Clone)]
@@ -1744,9 +1962,9 @@ pub(crate) struct SettingsUpdate {
     /// Whether `/v1` requires a managed API key.
     ///
     /// Was missing here, which meant `PUT /api/settings` accepted `{"requireApiKey": true}`,
-    /// answered 200, and changed nothing — the field was only reachable through a 9Router import.
-    /// Upstream's `PATCH /api/settings` passes its whole body to `updateSettings`, so the toggle
-    /// works there; a dashboard switch that silently does nothing is worse than one that is absent.
+    /// answered 200, and changed nothing — the only way to set it was a legacy import. A dashboard
+    /// switch that silently does nothing is worse than one that is absent, so every settable
+    /// setting needs its field here.
     pub require_api_key: Option<bool>,
     pub tunnel_dashboard_access: Option<bool>,
     pub tunnel_url: Option<String>,
@@ -1862,6 +2080,12 @@ mod persistence_tests {
         // being written, set dirty=true, and have that bit cleared afterwards — leaving B only in
         // memory forever. Pause durable persistence at exactly that point. With the production
         // lock order, the deferred writer cannot obtain the snapshot lock until A is durable.
+        //
+        // The guard is held because this case inspects the file as text. It asserts no key of its
+        // own, but it has to be sure no *other* case's key is in force while it reads: with one set,
+        // the bytes on disk are ciphertext and `read_to_string` fails on invalid UTF-8, which is how
+        // this case first started failing intermittently once sealing existed.
+        let _key = crate::at_rest::KeyGuard::set(None);
         let tempdir = tempfile::tempdir().expect("temporary state directory");
         let path = tempdir.path().join("state.json");
         let store = StateStore::file(&path).expect("state store");
@@ -1913,5 +2137,188 @@ mod persistence_tests {
         assert!(store.flush_if_dirty().expect("flush deferred write"));
         let after_flush = std::fs::read_to_string(&path).expect("flushed snapshot exists");
         assert!(after_flush.contains("deferred"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod persist_permission_tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::write_private;
+
+    /// Set a permissive umask for the duration of a write, then restore it.
+    ///
+    /// Without this the assertion would pass on a host whose umask already forbids group and other
+    /// access, proving nothing. `0o000` is the most permissive setting there is, so a mode of
+    /// `0o600` afterwards can only have come from the code setting it deliberately.
+    struct PermissiveUmask(libc::mode_t);
+
+    impl PermissiveUmask {
+        fn apply() -> Self {
+            // SAFETY: `umask` cannot fail and touches only this process's file-creation mask. It is
+            // restored on drop, and these cases write from one thread.
+            Self(unsafe { libc::umask(0o000) })
+        }
+    }
+
+    impl Drop for PermissiveUmask {
+        fn drop(&mut self) {
+            // SAFETY: as above, restoring what was replaced.
+            unsafe { libc::umask(self.0) };
+        }
+    }
+
+    fn mode_of(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path)
+            .map(|meta| meta.permissions().mode() & 0o777)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn a_written_state_file_is_readable_only_by_its_owner() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        let _umask = PermissiveUmask::apply();
+
+        write_private(&path, b"{}").expect("first write");
+        assert_eq!(
+            mode_of(&path),
+            0o600,
+            "mode is {:o}; other local accounts can read stored credentials",
+            mode_of(&path)
+        );
+
+        // The first write creates; every later one replaces by rename. A rename that dropped the
+        // mode would expose the file from the second save onward, which one write cannot catch.
+        write_private(&path, b"{\"a\":1}").expect("second write");
+        assert_eq!(
+            mode_of(&path),
+            0o600,
+            "mode after rewrite is {:o}",
+            mode_of(&path)
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("read back"),
+            b"{\"a\":1}",
+            "the rename must publish the new content, not the old"
+        );
+    }
+
+    #[test]
+    fn no_temporary_survives_a_successful_write() {
+        // A leftover `.tmp` is a second copy of the same credentials sitting beside the real file.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        write_private(&path, b"{}").expect("write");
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["nullrouter-state.json".to_owned()],
+            "{entries:?}"
+        );
+    }
+}
+#[cfg(all(test, unix))]
+mod at_rest_wiring_tests {
+    use super::StateStore;
+    // The crate-wide guard, not a local copy: the key is process-global and these cases run in
+    // parallel with the ones in `at_rest` and in `persistence_tests`, so isolation requires all three
+    // to serialise on one lock.
+    use crate::at_rest::KeyGuard as Key;
+
+    /// End-to-end rather than against `at_rest` alone: the module being correct says nothing about
+    /// whether `persist` and `file` actually call it. This is the test that would have caught the
+    /// wiring being absent.
+    #[test]
+    fn a_stored_secret_is_not_readable_on_disk_and_survives_a_reload() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        let secret = "sk-live-must-not-appear-on-disk";
+
+        {
+            let _key = Key::set(Some("operator-key-from-a-secret-manager"));
+            let store = StateStore::file(&path).expect("open store");
+            store
+                .save_translator_log("1_req_client.json", secret)
+                .expect("write a secret into state");
+            store.flush_if_dirty().expect("flush");
+
+            let raw = std::fs::read(&path).expect("read the file back");
+            assert!(
+                crate::at_rest::is_sealed(&raw),
+                "the file on disk is not sealed"
+            );
+            assert!(
+                !String::from_utf8_lossy(&raw).contains(secret),
+                "the secret is readable in the state file"
+            );
+
+            // Reopening with the same key must return it, or encryption has cost the operator their
+            // data rather than protected it.
+            let reopened = StateStore::file(&path).expect("reopen with the key");
+            assert_eq!(
+                reopened
+                    .translator_log("1_req_client.json")
+                    .expect("read back")
+                    .as_deref(),
+                Some(secret)
+            );
+        }
+
+        // Without the key, opening must fail loudly rather than silently starting empty -- an empty
+        // start would overwrite the sealed file on the next save and destroy every credential.
+        let _no_key = Key::set(None);
+        assert!(
+            StateStore::file(&path).is_err(),
+            "a sealed file opened without the key must refuse, not read as empty"
+        );
+    }
+
+    #[test]
+    fn an_existing_cleartext_file_is_adopted_without_a_migration_step() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nullrouter-state.json");
+        let secret = "carried-across-from-cleartext";
+
+        // Written with no key configured, as an existing deployment would have.
+        {
+            let _no_key = Key::set(None);
+            let store = StateStore::file(&path).expect("open store");
+            store
+                .save_translator_log("2_req_source.json", secret)
+                .expect("write");
+            store.flush_if_dirty().expect("flush");
+            let raw = std::fs::read(&path).expect("read");
+            assert!(
+                !crate::at_rest::is_sealed(&raw),
+                "should still be cleartext"
+            );
+        }
+
+        // The operator now sets a key. The existing file must load, and the next save must seal it.
+        let _key = Key::set(Some("newly-adopted-key"));
+        let store = StateStore::file(&path).expect("cleartext must still load once a key is set");
+        assert_eq!(
+            store
+                .translator_log("2_req_source.json")
+                .expect("read back")
+                .as_deref(),
+            Some(secret)
+        );
+        store
+            .save_translator_log("3_req_openai.json", "another")
+            .expect("write");
+        store.flush_if_dirty().expect("flush");
+
+        let raw = std::fs::read(&path).expect("read");
+        assert!(
+            crate::at_rest::is_sealed(&raw),
+            "the next save after adopting a key must seal the file"
+        );
     }
 }

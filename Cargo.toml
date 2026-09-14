@@ -20,6 +20,7 @@ members = [
     "services/gateway-pingora",
     "services/runtime-actix",
     "services/state-actix",
+    "tools/i18n-gen",
 ]
 default-members = [
     "apps/dashboard-leptos",
@@ -45,10 +46,9 @@ version = "0.5.20"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-description = "Microservice Rust port of 9Router"
+description = "Self-hosted AI model router and gateway"
 repository = "https://github.com/docker-mobile/nullrouter"
-readme = "README.md"
-keywords = ["9router", "ai", "router", "gateway"]
+keywords = ["ai", "llm", "router", "gateway", "proxy"]
 categories = ["command-line-utilities", "web-programming::http-server"]
 
 [workspace.dependencies]
@@ -66,6 +66,12 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 console_error_panic_hook = "0.1"
 http = "1"
 leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
+leptos_router = { version = "=0.8.10", default-features = false }
+# The dashboard's component layer. `default-features = false` is load-bearing: the default
+# `all-components` feature pulls in `performance-audit`, whose `statistical` -> `num 0.1` ->
+# `rustc-serialize` chain does not compile on any current rustc (E0046). Components are enabled
+# one by one in the dashboard manifest instead.
+leptos-shadcn-ui = { version = "0.9", default-features = false }
 mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
 nullrouter-logship = { path = "crates/logship" }
@@ -76,6 +82,13 @@ nullrouter-procctl = { path = "crates/procctl" }
 # SIGKILL, which makes cloudflared abandon its edge connections instead of unregistering them.
 libc = "0.2"
 # Optional pinning of a supervised binary to a known-good digest.
+# State-file encryption at rest. ChaCha20-Poly1305 rather than AES-GCM: pure Rust with no system
+# OpenSSL, and constant-time without needing AES hardware, which a small VM may not have.
+chacha20poly1305 = "0.10"
+# HKDF-SHA256 to turn an operator-supplied key of any length into the 32 bytes the cipher needs.
+hkdf = "0.12"
+# Wipes the derived key from memory on drop, so it does not linger in a core dump.
+zeroize = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hex = "0.4"
 # Cursor's Connect-RPC frames arrive gzip-, zlib-, or raw-deflate-compressed depending on the frame.
@@ -88,7 +101,7 @@ nullrouter-translate = { path = "crates/translate" }
 futures-util = "0.3"
 # Session ids for providers that require a per-request correlation header.
 getrandom = "0.3"
-# Bundled so a 9Router import works without a system SQLite present.
+# Bundled so a legacy import works without a system SQLite present.
 rusqlite = { version = "0.32", features = ["bundled"] }
 rcgen = "0.14.10"
 reqwest = { version = "0.12", default-features = false, features = [
@@ -105,16 +118,23 @@ pingora-proxy = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-# Codex keeps `~/.codex/config.toml`, and its 9Router block has to be merged into whatever the
-# user already has there rather than overwriting the file. `preserve_order` so a rewrite does not
-# reshuffle the user's own keys.
+# Codex keeps `~/.codex/config.toml`, and this router's provider block has to be merged into
+# whatever the user already has there rather than overwriting the file. `preserve_order` so a
+# rewrite does not reshuffle the user's own keys.
 toml = { version = "0.8", features = ["preserve_order"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# `json` for structured output: an enterprise SIEM ingests fields, and regex over a human-readable
+# line breaks whenever a message is reworded.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
+js-sys = "0.3"
+# A transitive dependency of the component layer. On wasm32 `uuid` hard-errors at compile time
+# unless it is told where randomness comes from, and the component crates do not select a source
+# themselves, so the choice lands here.
+uuid = { version = "1", features = ["js", "v4"] }
 tempfile = "3"
 
 [profile.bench]

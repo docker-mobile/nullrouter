@@ -29,9 +29,10 @@ async fn main() -> std::io::Result<()> {
     //
     // Measured on loopback with a raw socket: headers at 45 ms, then nothing for 42 ms,
     // then the whole body at once. Streamed p50 was 80 ms with client keep-alive and
-    // 40 ms without; 9Router, which is Node and sets nodelay on HTTP sockets by default,
-    // showed 49 ms either way. Real clients all use keep-alive, so this was the case that
-    // mattered and the only one the benchmark's non-streaming cells could not see.
+    // 40 ms without. The Node-based router this replaces showed 49 ms either way, because
+    // Node sets nodelay on HTTP sockets by default and so never had the stall. Real clients
+    // all use keep-alive, so this was the case that mattered and the only one the
+    // benchmark's non-streaming cells could not see.
     .on_connect(|connection, _extensions| {
         if let Some(stream) = connection.downcast_ref::<actix_web::rt::net::TcpStream>() {
             // A failure here costs latency, not correctness, so it is not fatal.

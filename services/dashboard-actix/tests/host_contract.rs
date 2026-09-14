@@ -117,7 +117,13 @@ async fn fallback_routes_return_html_bootstrap_when_requested() -> TestResult {
         assert!(html.contains(r#"<link rel="modulepreload" href="/pkg/dashboard_leptos.js">"#));
         assert!(html.contains(r#"<link rel="preload" href="/pkg/dashboard_leptos_bg.wasm" as="fetch" type="application/wasm" crossorigin>"#));
         assert!(html.contains(r#"<div id="dashboard-root"></div>"#));
-        assert!(html.contains("Endpoint &amp; Key"));
+        assert!(html.contains("nullrouter"));
+        // No trace of the old branding in anything served to a browser. Checked
+        // case-insensitively so neither spelling can creep back into the shell.
+        assert!(
+            !html.to_ascii_lowercase().contains("9router"),
+            "the shell must not carry the old branding"
+        );
     }
     Ok(())
 }

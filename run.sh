@@ -65,8 +65,21 @@ trap cleanup EXIT INT TERM
 # Without it the dashboard, the sign-in screen, and the OAuth callback are all empty shells, so this is
 # built before anything starts rather than discovered as a blank page.
 BUNDLE=services/dashboard-actix/static/pkg/dashboard_leptos_bg.wasm
-if [[ ! -f "$BUNDLE" ]]; then
-    log "building the dashboard WASM bundle (first run only)"
+
+# Rebuilt when any dashboard source is newer than the bundle, not only when the bundle is missing.
+# Presence alone is the wrong test: after an edit, the stale bundle is still a file, so the old UI
+# gets served with no indication that what is running is not what is checked out — which reads as
+# "my change did nothing" rather than "the bundle was not rebuilt".
+bundle_is_stale() {
+    [[ ! -f "$BUNDLE" ]] && return 0
+    local newer
+    newer=$(find apps/dashboard-leptos/src apps/dashboard-leptos/Cargo.toml \
+        -newer "$BUNDLE" -print -quit 2>/dev/null)
+    [[ -n "$newer" ]]
+}
+
+if bundle_is_stale; then
+    log "building the dashboard WASM bundle"
     # Version-pinned to the `wasm-bindgen` in `Cargo.lock`: the CLI refuses a bundle built by a
     # different minor version, and the error names schema numbers rather than the mismatch.
     WASM_BINDGEN_VERSION=$(sed -n '/^name = "wasm-bindgen"$/,/^version/{s/^version = "\(.*\)"$/\1/p;}' Cargo.lock | head -1)
@@ -117,10 +130,16 @@ for _ in $(seq 1 100); do
     if curl -fsS "http://127.0.0.1:$GATEWAY_PORT/api/health" >/dev/null 2>&1; then
         printf '\n'
         log "nullrouter is up"
-        printf '    Dashboard  http://127.0.0.1:%s/dashboard/endpoint\n' "$GATEWAY_PORT"
+        printf '    Dashboard  http://127.0.0.1:%s/dashboard\n' "$GATEWAY_PORT"
         printf '    API        http://127.0.0.1:%s/v1\n' "$GATEWAY_PORT"
         printf '    State file %s\n\n' "$NULLROUTER_STATE_FILE"
-        warn "default dashboard password is 123456 — set INITIAL_PASSWORD before exposing this anywhere"
+        # Only when the default is actually in force. Printed unconditionally it told an operator who
+        # had set a strong password that theirs was `123456`, which is both false and the kind of
+        # warning that teaches people to ignore warnings. `NULLROUTER_AUTH_PASSWORD_HASH` wins over
+        # `INITIAL_PASSWORD` in the auth service, so either one being set means the default is gone.
+        if [[ -z "${INITIAL_PASSWORD:-}" && -z "${NULLROUTER_AUTH_PASSWORD_HASH:-}" ]]; then
+            warn "dashboard password is the default 123456 — set INITIAL_PASSWORD before exposing this anywhere"
+        fi
         printf '\nCtrl-C to stop all services.\n'
         wait
     fi

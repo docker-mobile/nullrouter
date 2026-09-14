@@ -530,7 +530,14 @@ fn begin(
             // picks arbitrarily — so a clamped grace would fail or succeed at random. Survival is a
             // floor on how long the child must last, so when the two would coincide the floor is what
             // should fire.
-            let margin = Duration::from_millis(1);
+            //
+            // The margin is a tenth of the deadline rather than a fixed millisecond. One millisecond
+            // is below the timer granularity these two sleeps are scheduled on, so on a loaded runner
+            // both fire in the same poll and `select!` is back to choosing arbitrarily — which is the
+            // failure this clamp exists to prevent, reappearing only under load. A tenth keeps the
+            // ordering decisive at every scale of `startup_timeout`, and the floor of one millisecond
+            // keeps a sub-10ms timeout from collapsing the two onto the same instant again.
+            let margin = (spec.startup_timeout / 10).max(Duration::from_millis(1));
             let clamped = (*grace).min(spec.startup_timeout.saturating_sub(margin));
             Some(Instant::now() + clamped)
         }

@@ -7,6 +7,9 @@ use thiserror::Error;
 const MIN_SESSION_SECRET_BYTES: usize = 32;
 const DEFAULT_STATE_VALIDATION_URL: &str = "http://127.0.0.1:20134/internal/v1/keys/validate";
 const DEFAULT_STATE_AUTH_SETTINGS_URL: &str = "http://127.0.0.1:20134/internal/v1/auth-settings";
+/// Where a username and password are checked against the managed accounts. Under `/internal`, which
+/// the gateway refuses, so it is reachable only on loopback.
+const DEFAULT_STATE_USERS_VERIFY_URL: &str = "http://127.0.0.1:20134/internal/v1/users/verify";
 /// Fallback public origin, used to build the OIDC `redirect_uri` and the SAML ACS
 /// URL when the request carries no usable host. Matches the dashboard's port.
 const DEFAULT_PUBLIC_ORIGIN: &str = "http://localhost:20128";
@@ -45,6 +48,7 @@ pub struct AuthConfig {
     lockout: LockoutConfig,
     state_validation_url: Url,
     state_auth_settings_url: Url,
+    state_users_verify_url: Url,
     state_timeout: Duration,
     /// Timeout for calls out to an identity provider. Longer than the loopback
     /// state timeout, since discovery and the token exchange cross the internet.
@@ -55,6 +59,11 @@ pub struct AuthConfig {
     public_origin: Option<String>,
 }
 
+/// The password a local development run gets when the operator sets nothing.
+///
+/// Named rather than inlined because two places have to agree on it: the value handed to a dev
+/// instance, and the production guard that refuses to start when this is what is in force.
+const DEFAULT_DEV_PASSWORD: &str = "123456";
 #[derive(Debug, Error)]
 pub enum AuthConfigError {
     #[error("session secret must contain at least 32 bytes")]
@@ -69,6 +78,17 @@ pub enum AuthConfigError {
     NonLoopbackStateValidationUrl,
     #[error("invalid environment value for {0}")]
     InvalidEnvironment(&'static str),
+    #[error(
+        "NULLROUTER_ENV=production requires an explicit dashboard password: set \
+         NULLROUTER_AUTH_PASSWORD_HASH to a bcrypt hash, or INITIAL_PASSWORD to a value that is \
+         not the built-in default"
+    )]
+    DefaultPasswordInProduction,
+    #[error(
+        "NULLROUTER_ENV=production requires a persistent session secret: set \
+         NULLROUTER_AUTH_SESSION_SECRET, or every restart signs all operators out"
+    )]
+    EphemeralSecretInProduction,
     #[error("state HTTP client could not be created")]
     StateClient,
 }
@@ -77,6 +97,7 @@ impl AuthConfig {
     pub fn new(session_secret: Vec<u8>, password: PasswordConfig) -> Result<Self, AuthConfigError> {
         let state_validation_url = parse_state_url(DEFAULT_STATE_VALIDATION_URL)?;
         let state_auth_settings_url = parse_state_url(DEFAULT_STATE_AUTH_SETTINGS_URL)?;
+        let state_users_verify_url = parse_state_url(DEFAULT_STATE_USERS_VERIFY_URL)?;
         let config = Self {
             session_secret,
             password,
@@ -85,6 +106,7 @@ impl AuthConfig {
             lockout: LockoutConfig::default(),
             state_validation_url,
             state_auth_settings_url,
+            state_users_verify_url,
             state_timeout: Duration::from_secs(2),
             oidc_timeout: Duration::from_secs(10),
             public_origin: None,
@@ -94,8 +116,19 @@ impl AuthConfig {
     }
 
     pub fn from_env() -> Result<Self, AuthConfigError> {
+        // `NULLROUTER_ENV=production` is an explicit assertion by the operator that this instance is
+        // not a laptop. It does not change any default silently: it refuses to start on the two
+        // settings that are safe locally and indefensible in production, and it flips the cookie
+        // default to secure. Local development keeps working untouched.
+        let production = env::var("NULLROUTER_ENV")
+            .map(|value| value.trim().eq_ignore_ascii_case("production"))
+            .unwrap_or(false);
+
         let session_secret = match env::var("NULLROUTER_AUTH_SESSION_SECRET") {
             Ok(secret) => secret.into_bytes(),
+            Err(env::VarError::NotPresent) if production => {
+                return Err(AuthConfigError::EphemeralSecretInProduction);
+            }
             Err(env::VarError::NotPresent) => random::<[u8; 32]>().to_vec(),
             Err(env::VarError::NotUnicode(_)) => {
                 return Err(AuthConfigError::InvalidEnvironment(
@@ -105,9 +138,22 @@ impl AuthConfig {
         };
         let password = match env::var("NULLROUTER_AUTH_PASSWORD_HASH") {
             Ok(hash) if !hash.trim().is_empty() => PasswordConfig::BcryptHash(hash),
-            Ok(_) | Err(env::VarError::NotPresent) => PasswordConfig::Plaintext(
-                env::var("INITIAL_PASSWORD").unwrap_or_else(|_| "123456".to_owned()),
-            ),
+            Ok(_) | Err(env::VarError::NotPresent) => {
+                let configured = env::var("INITIAL_PASSWORD").ok();
+                let password = configured
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(DEFAULT_DEV_PASSWORD);
+                // Compared against the default rather than merely checking that the variable is
+                // set: `INITIAL_PASSWORD=123456` is the same exposure as not setting it at all, and
+                // an operator who has pasted the documented example into their deployment has not
+                // chosen a password.
+                if production && password == DEFAULT_DEV_PASSWORD {
+                    return Err(AuthConfigError::DefaultPasswordInProduction);
+                }
+                PasswordConfig::Plaintext(password.to_owned())
+            }
             Err(env::VarError::NotUnicode(_)) => {
                 return Err(AuthConfigError::InvalidEnvironment(
                     "NULLROUTER_AUTH_PASSWORD_HASH",
@@ -115,7 +161,10 @@ impl AuthConfig {
             }
         };
         let mut config = Self::new(session_secret, password)?;
-        config.secure_cookie = env_bool("AUTH_COOKIE_SECURE", false)?;
+        // Defaults to on in production, so a session cookie is never sent over plaintext HTTP
+        // unless an operator explicitly asks for that. Still overridable either way: a deployment
+        // terminating TLS at a proxy that speaks HTTP to this service internally needs `false`.
+        config.secure_cookie = env_bool("AUTH_COOKIE_SECURE", production)?;
         config.session_ttl = Duration::from_secs(env_u64(
             "NULLROUTER_AUTH_SESSION_TTL_SECONDS",
             24 * 60 * 60,
@@ -141,6 +190,9 @@ impl AuthConfig {
         }
         if let Ok(url) = env::var("NULLROUTER_STATE_AUTH_SETTINGS_URL") {
             config.state_auth_settings_url = parse_state_url(&url)?;
+        }
+        if let Ok(url) = env::var("NULLROUTER_STATE_USERS_VERIFY_URL") {
+            config.state_users_verify_url = parse_state_url(&url)?;
         }
         // Upstream reads BASE_URL for the same purpose.
         config.public_origin = ["NULLROUTER_PUBLIC_ORIGIN", "BASE_URL"]
@@ -230,7 +282,11 @@ impl AuthConfig {
         self.session_ttl
     }
 
-    pub(crate) const fn secure_cookie(&self) -> bool {
+    /// Whether the session cookie is marked `Secure`.
+    ///
+    /// Public so a deployment check can assert it, which is the point of the production guard: a
+    /// setting that cannot be observed from outside the crate cannot be tested from outside either.
+    pub const fn secure_cookie(&self) -> bool {
         self.secure_cookie
     }
 
@@ -240,6 +296,10 @@ impl AuthConfig {
 
     pub(crate) const fn state_validation_url(&self) -> &Url {
         &self.state_validation_url
+    }
+
+    pub(crate) const fn state_users_verify_url(&self) -> &Url {
+        &self.state_users_verify_url
     }
 
     pub(crate) const fn state_auth_settings_url(&self) -> &Url {

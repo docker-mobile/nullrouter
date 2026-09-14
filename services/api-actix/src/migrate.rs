@@ -1,8 +1,8 @@
-//! Dashboard-facing 9Router import.
+//! Dashboard-facing import of a legacy router installation.
 //!
-//! nullrouter-specific: 9Router has no equivalent route because it *is* the
-//! source. The work happens in `nullrouter-state`; this forwards to it and
-//! relays the report.
+//! Nothing to port here: the legacy product is the source of the data, so it has
+//! no equivalent route of its own. The work happens in `nullrouter-state`; this
+//! forwards to it and relays the report.
 //!
 //! The gateway classifies `/api/*` as session-gated, so this is not reachable
 //! without an authenticated dashboard session — importing provider credentials
@@ -16,7 +16,7 @@ use crate::{responses, state_client::StateClient};
 
 pub(super) fn configure(config: &mut web::ServiceConfig) {
     config.service(
-        web::resource("/api/migrate/9router")
+        web::resource("/api/migrate/legacy")
             .route(web::post().to(migrate))
             .route(web::method(actix_web::http::Method::OPTIONS).to(options)),
     );
@@ -30,8 +30,8 @@ async fn options() -> HttpResponse {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MigrateRequest {
-    /// Explicit 9Router data directory. Discovered from `DATA_DIR` and
-    /// `~/.9router` when omitted.
+    /// Explicit legacy data directory. Discovered from `DATA_DIR` and the
+    /// default home layout when omitted.
     #[serde(default)]
     data_dir: Option<String>,
     /// Preview what would be imported without writing.
@@ -56,7 +56,7 @@ async fn migrate(state: web::Data<StateClient>, body: web::Bytes) -> HttpRespons
     };
 
     let Some((status, report)) = state
-        .migrate_from_9router(request.data_dir.as_deref(), request.dry_run)
+        .migrate_from_legacy(request.data_dir.as_deref(), request.dry_run)
         .await
     else {
         return responses::json(

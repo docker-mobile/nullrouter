@@ -24,14 +24,30 @@ pub struct GatewayContext {
 pub struct GatewayProxy {
     config: GatewayConfig,
     auth_client: AuthClient,
+    /// `None` unless a rate limit was configured. Absent means no throttling at all rather than an
+    /// effectively-infinite limit, so the hot path skips the lock entirely when unused.
+    ///
+    /// `Arc`, because this proxy is cloned per worker and the buckets must be shared: a per-clone
+    /// map would multiply the effective allowance by the worker count.
+    throttle: Option<std::sync::Arc<crate::throttle::Throttle>>,
 }
 
 impl GatewayProxy {
     pub fn new(config: GatewayConfig) -> Result<Self, AuthClientError> {
         let auth_client = AuthClient::new(config.auth_upstream().addr())?;
+        let throttle = crate::throttle::ThrottleConfig::from_env()
+            .map(|limit| std::sync::Arc::new(crate::throttle::Throttle::new(limit)));
+        if let Some(limit) = crate::throttle::ThrottleConfig::from_env() {
+            tracing::info!(
+                per_second = limit.per_second,
+                burst = limit.burst,
+                "control-plane rate limit is active for /api/*"
+            );
+        }
         Ok(Self {
             config,
             auth_client,
+            throttle,
         })
     }
 
@@ -66,12 +82,43 @@ impl ProxyHttp for GatewayProxy {
         ctx.route = Some(route);
         ctx.client_ip = peer_ip;
 
+        // Checked before authorization so a flood does not cost an auth service round-trip per
+        // request -- which would make the gateway the amplifier for an attack on its own dependency.
+        if let (Some(throttle), Some(peer)) = (self.throttle.as_ref(), peer_ip)
+            && crate::throttle::Throttle::governs(&path)
+            && let crate::throttle::Verdict::Throttle { retry_after } =
+                throttle.check(peer, std::time::Instant::now())
+        {
+            tracing::warn!(
+                audit = true,
+                event = "gateway.rate_limited",
+                %peer,
+                path = %path,
+                retry_after_seconds = retry_after.as_secs(),
+                "control-plane request refused: rate limit exceeded"
+            );
+            write_throttled_response(session, retry_after).await?;
+            return Ok(true);
+        }
+
         let state = match requirement {
+            // Neither consults the auth service: `Public` needs no principal, and `Forbidden` is
+            // already refused by `decision` regardless of what a principal would have been.
             crate::policy::AccessRequirement::Public
-            | crate::policy::AccessRequirement::Forbidden => AuthorizationState::Authorized,
+            | crate::policy::AccessRequirement::Forbidden => {
+                AuthorizationState::Authorized { role: None }
+            }
             _ => match authorization_request(session.req_header(), requirement) {
                 Some(request) => match self.auth_client.authorize(&request).await {
-                    Ok(response) if response.authorized => AuthorizationState::Authorized,
+                    Ok(response) if response.authorized => AuthorizationState::Authorized {
+                        // Absent for a runtime API key and for a session minted before managed users
+                        // existed. Both mean "no role claim", which `decision` reads as the legacy
+                        // full-access principal.
+                        role: response
+                            .role
+                            .as_deref()
+                            .map(crate::policy::PrincipalRole::parse),
+                    },
                     Ok(_) => AuthorizationState::Denied,
                     Err(_) => AuthorizationState::Unavailable,
                 },
@@ -114,6 +161,28 @@ impl ProxyHttp for GatewayProxy {
         stamp_trusted_identity_headers(upstream_request, client_ip)?;
         Ok(())
     }
+}
+
+/// A 429 with `Retry-After`, so a client backs off by the interval the limiter computed rather than
+/// guessing.
+async fn write_throttled_response(
+    session: &mut Session,
+    retry_after: std::time::Duration,
+) -> PingoraResult<()> {
+    const BODY: &str = r#"{"error":"rate_limited","message":"Too many control-plane requests. Retry after the interval in the Retry-After header."}"#;
+
+    let mut response = ResponseHeader::build(429_u16, Some(4))?;
+    response.insert_header(header::CACHE_CONTROL, "no-store")?;
+    response.insert_header(header::RETRY_AFTER, retry_after.as_secs().to_string())?;
+    response.insert_header(header::CONTENT_TYPE, "application/json")?;
+    response.insert_header(header::CONTENT_LENGTH, BODY.len().to_string())?;
+    session
+        .write_response_header(Box::new(response), false)
+        .await?;
+    session
+        .write_response_body(Some(Bytes::from_static(BODY.as_bytes())), true)
+        .await?;
+    Ok(())
 }
 
 async fn write_access_response(

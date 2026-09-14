@@ -172,7 +172,7 @@ fn mutation_body(
             format!("{} settings applied successfully!", tool.display_name)
         }
         (mutations::Direction::Revoke, false) => {
-            format!("9Router settings removed from {}", tool.display_name)
+            format!("nullrouter settings removed from {}", tool.display_name)
         }
         (mutations::Direction::Revoke, true) => "No settings file to reset".to_owned(),
     };
@@ -212,14 +212,14 @@ fn mutation_body(
 
 /// One tool's status as the dashboard reads it.
 ///
-/// Built from a real filesystem look, not a constant. The field names follow upstream's response
-/// so the dashboard needs no changes; the two extra fields (`source`, `configError`) are additions
-/// this port makes because it has the information and hiding it helps nobody.
+/// Built from a real filesystem look, not a constant. `source` and `configError` are reported
+/// alongside the basics because this service has that information and hiding it helps nobody: a
+/// user whose config failed to parse deserves the reason, not a bare "not configured".
 fn tool_status_body(tool: &spec::Tool) -> serde_json::Value {
     let status = detect::status(tool);
     let mut body = serde_json::json!({
         "installed": status.installed,
-        "has9Router": status.has_router,
+        "hasRouter": status.has_router,
         "settings": status.settings,
         "displayName": tool.display_name,
         "writable": status.installed && tool.writable == spec::Writable::Yes,

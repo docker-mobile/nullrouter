@@ -91,14 +91,23 @@ async fn login_shell_carries_no_application_logic_of_its_own() -> TestResult {
     let login = html_for!(app, "/login");
     let script = scripts(&login);
 
-    // Then: the only script is the module that boots the bundle.
+    // Then: the module that boots the bundle is still two statements. Counted on its own rather
+    // than over every script on the page, because the theme bootstrap is also inline and has to
+    // be: it sets the colour scheme before the first paint, which is the one thing that cannot
+    // wait for a wasm bundle to arrive over the network. It carries no application logic, and the
+    // absent-substring checks below run against the whole page either way.
+    let boot = script
+        .split_once("import init")
+        .map(|(_, rest)| format!("import init{rest}"))
+        .unwrap_or_default();
     assert!(
-        script
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .count()
-            <= 3,
-        "the boot script should be two statements, got: {script}"
+        boot.lines().filter(|line| !line.trim().is_empty()).count() <= 3,
+        "the boot script should be two statements, got: {boot}"
+    );
+    // And: the only inline script beside it is the pre-paint theme bootstrap.
+    assert!(
+        script.contains("prefers-color-scheme"),
+        "the theme bootstrap should still run before first paint: {script}"
     );
     for absent in [
         // Fetching and submitting.

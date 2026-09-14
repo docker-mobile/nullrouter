@@ -121,7 +121,6 @@ fn route_for_path_selects_api_for_media_provider_support_paths() {
     for path in [
         "/api/media-providers/tts/voices",
         "/api/media-providers/tts/openai/voices",
-        "/api/models/alias",
         "/api/usage/logs",
     ] {
         // When: a media-provider support API path is routed.

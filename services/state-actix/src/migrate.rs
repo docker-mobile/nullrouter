@@ -1,15 +1,15 @@
-//! Import an existing 9Router installation.
+//! Import a legacy router installation into this store.
 //!
-//! 9Router stores state in `SQLite` at `$DATA_DIR/db/data.sqlite` (default
-//! `~/.9router/db/data.sqlite`), with a pre-`SQLite` JSON layout at
+//! The legacy product keeps its state in `SQLite` at `$DATA_DIR/db/data.sqlite`
+//! (default `~/.9router/db/data.sqlite`), with a pre-`SQLite` JSON layout at
 //! `$DATA_DIR/db.json` still present on older installs. Both are read here so a
 //! user switching to nullrouter keeps their providers, keys, combos, proxy
 //! pools, and settings instead of reconfiguring from scratch.
 //!
-//! Row shape follows `inspire/src/lib/db/schema.js`: each table keeps its
-//! queryable columns plus a `data` TEXT column holding the remaining fields as
-//! JSON, which `rowToConn`-style readers splat over the typed columns. The
-//! import mirrors that, with typed columns winning over the JSON blob.
+//! Its row shape is a hybrid: each table keeps its queryable columns plus a
+//! `data` TEXT column holding the remaining fields as JSON, and its own readers
+//! splat that blob over the typed columns. The import mirrors that, with typed
+//! columns winning over the JSON blob.
 //!
 //! The import is **additive and non-destructive**: existing records are left
 //! alone and duplicates are skipped, so running it twice is safe.
@@ -37,8 +37,8 @@ pub(crate) struct ImportReport {
     pub proxy_pools_found: usize,
     pub proxy_pools_imported: usize,
     pub api_keys_found: usize,
-    /// API keys are hashed in nullrouter and cannot be re-derived from
-    /// 9Router's plaintext storage, so they are reported but not imported.
+    /// API keys are hashed in nullrouter and cannot be re-derived from the
+    /// legacy plaintext storage, so they are reported but not imported.
     pub api_keys_imported: usize,
     pub settings_imported: bool,
     /// Per-record problems that did not abort the import.
@@ -48,17 +48,25 @@ pub(crate) struct ImportReport {
 /// Why an import could not run.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ImportError {
-    #[error("no 9Router installation found at {searched}")]
+    #[error("no legacy installation found at {searched}")]
     NotFound { searched: String },
-    #[error("failed to read 9Router database: {0}")]
+    #[error("failed to read the legacy database: {0}")]
     Read(String),
     #[error("state write failed")]
     Store(#[from] StoreError),
 }
 
-/// Candidate 9Router data directories, most likely first.
+/// The legacy product's data directory under `$HOME`. This is an external
+/// program's address on disk: renaming it makes every import find nothing.
+const LEGACY_DATA_DIR: &str = ".9router";
+
+/// The same directory in the Windows `%APPDATA%` layout, and the same rule.
+const LEGACY_DATA_DIR_WINDOWS: &str = "9router";
+
+/// Candidate legacy data directories, most likely first.
 ///
-/// `DATA_DIR` mirrors upstream's own override.
+/// `DATA_DIR` is the legacy product's own override, so a user who set it there
+/// gets the same answer here.
 fn candidate_dirs(explicit: Option<&str>) -> Vec<PathBuf> {
     if let Some(dir) = explicit.map(str::trim).filter(|dir| !dir.is_empty()) {
         return vec![PathBuf::from(dir)];
@@ -70,16 +78,16 @@ fn candidate_dirs(explicit: Option<&str>) -> Vec<PathBuf> {
         dirs.push(PathBuf::from(configured));
     }
     if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(Path::new(&home).join(".9router"));
+        dirs.push(Path::new(&home).join(LEGACY_DATA_DIR));
     }
     // Windows layout, harmless to probe elsewhere.
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        dirs.push(Path::new(&appdata).join("9router"));
+        dirs.push(Path::new(&appdata).join(LEGACY_DATA_DIR_WINDOWS));
     }
     dirs
 }
 
-/// Locate a 9Router data source: `SQLite` first, then the legacy JSON file.
+/// Locate a legacy data source: `SQLite` first, then the older JSON file.
 fn locate(explicit: Option<&str>) -> Result<(PathBuf, &'static str), ImportError> {
     let candidates = candidate_dirs(explicit);
     for dir in &candidates {
@@ -101,7 +109,7 @@ fn locate(explicit: Option<&str>) -> Result<(PathBuf, &'static str), ImportError
     })
 }
 
-/// One 9Router record: typed columns merged with its `data` JSON blob.
+/// One legacy record: typed columns merged with its `data` JSON blob.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct Record {
     #[serde(flatten)]
@@ -125,7 +133,7 @@ impl Record {
             .and_then(|value| u32::try_from(value).ok())
     }
 
-    /// 9Router stores booleans as `SQLite` integers.
+    /// Booleans arrive as `SQLite` integers, so `1`/`0` has to read as a flag.
     fn flag(&self, key: &str) -> Option<bool> {
         self.fields.get(key).and_then(|value| {
             value
@@ -159,7 +167,8 @@ impl Record {
 
     /// Merge the `data` JSON blob under the typed columns.
     ///
-    /// Typed columns win, matching upstream's `{ ...extra, id: row.id, ... }`.
+    /// Typed columns win, so a stale copy of a field inside the blob cannot
+    /// override the column the source treated as authoritative.
     fn splat_data_column(&mut self) {
         let Some(blob) = self.fields.get("data").cloned() else {
             return;
@@ -179,7 +188,7 @@ impl Record {
     }
 }
 
-/// Everything read out of a 9Router installation.
+/// Everything read out of a legacy installation.
 #[derive(Debug, Default)]
 struct Extracted {
     connections: Vec<Record>,
@@ -189,10 +198,11 @@ struct Extracted {
     settings: Option<BTreeMap<String, Value>>,
 }
 
-/// Read a 9Router `SQLite` database.
+/// Read a legacy `SQLite` database.
 ///
-/// Opened read-only so an import can never disturb a live 9Router install.
-/// Missing tables are tolerated: schema versions differ across releases.
+/// Opened read-only so an import can never disturb an installation that is
+/// still running. Missing tables are tolerated: schema versions differ across
+/// the releases a user might be coming from.
 fn read_sqlite(path: &Path) -> Result<Extracted, ImportError> {
     use rusqlite::{Connection, OpenFlags};
 
@@ -296,7 +306,7 @@ fn read_legacy_json(path: &Path) -> Result<Extracted, ImportError> {
     })
 }
 
-/// Import a 9Router installation into this store.
+/// Import a legacy installation into this store.
 ///
 /// `explicit_dir` overrides discovery. `dry_run` reports what would be imported
 /// without writing, so a user can preview before committing.
@@ -494,8 +504,8 @@ mod tests {
 
     #[test]
     fn data_column_splats_under_typed_columns() {
-        // Upstream builds `{ ...extra, id: row.id, ... }`, so a typed column
-        // wins over the same key inside the JSON blob.
+        // A typed column wins over the same key inside the JSON blob, because
+        // the column is the one the source kept queryable and current.
         let mut row = record(json!({
             "id": "conn_1",
             "provider": "openai",
@@ -551,17 +561,18 @@ mod tests {
     fn discovery_falls_back_to_the_home_layout() {
         let dirs = candidate_dirs(None);
         assert!(
-            dirs.iter().any(|dir| dir.ends_with(".9router")),
-            "expected the default ~/.9router layout in {dirs:?}"
+            dirs.iter().any(|dir| dir.ends_with(super::LEGACY_DATA_DIR)),
+            "expected the default ~/{} layout in {dirs:?}",
+            super::LEGACY_DATA_DIR
         );
     }
 
     #[test]
     fn missing_installation_reports_what_was_searched() {
-        let error = locate(Some("/nonexistent/9router/path")).expect_err("must not find");
+        let error = locate(Some("/nonexistent/import/path")).expect_err("must not find");
         let message = error.to_string();
         assert!(
-            message.contains("/nonexistent/9router/path"),
+            message.contains("/nonexistent/import/path"),
             "got {message}"
         );
     }

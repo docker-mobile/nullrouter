@@ -1,0 +1,15 @@
+[package]
+name = "nullrouter-i18n-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+description = "Generates the dashboard's locale files from message keys in source"
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

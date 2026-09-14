@@ -2,9 +2,9 @@
 //!
 //! A compatible connection is addressed as `myllm/some-model`, where `myllm` is a
 //! user-defined prefix and the connection's real provider id is
-//! `openai-compatible-chat-<uuid>`. Upstream resolves the prefix in `getModelInfo`;
-//! without it a migrated install is reachable only by that uuid, so every client config
-//! that worked against 9Router breaks after an import.
+//! `openai-compatible-chat-<uuid>`. Without prefix resolution an imported install is
+//! reachable only by that uuid, so every client config that worked before the import
+//! breaks after it.
 //!
 //! Two things need checking at this level and only this level:
 //!

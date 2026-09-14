@@ -1,12 +1,53 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>9Router - Leptos Dashboard</title>
-    <meta name="description" content="Leptos WASM dashboard shell for the 9Router Rust port.">
+    <title>nullrouter</title>
+    <meta name="description" content="Self-hosted AI model router and gateway.">
+    <meta name="color-scheme" content="light dark">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+    <!--
+      Resolve the theme before the first paint.
+
+      The wasm bundle is a network round trip away, so a theme applied from Rust on mount lands
+      after the browser has already painted a frame with the default tokens: a white flash on the
+      way into dark mode. Setting the class here, ahead of the stylesheet, is the only way to avoid
+      it.
+
+      Everything is inside one try/catch because `localStorage` *throws* rather than returning null
+      in Firefox's private mode and under a blocked-cookies policy. An unguarded read there kills
+      the whole script, and with it the `prefers-color-scheme` fallback below — so the browsers most
+      likely to be in dark mode would be the ones that flash.
+    -->
+    <script>
+      (function () {
+        var dark;
+        try {
+          var stored = window.localStorage.getItem("nullrouter.theme");
+          if (stored === "light" || stored === "dark") {
+            dark = stored === "dark";
+          }
+        } catch (_) {
+          // Storage unavailable. Fall through to the OS preference.
+        }
+        if (dark === undefined) {
+          try {
+            dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          } catch (_) {
+            dark = false;
+          }
+        }
+        if (dark) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+
+    <link rel="stylesheet" href="/assets/dashboard/app.css">
   </head>
   <body>
-    <noscript>This dashboard requires WebAssembly and JavaScript.</noscript>
+    <noscript>This dashboard needs WebAssembly and JavaScript enabled.</noscript>
   </body>
 </html>

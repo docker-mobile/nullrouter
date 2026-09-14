@@ -59,7 +59,7 @@ up() {
 
     # Only state takes the state file; the others reach it over the wire.
     #
-    # NULLROUTER_REQUIRE_API_KEY is on for a fairness reason, not a security one: 9Router
+    # NULLROUTER_REQUIRE_API_KEY is on for a fairness reason, not a security one: the baseline
     # validates a Bearer key on /v1, and nullrouter does not by default. Leaving it off
     # would hand nullrouter a free pass on work the baseline is doing. The matching
     # `requireApiKey` setting has to be turned on in state too, or the runtime does not

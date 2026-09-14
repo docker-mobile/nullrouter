@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 pub(crate) struct LoginRequest {
     pub(crate) password: Option<String>,
+    /// Absent on a shared-password sign-in, which is still accepted while no account exists.
+    #[serde(default)]
+    pub(crate) username: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -39,13 +42,30 @@ pub(crate) struct AuthStatusResponse {
     pub(crate) require_login: bool,
     pub(crate) auth_mode: &'static str,
     pub(crate) oidc_configured: bool,
-    pub(crate) oidc_login_label: &'static str,
+    /// Owned, not `&'static str`: an operator sets this label in settings, so it is runtime data.
+    /// It was a literal while `oidc_configured` was hardcoded `false` and the field could never be
+    /// anything but the placeholder.
+    pub(crate) oidc_login_label: String,
+    pub(crate) saml_configured: bool,
     pub(crate) has_password: bool,
-    pub(crate) display_name: &'static str,
+    /// Owned since a managed account supplies it. `"Password user"` on a shared-password session,
+    /// which is what those sessions were before accounts existed.
+    pub(crate) display_name: String,
     pub(crate) login_method: &'static str,
     pub(crate) oidc_name: Option<&'static str>,
     pub(crate) oidc_email: Option<&'static str>,
     pub(crate) oidc_login: bool,
+    /// The signed-in account's id, absent on a shared-password session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) user_id: Option<String>,
+    /// `admin`, `operator` or `viewer`.
+    ///
+    /// A shared-password session reports `admin`: it is the legacy full-access principal, and calling
+    /// it anything less would hide controls from an operator who has not migrated yet.
+    pub(crate) role: &'static str,
+    /// Whether any managed account exists. False means the shared password is still the way in, which
+    /// the dashboard says out loud rather than leaving an operator to discover.
+    pub(crate) users_configured: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +139,10 @@ pub(crate) struct AuthorizeResponse {
     pub(crate) key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<&'static str>,
+    /// The session's role, so the gateway can enforce it. Absent for an API key and for a session
+    /// minted before managed users existed; the gateway reads absent as full access.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) role: Option<String>,
 }
 
 impl AuthorizeResponse {
@@ -128,6 +152,7 @@ impl AuthorizeResponse {
             principal: None,
             key_id: None,
             reason: Some(reason),
+            role: None,
         }
     }
 }

@@ -1,0 +1,77 @@
+{
+  "apiKeys": [],
+  "providerConnections": [],
+  "providerNodes": [],
+  "combos": [],
+  "proxyPools": [],
+  "settings": {
+    "tunnelDashboardAccess": false,
+    "tunnelUrl": "",
+    "tailscaleUrl": "",
+    "outboundProxyEnabled": false,
+    "outboundProxyUrl": "",
+    "outboundNoProxy": "",
+    "oidcIssuerUrl": "",
+    "oidcClientId": "",
+    "oidcClientSecret": "",
+    "oidcScopes": "",
+    "oidcLoginLabel": "",
+    "samlEntryPoint": "",
+    "samlIssuer": "",
+    "samlCert": "",
+    "samlAttributeEmail": "",
+    "samlAttributeName": "",
+    "pxpipeEnabled": false,
+    "pxpipeAutoInstall": true,
+    "pxpipeMinChars": 25000,
+    "pxpipeTimeoutMs": 15000,
+    "fallbackStrategy": "fill-first",
+    "stickyRoundRobinLimit": 3,
+    "comboStrategy": "fallback",
+    "comboStickyRoundRobinLimit": 1,
+    "comboStrategies": {},
+    "requireApiKey": false
+  },
+  "usage": {
+    "records": [
+      {
+        "id": "req_1",
+        "timestamp": 1788527414278,
+        "provider": "openai",
+        "model": "gpt-5",
+        "endpoint": "/v1/chat/completions",
+        "status": "error",
+        "statusCode": 404,
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "cachedTokens": 0,
+        "totalTokens": 0,
+        "latencyMs": 0,
+        "error": "No active credentials for provider: openai"
+      },
+      {
+        "id": "req_2",
+        "timestamp": 1788529982864,
+        "provider": "openai",
+        "model": "gpt-5",
+        "endpoint": "/v1/chat/completions",
+        "status": "error",
+        "statusCode": 404,
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "cachedTokens": 0,
+        "totalTokens": 0,
+        "latencyMs": 0,
+        "error": "No active credentials for provider: openai"
+      }
+    ],
+    "totalRequests": 2,
+    "totalPromptTokens": 0,
+    "totalCompletionTokens": 0,
+    "totalCachedTokens": 0,
+    "sequence": 2
+  },
+  "translatorLogs": {
+    "1_req_client.json": "{\"model\":\"probe\"}"
+  }
+}

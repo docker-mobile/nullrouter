@@ -1,69 +1,86 @@
-//! Shared HTTP client and hydration state for the dashboard.
+//! HTTP access and the loading states every panel is built from.
 //!
-//! Before this existed the app had exactly one `fetch` call site (auth status /
-//! logout) and every panel rendered compile-time fixtures. That made the UI
-//! assert things that were not true — a Settings toggle that discarded writes,
-//! a Providers page listing accounts that did not exist.
+//! The rule this module exists to enforce: a panel is either loading, holding data the server
+//! actually sent, or explaining why it has none. There is deliberately no state in which invented
+//! data can reach the screen, because the failure that produces -- a toggle that silently discards
+//! writes, a list of accounts that do not exist -- is invisible until someone relies on it.
 //!
-//! [`Hydrate`] is the contract that prevents that: a panel is either loading,
-//! holding real data, or explaining a failure. There is no state in which
-//! fabricated data can be presented as live.
+//! [`Hydrate`] covers reads and [`Save`] covers writes. They are separate because a write must not
+//! replace what the panel is showing: the row stays visible while saving, and a failure has to be
+//! recoverable without losing the rest of the page.
+//!
+//! Only the calls needing a `Window` are wasm-gated. The native counterparts report the absence
+//! rather than faking a response, which keeps parsing and state logic unit-testable off-browser.
 
 use leptos::prelude::*;
 
-/// Why a request did not produce usable data.
+pub mod sse;
+
+/// Why a request produced no usable data.
 ///
-/// Kept coarse on purpose: the UI needs to tell a user what to do, not surface
-/// transport internals.
+/// Coarse on purpose. A panel needs to tell someone what to do next, not surface transport
+/// internals they cannot act on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApiError {
-    /// The browser environment was unavailable (no `window`).
+    /// No browser environment was available.
     Environment,
     /// The request could not be constructed.
     RequestBuild,
     /// The request never reached the server.
     Network,
-    /// The server answered with a non-2xx status.
+    /// The server answered, with a non-2xx status.
     Status(u16),
-    /// The response body could not be read or decoded.
+    /// The body could not be read or did not parse.
     Body,
 }
 
 impl ApiError {
-    /// A short, user-facing explanation.
+    /// A short, actionable sentence for the user.
     pub const fn message(self) -> &'static str {
         match self {
             Self::Environment => "Browser environment unavailable.",
             Self::RequestBuild => "Could not build the request.",
-            Self::Network => "Could not reach the local router. Is the service running?",
+            Self::Network => "Could not reach the router. Is the service running?",
             Self::Status(401) => "Not signed in. Reload and sign in again.",
             Self::Status(403) => "This action is not permitted.",
             Self::Status(404) => "That endpoint is not available on this build.",
+            Self::Status(409) => "That conflicts with the current state. Reload and retry.",
+            Self::Status(429) => "Too many requests. Wait a moment and retry.",
             Self::Status(503) => "The service is temporarily unavailable.",
-            Self::Status(_) => "The local router returned an error.",
+            Self::Status(_) => "The router returned an error.",
             Self::Body => "The response could not be read.",
         }
     }
+
+    /// Whether retrying the same request could plausibly succeed.
+    ///
+    /// Drives whether a failed panel offers a retry button. A 404 or a 403 will not change on its
+    /// own, and offering to retry one is a false promise.
+    pub const fn is_retryable(self) -> bool {
+        match self {
+            Self::Network | Self::Body | Self::Status(429 | 503) => true,
+            Self::Environment | Self::RequestBuild | Self::Status(_) => false,
+        }
+    }
+
+    /// Whether this means the session is gone and the user must sign in again.
+    pub const fn is_unauthenticated(self) -> bool {
+        matches!(self, Self::Status(401))
+    }
 }
 
-/// HTTP verb for a dashboard request.
+/// HTTP verb.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Method {
     Get,
     Post,
     Put,
-    /// Used by the sign-in screen's password change, which patches settings.
     Patch,
     Delete,
 }
 
 impl Method {
-    /// Only read by the wasm request path; the native stub never sends.
-    #[cfg_attr(
-        not(target_arch = "wasm32"),
-        allow(dead_code, reason = "used only by the wasm fetch path")
-    )]
-    const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
@@ -74,13 +91,12 @@ impl Method {
     }
 }
 
-/// Loading state for one piece of server-owned data.
+/// The state of one piece of server-owned data.
 ///
-/// Panels match on this exhaustively, so a failure or an empty result is always
-/// rendered as itself rather than silently replaced by a placeholder.
+/// Panels match this exhaustively, so "failed" and "empty" always render as themselves instead of
+/// collapsing into a placeholder that reads as "nothing here".
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Hydrate<T> {
-    /// The first request is still in flight.
     #[default]
     Loading,
     Ready(T),
@@ -88,7 +104,6 @@ pub enum Hydrate<T> {
 }
 
 impl<T> Hydrate<T> {
-    /// The data, when present.
     pub const fn ready(&self) -> Option<&T> {
         match self {
             Self::Ready(value) => Some(value),
@@ -96,24 +111,28 @@ impl<T> Hydrate<T> {
         }
     }
 
-    /// `true` while the first request is still in flight.
     pub const fn is_loading(&self) -> bool {
         matches!(self, Self::Loading)
     }
 
-    /// The failure, when the request did not succeed.
     pub const fn failure(&self) -> Option<ApiError> {
         match self {
             Self::Failed(error) => Some(*error),
             Self::Loading | Self::Ready(_) => None,
         }
     }
+
+    /// Apply a function to the held value.
+    pub fn map<U, F: FnOnce(T) -> U>(self, transform: F) -> Hydrate<U> {
+        match self {
+            Self::Ready(value) => Hydrate::Ready(transform(value)),
+            Self::Loading => Hydrate::Loading,
+            Self::Failed(error) => Hydrate::Failed(error),
+        }
+    }
 }
 
 /// Whether a write is in flight, and how the last one ended.
-///
-/// Separate from [`Hydrate`] because a write does not replace the panel's data:
-/// the row stays visible while saving, and a failure must be recoverable.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Save {
     #[default]
@@ -121,6 +140,8 @@ pub enum Save {
     Saving,
     Saved,
     Failed(ApiError),
+    /// Refused with wording of its own. See [`submit_reporting`].
+    Refused(String),
 }
 
 impl Save {
@@ -128,31 +149,54 @@ impl Save {
         matches!(self, Self::Saving)
     }
 
-    /// Status text for the row, or `None` when idle.
-    pub const fn status(&self) -> Option<&'static str> {
+    /// The transport or status failure, when that is what went wrong.
+    ///
+    /// A [`Self::Refused`] write reports `None` here: its explanation is a sentence from the server,
+    /// not one of these variants. Use [`Self::message`] to render either kind.
+    pub const fn failure(&self) -> Option<ApiError> {
         match self {
-            Self::Idle => None,
-            Self::Saving => Some("Saving…"),
-            Self::Saved => Some("Saved"),
-            Self::Failed(error) => Some(error.message()),
+            Self::Failed(error) => Some(*error),
+            Self::Idle | Self::Saving | Self::Saved | Self::Refused(_) => None,
+        }
+    }
+
+    /// What to show the user about a failed write, whichever kind of failure it was.
+    pub fn message(&self) -> Option<String> {
+        match self {
+            Self::Failed(error) => Some(error.message().to_owned()),
+            Self::Refused(reason) => Some(reason.clone()),
+            Self::Idle | Self::Saving | Self::Saved => None,
         }
     }
 }
 
-/// Perform a JSON request and return the raw body.
+/// A response whose status, `Retry-After`, and body are all still readable.
 ///
-/// `body` is sent only for the verbs that carry one. Credentials are included
-/// so the dashboard session cookie reaches session-gated routes, and caching is
-/// disabled so a panel never renders a stale snapshot.
+/// [`request`] folds a non-2xx into [`ApiError::Status`] and drops the body, which is what most
+/// panels want. Sign-in is the exception: the refusal itself carries the remaining-attempts count
+/// and the must-change-password flag, and a lockout's countdown is in the `Retry-After` header.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DetailedResponse {
+    pub status: u16,
+    pub ok: bool,
+    pub retry_after: Option<String>,
+    /// The body, empty when it could not be read.
+    pub body: String,
+}
+
 #[cfg(target_arch = "wasm32")]
-pub async fn request(method: Method, path: &str, body: Option<&str>) -> Result<String, ApiError> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-    use web_sys::{Request, RequestCache, RequestCredentials, RequestInit, Response};
+fn build_request(
+    method: Method,
+    path: &str,
+    body: Option<&str>,
+) -> Result<web_sys::Request, ApiError> {
+    use web_sys::{Request, RequestCache, RequestCredentials, RequestInit};
 
     let init = RequestInit::new();
     init.set_method(method.as_str());
+    // Same-origin so the dashboard session cookie reaches session-gated routes.
     init.set_credentials(RequestCredentials::SameOrigin);
+    // No-store so a panel never renders a snapshot the router has already moved past.
     init.set_cache(RequestCache::NoStore);
     if let Some(payload) = body {
         init.set_body(&wasm_bindgen::JsValue::from_str(payload));
@@ -166,7 +210,17 @@ pub async fn request(method: Method, path: &str, body: Option<&str>) -> Result<S
             .set("content-type", "application/json")
             .map_err(|_| ApiError::RequestBuild)?;
     }
+    Ok(request)
+}
 
+/// Send a request, returning the body on success.
+#[cfg(target_arch = "wasm32")]
+pub async fn request(method: Method, path: &str, body: Option<&str>) -> Result<String, ApiError> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::Response;
+
+    let request = build_request(method, path, body)?;
     let window = web_sys::window().ok_or(ApiError::Environment)?;
     let response = JsFuture::from(window.fetch_with_request(&request))
         .await
@@ -177,26 +231,78 @@ pub async fn request(method: Method, path: &str, body: Option<&str>) -> Result<S
     if !response.ok() {
         return Err(ApiError::Status(response.status()));
     }
-    let text = JsFuture::from(response.text().map_err(|_| ApiError::Body)?)
+    JsFuture::from(response.text().map_err(|_| ApiError::Body)?)
         .await
-        .map_err(|_| ApiError::Body)?;
-    text.as_string().ok_or(ApiError::Body)
+        .map_err(|_| ApiError::Body)?
+        .as_string()
+        .ok_or(ApiError::Body)
 }
 
-/// Native builds have no browser to fetch from.
-///
-/// The native target exists so panel logic and parsing stay unit-testable; any
-/// request there is a programming error, reported rather than faked.
+/// Native builds have no browser to fetch from. Any call here is a programming error, reported
+/// rather than faked.
 #[cfg(not(target_arch = "wasm32"))]
-#[allow(
+#[expect(
     clippy::unused_async,
-    reason = "mirrors the wasm signature so callers are target-agnostic"
+    reason = "mirrors the wasm signature so callers stay target-agnostic"
 )]
 pub async fn request(
     _method: Method,
     _path: &str,
     _body: Option<&str>,
 ) -> Result<String, ApiError> {
+    Err(ApiError::Environment)
+}
+
+/// Send a request, reporting status and headers without folding a refusal into an error.
+#[cfg(target_arch = "wasm32")]
+pub async fn request_detailed(
+    method: Method,
+    path: &str,
+    body: Option<&str>,
+) -> Result<DetailedResponse, ApiError> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::Response;
+
+    let request = build_request(method, path, body)?;
+    let window = web_sys::window().ok_or(ApiError::Environment)?;
+    let response = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|_| ApiError::Network)?
+        .dyn_into::<Response>()
+        .map_err(|_| ApiError::Body)?;
+
+    // An unreadable body is not fatal: the status alone still yields a message, so the caller
+    // reports the refusal rather than a transport error it did not have.
+    let text = match response.text() {
+        Ok(promise) => JsFuture::from(promise)
+            .await
+            .ok()
+            .and_then(|value| value.as_string())
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    };
+
+    Ok(DetailedResponse {
+        status: response.status(),
+        ok: response.ok(),
+        retry_after: response.headers().get("Retry-After").ok().flatten(),
+        body: text,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+// `allow`, not `expect`: whether `unused_async` fires here depends on the target being built, so an
+// expectation is reported unfulfilled on the target where it does not.
+#[allow(
+    clippy::unused_async,
+    reason = "mirrors the wasm signature so callers stay target-agnostic"
+)]
+pub async fn request_detailed(
+    _method: Method,
+    _path: &str,
+    _body: Option<&str>,
+) -> Result<DetailedResponse, ApiError> {
     Err(ApiError::Environment)
 }
 
@@ -215,134 +321,158 @@ pub async fn put(path: &str, body: &str) -> Result<String, ApiError> {
     request(Method::Put, path, Some(body)).await
 }
 
+/// `PATCH` a JSON body.
+pub async fn patch(path: &str, body: &str) -> Result<String, ApiError> {
+    request(Method::Patch, path, Some(body)).await
+}
+
 /// `DELETE` a path.
 pub async fn delete(path: &str) -> Result<String, ApiError> {
     request(Method::Delete, path, None).await
 }
 
-/// A response whose status, `Retry-After`, and body are all readable.
+/// Deserialize a response body.
 ///
-/// [`request`] collapses a non-2xx into [`ApiError::Status`] and discards the
-/// body, which is right for panels that only need success or failure. Sign-in
-/// needs the refusal itself: the body carries `remainingBeforeLock` and
-/// `mustChangePassword`, and a lockout's countdown is in the `Retry-After` header.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DetailedResponse {
-    pub status: u16,
-    pub ok: bool,
-    /// The raw `Retry-After` header, when present.
-    pub retry_after: Option<String>,
-    /// The body, empty when it could not be read.
-    pub body: String,
+/// A shape change upstream becomes [`ApiError::Body`], so it surfaces as a visible failure rather
+/// than an empty panel that reads as "no data".
+pub fn decode<T: serde::de::DeserializeOwned>(body: &str) -> Result<T, ApiError> {
+    serde_json::from_str(body).map_err(|_| ApiError::Body)
 }
 
-/// Send a request and report status, `Retry-After`, and body without collapsing
-/// a refusal into an error.
-#[cfg(target_arch = "wasm32")]
-pub async fn request_detailed(
-    method: Method,
-    path: &str,
-    body: Option<&str>,
-) -> Result<DetailedResponse, ApiError> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-    use web_sys::{Request, RequestCache, RequestCredentials, RequestInit, Response};
-
-    let init = RequestInit::new();
-    init.set_method(method.as_str());
-    init.set_credentials(RequestCredentials::SameOrigin);
-    init.set_cache(RequestCache::NoStore);
-    if let Some(payload) = body {
-        init.set_body(&wasm_bindgen::JsValue::from_str(payload));
-    }
-
-    let request =
-        Request::new_with_str_and_init(path, &init).map_err(|_| ApiError::RequestBuild)?;
-    if body.is_some() {
-        request
-            .headers()
-            .set("content-type", "application/json")
-            .map_err(|_| ApiError::RequestBuild)?;
-    }
-
-    let window = web_sys::window().ok_or(ApiError::Environment)?;
-    let response = JsFuture::from(window.fetch_with_request(&request))
-        .await
-        .map_err(|_| ApiError::Network)?
-        .dyn_into::<Response>()
-        .map_err(|_| ApiError::Body)?;
-
-    let status = response.status();
-    let ok = response.ok();
-    let retry_after = response.headers().get("Retry-After").ok().flatten();
-    // An unreadable body is not fatal here: the status alone still yields a
-    // message, so sign-in reports the refusal rather than a transport error.
-    let text = match response.text() {
-        Ok(promise) => JsFuture::from(promise)
-            .await
-            .ok()
-            .and_then(|value| value.as_string())
-            .unwrap_or_default(),
-        Err(_) => String::new(),
-    };
-
-    Ok(DetailedResponse {
-        status,
-        ok,
-        retry_after,
-        body: text,
-    })
+/// Serialize a request body.
+pub fn encode<T: serde::Serialize>(value: &T) -> Result<String, ApiError> {
+    serde_json::to_string(value).map_err(|_| ApiError::Body)
 }
 
-/// Native builds have no browser to fetch from.
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(
-    clippy::unused_async,
-    reason = "mirrors the wasm signature so callers are target-agnostic"
-)]
-pub async fn request_detailed(
-    _method: Method,
-    _path: &str,
-    _body: Option<&str>,
-) -> Result<DetailedResponse, ApiError> {
-    Err(ApiError::Environment)
-}
-
-/// Fetch a path, parse it, and drive a [`Hydrate`] signal.
-///
-/// `parse` converts the raw body; returning `None` is treated as a body error,
-/// so a shape change upstream surfaces as a visible failure rather than an
-/// empty panel that looks like "no data".
-#[cfg(target_arch = "wasm32")]
-pub fn hydrate<T, F>(path: &'static str, setter: WriteSignal<Hydrate<T>>, parse: F)
+/// Fetch, decode, and drive a [`Hydrate`] signal.
+pub fn load<T>(path: impl Into<String>, into: WriteSignal<Hydrate<T>>)
 where
-    T: Send + Sync + 'static,
-    F: Fn(&str) -> Option<T> + 'static,
+    T: serde::de::DeserializeOwned + Send + Sync + 'static,
 {
-    wasm_bindgen_futures::spawn_local(async move {
-        let next = match get(path).await {
-            Ok(body) => parse(&body).map_or(Hydrate::Failed(ApiError::Body), Hydrate::Ready),
+    let path = path.into();
+    spawn(async move {
+        let next = match get(&path).await {
+            Ok(body) => decode(&body).map_or_else(Hydrate::Failed, Hydrate::Ready),
             Err(error) => Hydrate::Failed(error),
         };
-        setter.set(next);
+        into.set(next);
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn hydrate<T, F>(_path: &'static str, setter: WriteSignal<Hydrate<T>>, _parse: F)
+/// Fetch and drive a [`Hydrate`] signal through a custom parse.
+///
+/// For the endpoints whose useful shape is not their wire shape -- a list that needs sorting, a
+/// map that the UI wants as ordered rows.
+pub fn load_with<T, F>(path: impl Into<String>, into: WriteSignal<Hydrate<T>>, parse: F)
 where
     T: Send + Sync + 'static,
-    F: Fn(&str) -> Option<T> + 'static,
+    F: Fn(&str) -> Result<T, ApiError> + 'static,
 {
-    setter.set(Hydrate::Failed(ApiError::Environment));
+    let path = path.into();
+    spawn(async move {
+        let next = match get(&path).await {
+            Ok(body) => parse(&body).map_or_else(Hydrate::Failed, Hydrate::Ready),
+            Err(error) => Hydrate::Failed(error),
+        };
+        into.set(next);
+    });
+}
+
+/// Run a write, driving a [`Save`] signal through its lifecycle.
+///
+/// `on_success` runs only when the write succeeded, which is where a panel refetches or applies the
+/// change locally. It does not run on failure, so a rejected write cannot leave the UI claiming it
+/// was applied.
+pub fn submit<F, Fut, S>(state: WriteSignal<Save>, send: F, on_success: S)
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<String, ApiError>> + 'static,
+    S: FnOnce(String) + 'static,
+{
+    state.set(Save::Saving);
+    spawn(async move {
+        match send().await {
+            Ok(body) => {
+                state.set(Save::Saved);
+                on_success(body);
+            }
+            Err(error) => state.set(Save::Failed(error)),
+        }
+    });
+}
+
+/// The error envelope every route refuses with.
+///
+/// The services answer a rejected write as `{"error": "…"}`, and that sentence is usually the only
+/// thing that says what to change.
+#[derive(serde::Deserialize)]
+struct Refusal {
+    #[serde(default)]
+    error: String,
+}
+
+/// What a refusal should say.
+///
+/// Prefers the server's own sentence, falling back to the status message when the body carried
+/// nothing usable -- an HTML error page from a proxy, or an empty body. Always returns something
+/// displayable, so a caller never has to render empty space where a reason belongs.
+pub fn refusal_message(response: &DetailedResponse) -> String {
+    decode::<Refusal>(&response.body)
+        .ok()
+        .map(|refusal| refusal.error)
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or_else(|| ApiError::Status(response.status).message().to_owned())
+}
+
+/// Run a write, keeping the server's own explanation when it refuses.
+///
+/// [`submit`] folds a non-2xx into [`ApiError::Status`], whose wording is deliberately generic
+/// because most panels have nothing more specific to say. Some routes are the exception: a duplicate
+/// combo name, an unknown pricing field, or a negative rate each come back as a sentence naming the
+/// problem, and a status code throws that away. Those failures land in [`Save::Refused`].
+///
+/// `on_success` runs only when the write was accepted, so a rejected write cannot leave a panel
+/// claiming it was applied.
+pub fn submit_reporting<F, Fut, S>(state: WriteSignal<Save>, send: F, on_success: S)
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<DetailedResponse, ApiError>> + 'static,
+    S: FnOnce(String) + 'static,
+{
+    state.set(Save::Saving);
+    spawn(async move {
+        match send().await {
+            Ok(response) if response.ok => {
+                state.set(Save::Saved);
+                on_success(response.body);
+            }
+            Ok(response) => state.set(Save::Refused(refusal_message(&response))),
+            Err(error) => state.set(Save::Failed(error)),
+        }
+    });
+}
+
+/// Spawn a future on the browser's task queue.
+#[cfg(target_arch = "wasm32")]
+fn spawn<F: std::future::Future<Output = ()> + 'static>(future: F) {
+    wasm_bindgen_futures::spawn_local(future);
+}
+
+/// Native builds have no task queue to spawn onto, and no browser for the future to talk to. The
+/// future is dropped unpolled rather than blocking a test thread on work that cannot complete.
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn<F: std::future::Future<Output = ()> + 'static>(future: F) {
+    drop(future);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiError, Hydrate, Method, Save};
+    use super::{
+        ApiError, DetailedResponse, Hydrate, Method, Save, decode, encode, refusal_message,
+    };
 
     #[test]
-    fn hydrate_starts_loading() {
+    fn hydrate_starts_loading_and_holds_nothing() {
         let state: Hydrate<u8> = Hydrate::default();
         assert!(state.is_loading());
         assert!(state.ready().is_none());
@@ -363,8 +493,24 @@ mod tests {
     }
 
     #[test]
-    fn every_error_has_actionable_text() {
-        // A user must always be told something useful, never an empty string.
+    fn hydrate_map_preserves_the_non_ready_states() {
+        assert_eq!(
+            Hydrate::Ready(2_u8).map(|value| value * 2),
+            Hydrate::Ready(4_u8)
+        );
+        assert_eq!(
+            Hydrate::<u8>::Loading.map(|value| value * 2),
+            Hydrate::Loading
+        );
+        let failed = Hydrate::<u8>::Failed(ApiError::Body);
+        assert_eq!(
+            failed.map(|value| value * 2),
+            Hydrate::Failed(ApiError::Body)
+        );
+    }
+
+    #[test]
+    fn every_error_reads_as_an_actionable_sentence() {
         for error in [
             ApiError::Environment,
             ApiError::RequestBuild,
@@ -373,6 +519,8 @@ mod tests {
             ApiError::Status(401),
             ApiError::Status(403),
             ApiError::Status(404),
+            ApiError::Status(409),
+            ApiError::Status(429),
             ApiError::Status(500),
             ApiError::Status(503),
         ] {
@@ -380,37 +528,144 @@ mod tests {
             assert!(!message.is_empty(), "{error:?} has no message");
             assert!(
                 message.ends_with('.') || message.ends_with('?'),
-                "{error:?} message should read as a sentence: {message}"
+                "{error:?} should read as a sentence: {message}"
             );
         }
     }
 
     #[test]
-    fn unauthorized_tells_the_user_to_sign_in() {
-        // 401 is the one status where the remedy is specific and worth naming.
+    fn unauthorized_is_the_only_status_that_asks_for_a_sign_in() {
+        assert!(ApiError::Status(401).is_unauthenticated());
         assert!(ApiError::Status(401).message().contains("sign in"));
-        // A generic 5xx must not claim an auth problem.
-        assert!(!ApiError::Status(500).message().contains("sign in"));
+        for status in [403, 404, 409, 429, 500, 503] {
+            assert!(!ApiError::Status(status).is_unauthenticated(), "{status}");
+            assert!(
+                !ApiError::Status(status).message().contains("sign in"),
+                "{status} must not claim an auth problem"
+            );
+        }
     }
 
     #[test]
-    fn save_reports_progress_and_failure() {
-        assert_eq!(Save::Idle.status(), None);
+    fn only_transient_failures_offer_a_retry() {
+        // Offering to retry a 404 or a 403 is a false promise: neither changes on its own.
+        for error in [
+            ApiError::Network,
+            ApiError::Body,
+            ApiError::Status(429),
+            ApiError::Status(503),
+        ] {
+            assert!(error.is_retryable(), "{error:?}");
+        }
+        for error in [
+            ApiError::Environment,
+            ApiError::RequestBuild,
+            ApiError::Status(401),
+            ApiError::Status(403),
+            ApiError::Status(404),
+            ApiError::Status(500),
+        ] {
+            assert!(!error.is_retryable(), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn save_reports_progress_and_recoverable_failure() {
+        assert!(!Save::Idle.is_saving());
         assert!(Save::Saving.is_saving());
-        assert_eq!(Save::Saving.status(), Some("Saving…"));
-        assert_eq!(Save::Saved.status(), Some("Saved"));
+        assert!(Save::Saved.failure().is_none());
         assert_eq!(
-            Save::Failed(ApiError::Network).status(),
-            Some(ApiError::Network.message())
+            Save::Failed(ApiError::Network).failure(),
+            Some(ApiError::Network)
         );
         assert!(!Save::Failed(ApiError::Network).is_saving());
     }
 
     #[test]
-    fn methods_map_to_http_verbs() {
+    fn a_refusal_is_not_reported_as_a_transport_failure() {
+        // `failure()` drives the retry affordance, and a refused write is not a request to retry
+        // unchanged.
+        let refused = Save::Refused("Combo name already exists".to_owned());
+        assert!(refused.failure().is_none());
+        assert!(!refused.is_saving());
+    }
+
+    #[test]
+    fn both_kinds_of_failed_write_have_something_to_show() {
+        assert_eq!(
+            Save::Refused("Combo name already exists".to_owned()).message(),
+            Some("Combo name already exists".to_owned())
+        );
+        assert_eq!(
+            Save::Failed(ApiError::Network).message(),
+            Some(ApiError::Network.message().to_owned())
+        );
+        // A write that has not failed has nothing to say.
+        assert_eq!(Save::Idle.message(), None);
+        assert_eq!(Save::Saving.message(), None);
+        assert_eq!(Save::Saved.message(), None);
+    }
+
+    #[test]
+    fn a_refusal_prefers_the_servers_own_wording() {
+        let response = DetailedResponse {
+            status: 400,
+            ok: false,
+            retry_after: None,
+            body: r#"{"error":"Combo name already exists"}"#.to_owned(),
+        };
+        assert_eq!(refusal_message(&response), "Combo name already exists");
+    }
+
+    #[test]
+    fn a_refusal_without_a_usable_body_falls_back_to_the_status() {
+        // A proxy's HTML error page, an empty body, or an envelope with a blank message: each still
+        // has to produce a sentence rather than empty space.
+        for body in ["", "<html>502 Bad Gateway</html>", r#"{"error":"  "}"#] {
+            let response = DetailedResponse {
+                status: 503,
+                ok: false,
+                retry_after: None,
+                body: body.to_owned(),
+            };
+            assert_eq!(
+                refusal_message(&response),
+                ApiError::Status(503).message(),
+                "body {body:?} should fall back"
+            );
+        }
+    }
+
+    #[test]
+    fn methods_map_to_verbs_and_know_which_carry_a_body() {
         assert_eq!(Method::Get.as_str(), "GET");
         assert_eq!(Method::Post.as_str(), "POST");
         assert_eq!(Method::Put.as_str(), "PUT");
+        assert_eq!(Method::Patch.as_str(), "PATCH");
         assert_eq!(Method::Delete.as_str(), "DELETE");
+    }
+
+    #[test]
+    fn a_shape_change_upstream_becomes_a_body_error() {
+        // Not a panic, and not a default value that would render as real data.
+        assert_eq!(
+            decode::<Vec<u8>>("{\"not\":\"an array\"}").unwrap_err(),
+            ApiError::Body
+        );
+        assert_eq!(decode::<Vec<u8>>("truncated").unwrap_err(), ApiError::Body);
+        assert_eq!(
+            decode::<Vec<u8>>("[1,2,3]").unwrap_or_default(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn bodies_round_trip() {
+        let encoded = encode(&vec![1_u8, 2, 3]).unwrap_or_default();
+        assert_eq!(encoded, "[1,2,3]");
+        assert_eq!(
+            decode::<Vec<u8>>(&encoded).unwrap_or_default(),
+            vec![1, 2, 3]
+        );
     }
 }

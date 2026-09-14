@@ -1,8 +1,8 @@
-//! The 9Router import must require a dashboard session.
+//! The legacy import must require a dashboard session.
 //!
-//! It reads provider credentials out of a local 9Router install and writes them
-//! into this router's state. Reachable unauthenticated, it would let anyone on
-//! the network trigger a credential import.
+//! It reads provider credentials out of a legacy install on this machine and
+//! writes them into this router's state. Reachable unauthenticated, it would let
+//! anyone on the network trigger a credential import.
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -11,7 +11,7 @@ use nullrouter_gateway::{AccessDecision, AccessRequirement, AuthorizationState, 
 const REMOTE: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
 const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-const MIGRATE_PATH: &str = "/api/migrate/9router";
+const MIGRATE_PATH: &str = "/api/migrate/legacy";
 
 #[test]
 fn migration_is_routed_to_the_api_service() {
@@ -33,9 +33,12 @@ fn migration_requires_a_session_not_public_access() {
             peer,
             false,
         );
+        // A legacy import writes provider credentials, so it needs at least operator.
         assert_eq!(
             requirement,
-            AccessRequirement::ApiSession,
+            AccessRequirement::ApiSession {
+                least: nullrouter_gateway::PrincipalRole::Operator,
+            },
             "import must be session-gated (peer={peer:?})"
         );
         // Without authorization it must not be allowed through.
@@ -50,8 +53,17 @@ fn migration_requires_a_session_not_public_access() {
         );
         // With a valid session it proceeds.
         assert_eq!(
-            requirement.decision(AuthorizationState::Authorized),
+            requirement.decision(AuthorizationState::Authorized {
+                role: Some(nullrouter_gateway::PrincipalRole::Operator)
+            }),
             AccessDecision::Allow
+        );
+        // And a viewer does not get to run it.
+        assert_eq!(
+            requirement.decision(AuthorizationState::Authorized {
+                role: Some(nullrouter_gateway::PrincipalRole::Viewer)
+            }),
+            AccessDecision::Forbidden
         );
     }
 }
@@ -60,7 +72,7 @@ fn migration_requires_a_session_not_public_access() {
 fn the_internal_import_endpoint_stays_unreachable_publicly() {
     // The API service forwards to this; it must never be callable directly.
     let requirement = AccessRequirement::for_request(
-        "/internal/v1/migrate/9router",
+        "/internal/v1/migrate/legacy",
         &http::Method::POST,
         nullrouter_gateway::RouteKind::State,
         Some(REMOTE),
@@ -68,8 +80,10 @@ fn the_internal_import_endpoint_stays_unreachable_publicly() {
     );
     assert_eq!(requirement, AccessRequirement::Forbidden);
     assert_eq!(
-        requirement.decision(AuthorizationState::Authorized),
+        requirement.decision(AuthorizationState::Authorized {
+            role: Some(nullrouter_gateway::PrincipalRole::Admin)
+        }),
         AccessDecision::Forbidden,
-        "even an authorized session must not reach the internal endpoint"
+        "even an admin session must not reach the internal endpoint"
     );
 }

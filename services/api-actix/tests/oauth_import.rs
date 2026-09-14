@@ -601,10 +601,10 @@ async fn a_real_aws_region_shape_is_accepted() -> TestResult {
         assert_eq!(status, StatusCode::OK, "{region:?} was refused: {body}");
     }
 
-    // A four-segment region is refused, and that is faithful rather than a gap here: upstream's own
-    // AWS_REGION_PATTERN is `^[a-z]{2}-[a-z]+-\d{1,2}$`, so `us-gov-west-1` and `us-iso-east-1` fail
-    // its check too. GovCloud is out of reach in 9Router for the same reason it is out of reach here,
-    // and loosening the pattern unilaterally would widen a check whose whole job is narrowness.
+    // A four-segment region is refused, and deliberately so: the region pattern is
+    // `^[a-z]{2}-[a-z]+-\d{1,2}$`, which `us-gov-west-1` and `us-iso-east-1` do not match. GovCloud
+    // is therefore out of reach, and that is the right trade — the pattern's whole job is to be
+    // narrow enough that an attacker cannot smuggle a hostname through the region field.
     let (gov_status, gov_body) = post_to(
         "/api/oauth/kiro/api-key",
         &state,

@@ -1,8 +1,8 @@
 //! Translation cost, per request and per streaming frame.
 //!
-//! These do not support the "faster than 9Router" claim — that needs the end-to-end
-//! harness in `BENCHMARKS.md`. What they give is attribution: when a release is slower,
-//! this says which function.
+//! These do not support any end-to-end throughput claim — that needs the full harness
+//! described in `BENCHMARKS.md`, which measures a whole request through the router. What
+//! these give is attribution: when a release is slower, this says which function.
 //!
 //! Two of these matter more than the rest:
 //!
