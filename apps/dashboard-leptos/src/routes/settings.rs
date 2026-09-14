@@ -124,11 +124,15 @@ fn SettingsForm(
                 class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                 disabled=move || save.get().is_saving()
                 on:click=move |_| {
+                    // Only the toggles this panel owns. The SSO fields on the same endpoint are left
+                    // out entirely, because the store treats a present key as "set this" and sending
+                    // them empty from here would clear a working identity-provider configuration.
                     let Ok(body) = encode(&SettingsPatch {
                         require_api_key: Some(require_api_key.get()),
                         tunnel_dashboard_access: Some(tunnel.get()),
                         outbound_proxy_enabled: Some(proxy.get()),
                         pxpipe_enabled: Some(pxpipe.get()),
+                        ..SettingsPatch::default()
                     }) else {
                         return;
                     };

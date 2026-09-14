@@ -122,6 +122,18 @@ pub struct SettingsView {
     #[serde(default)]
     pub oidc_login_label: String,
     #[serde(default)]
+    pub saml_entry_point: String,
+    #[serde(default)]
+    pub saml_issuer: String,
+    /// Whether a certificate is stored. The certificate itself is never returned, the same way the
+    /// client secret is not: both are write-only from this panel's side.
+    #[serde(default)]
+    pub saml_cert_set: bool,
+    #[serde(default)]
+    pub saml_attribute_email: String,
+    #[serde(default)]
+    pub saml_attribute_name: String,
+    #[serde(default)]
     pub pxpipe_enabled: bool,
 }
 
@@ -175,7 +187,7 @@ pub struct LoginBody<'a> {
     pub password: &'a str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Default, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -186,6 +198,30 @@ pub struct SettingsPatch {
     pub outbound_proxy_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pxpipe_enabled: Option<bool>,
+    // ── SSO ──
+    //
+    // Every field is optional and omitted when unchanged, because the store treats a key being
+    // present as "set this". Sending an empty secret would clear a working one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oidc_issuer_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oidc_client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oidc_client_secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oidc_scopes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oidc_login_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saml_entry_point: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saml_issuer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saml_cert: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saml_attribute_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saml_attribute_name: Option<String>,
 }
 
 /// What a model can do, as the catalogue reports it.

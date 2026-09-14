@@ -74,6 +74,7 @@ pub fn App() -> impl leptos::IntoView {
                     <Route path=path!("pricing") view=routes::Pricing />
                     <Route path=path!("keys") view=routes::Keys />
                     <Route path=path!("users") view=routes::Users />
+                    <Route path=path!("sso") view=routes::Sso />
                     <Route path=path!("usage") view=routes::Usage />
                     <Route path=path!("logs") view=routes::Logs />
                     <Route path=path!("cli-tools") view=routes::CliTools />
