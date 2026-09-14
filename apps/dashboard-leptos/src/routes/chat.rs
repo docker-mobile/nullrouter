@@ -1,0 +1,649 @@
+//! Interactive chat playground for testing models and providers.
+//!
+//! Directly maps `/api/dashboard/chat/completions` to an enterprise, reactive Leptos WASM UI.
+//! Supports multi-turn conversations, system prompts, model switching, and real-time streaming feedback.
+
+use leptos::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::api::{Hydrate, Method, load};
+use crate::routes::PageHeader;
+use crate::routes::types::ModelsList;
+use crate::routes::write_reporting;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+    pub is_streaming: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DashboardChatCompletionRequest {
+    model: String,
+    messages: Vec<WireMessage>,
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct WireMessage {
+    role: String,
+    content: String,
+}
+
+fn parse_chat_response(raw: &str) -> (String, Option<String>) {
+    let text = raw.trim();
+    if text.is_empty() {
+        return (
+            String::new(),
+            Some("Empty response received from router".to_owned()),
+        );
+    }
+
+    if text.contains("data: ") {
+        let mut accumulated = String::new();
+        let mut err = None;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("data: ") {
+                let rest = rest.trim();
+                if rest == "[DONE]" {
+                    continue;
+                }
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(rest) {
+                    if let Some(content) = val
+                        .pointer("/choices/0/delta/content")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        accumulated.push_str(content);
+                    } else if let Some(msg) = val
+                        .pointer("/error/message")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        err = Some(msg.to_owned());
+                    }
+                }
+            }
+        }
+        if !accumulated.is_empty() {
+            return (accumulated, err);
+        }
+        if let Some(e) = err {
+            return (String::new(), Some(e));
+        }
+    }
+
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(text) {
+        if let Some(content) = val
+            .pointer("/choices/0/message/content")
+            .and_then(serde_json::Value::as_str)
+        {
+            return (content.to_owned(), None);
+        }
+        if let Some(msg) = val
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+        {
+            return (String::new(), Some(msg.to_owned()));
+        }
+    }
+
+    (text.to_owned(), None)
+}
+
+#[component]
+#[allow(clippy::too_many_lines, clippy::similar_names)]
+pub fn Chat() -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+
+    let label_title = locale.get("chat.title").to_owned();
+    let label_desc = locale.get("chat.description").to_owned();
+    let label_params = locale.get("chat.parameters").to_owned();
+    let label_clear = locale.get("chat.clear").to_owned();
+    let label_sys_prompt = locale.get("chat.system_prompt").to_owned();
+    let label_sys_placeholder = locale.get("chat.system_placeholder").to_owned();
+    let label_temp = locale.get("chat.temperature").to_owned();
+    let label_stream = locale.get("chat.stream").to_owned();
+    let label_model = locale.get("chat.model").to_owned();
+    let label_latency = locale.get("chat.latency").to_owned();
+    let label_tokens = locale.get("chat.tokens").to_owned();
+    let label_empty_title = locale.get("chat.empty_title").to_owned();
+    let label_empty_hint = locale.get("chat.empty_hint").to_owned();
+    let label_sug1 = locale.get("chat.suggestion_1").to_owned();
+    let label_sug2 = locale.get("chat.suggestion_2").to_owned();
+    let label_sug3 = locale.get("chat.suggestion_3").to_owned();
+    let label_user = locale.get("chat.user_label").to_owned();
+    let label_asst = locale.get("chat.assistant_label").to_owned();
+    let label_copy = locale.get("chat.copy").to_owned();
+    let label_streaming = locale.get("chat.streaming").to_owned();
+    let label_placeholder = locale.get("chat.input_placeholder").to_owned();
+    let label_send = locale.get("chat.send").to_owned();
+
+    let (catalogue, set_catalogue) = signal(Hydrate::<ModelsList>::Loading);
+    load("/api/models", set_catalogue);
+
+    let (messages, set_messages) = signal(Vec::<ChatMessage>::new());
+    let (input_text, set_input_text) = signal(String::new());
+    let (selected_model, set_selected_model) = signal(String::from("openai/gpt-5"));
+    let (system_prompt, set_system_prompt) = signal(String::from(
+        "You are a helpful, fast, and precise AI assistant powered by nullrouter.",
+    ));
+    let (temperature, set_temperature) = signal(String::from("0.7"));
+    let (stream_enabled, set_stream_enabled) = signal(true);
+    let (is_generating, set_is_generating) = signal(false);
+    let (error_banner, set_error_banner) = signal(Option::<String>::None);
+    let (metrics, set_metrics) = signal(Option::<(u64, usize)>::None);
+    let (show_params, set_show_params) = signal(false);
+
+    let send_message = move |text: String| {
+        let trimmed = text.trim().to_owned();
+        if trimmed.is_empty() || is_generating.get() {
+            return;
+        }
+
+        let user_msg_id = format!("u_{}", messages.get().len());
+        let assistant_msg_id = format!("a_{}", messages.get().len() + 1);
+
+        let user_msg = ChatMessage {
+            id: user_msg_id,
+            role: "user".to_owned(),
+            content: trimmed.clone(),
+            is_streaming: false,
+            error: None,
+        };
+
+        let assistant_msg = ChatMessage {
+            id: assistant_msg_id.clone(),
+            role: "assistant".to_owned(),
+            content: String::new(),
+            is_streaming: true,
+            error: None,
+        };
+
+        set_messages.update(|msgs| {
+            msgs.push(user_msg);
+            msgs.push(assistant_msg);
+        });
+
+        set_input_text.set(String::new());
+        set_is_generating.set(true);
+        set_error_banner.set(None);
+
+        let model = selected_model.get();
+        let stream = stream_enabled.get();
+        let temp_val = temperature.get().parse::<f32>().ok();
+        let sys_prompt = system_prompt.get().trim().to_owned();
+
+        let mut wire_messages = Vec::new();
+        if !sys_prompt.is_empty() {
+            wire_messages.push(WireMessage {
+                role: "system".to_owned(),
+                content: sys_prompt,
+            });
+        }
+
+        for msg in messages.get() {
+            if !msg.is_streaming && msg.error.is_none() && !msg.content.is_empty() {
+                wire_messages.push(WireMessage {
+                    role: msg.role.clone(),
+                    content: msg.content.clone(),
+                });
+            }
+        }
+
+        let req = DashboardChatCompletionRequest {
+            model,
+            messages: wire_messages,
+            stream,
+            temperature: temp_val,
+        };
+
+        let payload_str = serde_json::to_string(&req).unwrap_or_default();
+
+        leptos::task::spawn_local(async move {
+            let start_time = web_time_millis();
+            let result = write_reporting(
+                Method::Post,
+                "/api/dashboard/chat/completions",
+                Some(&payload_str),
+            )
+            .await;
+
+            let elapsed_ms = web_time_millis().saturating_sub(start_time);
+            set_is_generating.set(false);
+
+            match result {
+                Ok(raw) => {
+                    let (content, err) = parse_chat_response(&raw);
+                    let words = content.split_whitespace().count();
+                    set_metrics.set(Some((elapsed_ms, words)));
+
+                    set_messages.update(|msgs| {
+                        if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
+                            target.is_streaming = false;
+                            if let Some(e) = err {
+                                target.error = Some(e);
+                            } else {
+                                target.content = content;
+                            }
+                        }
+                    });
+                }
+                Err(err_msg) => {
+                    let err_display = if err_msg.is_empty() {
+                        "Failed to communicate with provider".to_owned()
+                    } else {
+                        err_msg
+                    };
+                    set_error_banner.set(Some(err_display.clone()));
+                    set_messages.update(|msgs| {
+                        if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
+                            target.is_streaming = false;
+                            target.error = Some(err_display);
+                        }
+                    });
+                }
+            }
+        });
+    };
+
+    let on_submit = move || {
+        let current = input_text.get();
+        send_message(current);
+    };
+
+    let clear_conversation = move || {
+        set_messages.set(Vec::new());
+        set_metrics.set(None);
+        set_error_banner.set(None);
+    };
+
+    let drawer_params = label_params.clone();
+    let drawer_sys = label_sys_prompt.clone();
+    let drawer_sys_ph = label_sys_placeholder.clone();
+    let drawer_temp = label_temp.clone();
+    let drawer_stream = label_stream.clone();
+
+    let metrics_lat = label_latency.clone();
+    let metrics_tok = label_tokens.clone();
+
+    let win_empty_title = label_empty_title.clone();
+    let win_empty_hint = label_empty_hint.clone();
+    let win_sug1 = label_sug1.clone();
+    let win_sug2 = label_sug2.clone();
+    let win_sug3 = label_sug3.clone();
+    let win_user = label_user.clone();
+    let win_asst = label_asst.clone();
+    let win_copy = label_copy.clone();
+    let win_streaming = label_streaming.clone();
+
+    view! {
+        <div class="max-w-5xl mx-auto space-y-4">
+            <PageHeader
+                title=label_title
+                description=label_desc
+            >
+                <div class="flex items-center gap-2">
+                    <button
+                        type="button"
+                        class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-accent transition-colors"
+                        on:click=move |_| set_show_params.update(|v| *v = !*v)
+                    >
+                        {label_params.clone()}
+                    </button>
+                    <button
+                        type="button"
+                        class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        on:click=move |_| clear_conversation()
+                    >
+                        {label_clear.clone()}
+                    </button>
+                </div>
+            </PageHeader>
+
+            // Configuration drawer
+            {
+                let p_lbl = drawer_params.clone();
+                let s_lbl = drawer_sys.clone();
+                let sph_lbl = drawer_sys_ph.clone();
+                let t_lbl = drawer_temp.clone();
+                let st_lbl = drawer_stream.clone();
+                move || if show_params.get() {
+                    view! {
+                        <section class="rounded-lg border border-border bg-card p-4 space-y-3">
+                            <h2 class="text-sm font-semibold">{p_lbl.clone()}</h2>
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <label class="space-y-1 text-xs">
+                                    <span class="text-muted-foreground font-medium">{s_lbl.clone()}</span>
+                                    <textarea
+                                        class="w-full rounded-md border border-input bg-background p-2 text-xs h-20 resize-none font-mono"
+                                        prop:value=move || system_prompt.get()
+                                        on:input=move |ev| set_system_prompt.set(event_target_value(&ev))
+                                        placeholder=sph_lbl.clone()
+                                    />
+                                </label>
+                                <div class="space-y-3">
+                                    <label class="space-y-1 text-xs block">
+                                        <div class="flex justify-between">
+                                            <span class="text-muted-foreground font-medium">{t_lbl.clone()}</span>
+                                            <span class="font-mono">{move || temperature.get()}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="2"
+                                            step="0.1"
+                                            class="w-full"
+                                            prop:value=move || temperature.get()
+                                            on:input=move |ev| set_temperature.set(event_target_value(&ev))
+                                        />
+                                    </label>
+                                    <label class="flex items-center gap-2 text-xs cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            class="rounded border-input text-primary"
+                                            prop:checked=move || stream_enabled.get()
+                                            on:change=move |ev| set_stream_enabled.set(event_target_checked(&ev))
+                                        />
+                                        <span>{st_lbl.clone()}</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+                    }.into_any()
+                } else {
+                    view! { <span class="hidden"></span> }.into_any()
+                }
+            }
+
+            // Model Selector Bar
+            <div class="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-border bg-card/60">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <span class="text-xs font-semibold text-muted-foreground shrink-0">{label_model}:</span>
+                    {move || match catalogue.get() {
+                        Hydrate::Ready(data) if !data.models.is_empty() => {
+                            let models = data.models.clone();
+                            view! {
+                                <select
+                                    class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono max-w-sm truncate"
+                                    prop:value=move || selected_model.get()
+                                    on:change=move |ev| set_selected_model.set(event_target_value(&ev))
+                                >
+                                    {models.into_iter().map(|m| {
+                                        let name = if m.full_model.is_empty() {
+                                            format!("{}/{}", m.provider, m.model)
+                                        } else {
+                                            m.full_model
+                                        };
+                                        view! { <option value=name.clone()>{name.clone()}</option> }
+                                    }).collect::<Vec<_>>()}
+                                </select>
+                            }.into_any()
+                        }
+                        _ => view! {
+                            <input
+                                type="text"
+                                class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono w-64"
+                                prop:value=move || selected_model.get()
+                                on:input=move |ev| set_selected_model.set(event_target_value(&ev))
+                                placeholder="provider/model"
+                            />
+                        }.into_any()
+                    }}
+                </div>
+
+                // Metrics indicator
+                {
+                    let lat_lbl = metrics_lat.clone();
+                    let tok_lbl = metrics_tok.clone();
+                    move || metrics.get().map(|(ms, words)| {
+                        view! {
+                            <div class="flex items-center gap-3 text-xs text-muted-foreground font-mono">
+                                <span>{lat_lbl.clone()}: {ms}ms</span>
+                                <span>{tok_lbl.clone()}: ~{words}</span>
+                            </div>
+                        }
+                    })
+                }
+            </div>
+
+            // Error banner
+            {move || error_banner.get().map(|err| {
+                view! {
+                    <div class="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium">
+                        {err}
+                    </div>
+                }
+            })}
+
+            // Message Window
+            <div class="rounded-lg border border-border bg-card min-h-[420px] max-h-[640px] flex flex-col justify-between overflow-hidden shadow-sm">
+                <div class="p-4 space-y-4 overflow-y-auto flex-1">
+                    {
+                        let empty_title = win_empty_title.clone();
+                        let empty_hint = win_empty_hint.clone();
+                        let s1 = win_sug1.clone();
+                        let s2 = win_sug2.clone();
+                        let s3 = win_sug3.clone();
+                        let user_lbl = win_user.clone();
+                        let asst_lbl = win_asst.clone();
+                        let copy_lbl = win_copy.clone();
+                        let stream_lbl = win_streaming.clone();
+
+                        move || {
+                            let msgs = messages.get();
+                            if msgs.is_empty() {
+                                let s1_btn = s1.clone();
+                                let s2_btn = s2.clone();
+                                let s3_btn = s3.clone();
+                                view! {
+                                    <div class="py-16 text-center space-y-3">
+                                        <div class="size-12 rounded-full bg-primary/10 text-primary mx-auto flex items-center justify-center">
+                                            <svg class="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                            </svg>
+                                        </div>
+                                        <h3 class="font-semibold text-sm">{empty_title.clone()}</h3>
+                                        <p class="text-xs text-muted-foreground max-w-sm mx-auto">{empty_hint.clone()}</p>
+                                        <div class="pt-4 flex flex-wrap justify-center gap-2 max-w-xl mx-auto">
+                                            <button
+                                                type="button"
+                                                class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
+                                                on:click=move |_| send_message(s1_btn.clone())
+                                            >
+                                                {s1.clone()}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
+                                                on:click=move |_| send_message(s2_btn.clone())
+                                            >
+                                                {s2.clone()}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
+                                                on:click=move |_| send_message(s3_btn.clone())
+                                            >
+                                                {s3.clone()}
+                                            </button>
+                                        </div>
+                                    </div>
+                                }.into_any()
+                            } else {
+                                view! {
+                                    <div class="space-y-4">
+                                        {msgs.into_iter().map(|msg| {
+                                            let is_user = msg.role == "user";
+                                            let content = msg.content.clone();
+                                            let role_lbl = if is_user { user_lbl.clone() } else { asst_lbl.clone() };
+                                            let copy_text = copy_lbl.clone();
+                                            let streaming_text = stream_lbl.clone();
+                                            view! {
+                                                <div class=format!("flex gap-3 {}", if is_user { "justify-end" } else { "justify-start" })>
+                                                    <div class=format!(
+                                                        "max-w-[80%] rounded-lg p-3.5 text-sm {}",
+                                                        if is_user {
+                                                            "bg-primary text-primary-foreground"
+                                                        } else {
+                                                            "bg-muted border border-border text-foreground"
+                                                        }
+                                                    )>
+                                                        <div class="flex items-center justify-between gap-2 mb-1 opacity-80 text-[11px]">
+                                                            <span class="font-semibold">
+                                                                {role_lbl}
+                                                            </span>
+                                                            {(!is_user && !content.is_empty()).then(|| {
+                                                                let text_to_copy = content.clone();
+                                                                view! {
+                                                                    <button
+                                                                        type="button"
+                                                                        class="hover:underline cursor-pointer opacity-75 hover:opacity-100"
+                                                                        on:click=move |_| copy_to_clipboard(&text_to_copy)
+                                                                    >
+                                                                        {copy_text}
+                                                                    </button>
+                                                                }
+                                                            })}
+                                                        </div>
+
+                                                        {if msg.is_streaming {
+                                                            view! {
+                                                                <div class="flex items-center gap-2 py-1 text-muted-foreground text-xs italic">
+                                                                    <span class="size-2 rounded-full bg-primary animate-ping"></span>
+                                                                    <span>{streaming_text}</span>
+                                                                </div>
+                                                            }.into_any()
+                                                        } else if let Some(err) = msg.error {
+                                                            view! {
+                                                                <div class="text-destructive font-mono text-xs whitespace-pre-wrap">
+                                                                    {err}
+                                                                </div>
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {
+                                                                <div class="whitespace-pre-wrap leading-relaxed">
+                                                                    {msg.content}
+                                                                </div>
+                                                            }.into_any()
+                                                        }}
+                                                    </div>
+                                                </div>
+                                            }
+                                        }).collect::<Vec<_>>()}
+                                    </div>
+                                }.into_any()
+                            }
+                        }
+                    }
+                </div>
+
+                // Input Bar
+                <div class="p-3 border-t border-border bg-card/80">
+                    <form
+                        class="flex gap-2 items-end"
+                        on:submit=move |ev| {
+                            ev.prevent_default();
+                            on_submit();
+                        }
+                    >
+                        <textarea
+                            class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[44px] max-h-32 leading-tight"
+                            rows="1"
+                            placeholder=label_placeholder
+                            prop:value=move || input_text.get()
+                            on:input=move |ev| set_input_text.set(event_target_value(&ev))
+                            on:keydown=move |ev| {
+                                if ev.key() == "Enter" && !ev.shift_key() {
+                                    ev.prevent_default();
+                                    on_submit();
+                                }
+                            }
+                        />
+                        <button
+                            type="submit"
+                            disabled=move || input_text.get().trim().is_empty() || is_generating.get()
+                            class="px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
+                        >
+                            <span>{label_send}</span>
+                            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn web_time_millis() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(0))
+    }
+}
+
+#[allow(clippy::missing_const_for_fn)]
+fn copy_to_clipboard(_text: &str) {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(window) = web_sys::window() {
+        let nav = window.navigator();
+        let clipboard = nav.clipboard();
+        let _ = clipboard.write_text(_text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_chat_response_handles_sse_stream() {
+        let stream_data = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"world!\"}}]}\ndata: [DONE]\n";
+        let (content, err) = parse_chat_response(stream_data);
+        assert_eq!(content, "Hello world!");
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn parse_chat_response_handles_json_completion() {
+        let json_data = r#"{"id":"chatcmpl-1","choices":[{"message":{"role":"assistant","content":"Testing 123"}}]}"#;
+        let (content, err) = parse_chat_response(json_data);
+        assert_eq!(content, "Testing 123");
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn parse_chat_response_handles_error_envelope() {
+        let err_data = r#"{"error":{"message":"Rate limit reached for provider"}}"#;
+        let (content, err) = parse_chat_response(err_data);
+        assert!(content.is_empty());
+        assert_eq!(err.as_deref(), Some("Rate limit reached for provider"));
+    }
+
+    #[test]
+    fn parse_chat_response_handles_empty_response() {
+        let (content, err) = parse_chat_response("   ");
+        assert!(content.is_empty());
+        assert!(err.is_some());
+    }
+
+    #[test]
+    fn parse_chat_response_falls_back_to_raw_text() {
+        let raw = "Just raw text response from backend";
+        let (content, err) = parse_chat_response(raw);
+        assert_eq!(content, raw);
+        assert!(err.is_none());
+    }
+}

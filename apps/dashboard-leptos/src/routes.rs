@@ -147,6 +147,7 @@ pub async fn write_reporting(
 }
 
 pub mod catalog;
+pub mod chat;
 pub mod cli_tools;
 pub mod combos;
 pub mod controls;
@@ -171,6 +172,7 @@ pub mod types;
 pub mod usage;
 pub mod users;
 
+pub use chat::Chat;
 pub use cli_tools::CliTools;
 pub use combos::Combos;
 pub use headroom::Headroom;

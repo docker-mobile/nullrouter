@@ -67,6 +67,7 @@ pub fn App() -> impl leptos::IntoView {
                 <Route path=path!("/callback") view=routes::Callback />
                 <ParentRoute path=path!("/dashboard") view=shell::DashboardFrame>
                     <Route path=path!("") view=routes::Overview />
+                    <Route path=path!("chat") view=routes::Chat />
                     <Route path=path!("providers") view=routes::Providers />
                     <Route path=path!("providers/:id") view=routes::providers::Provider />
                     <Route path=path!("models") view=routes::Models />

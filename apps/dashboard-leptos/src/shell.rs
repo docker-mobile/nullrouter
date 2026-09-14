@@ -38,6 +38,11 @@ pub const NAV_ITEMS: &[NavItem] = &[
         icon: "M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z",
     },
     NavItem {
+        key: "nav.chat",
+        path: "/dashboard/chat",
+        icon: "M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z",
+    },
+    NavItem {
         key: "nav.providers",
         path: "/dashboard/providers",
         icon: "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z",
