@@ -401,9 +401,12 @@ pub(crate) fn session_lookup(history: &[(String, String)]) -> Option<String> {
     let entry = cache.get(&key)?;
     if entry.stored.elapsed() > SESSION_MAX_AGE {
         cache.remove(&key);
+        drop(cache);
         return None;
     }
-    Some(entry.backend_uuid.clone())
+    let uuid = entry.backend_uuid.clone();
+    drop(cache);
+    Some(uuid)
 }
 
 /// Remember the uuid for the conversation as it stands after this exchange.

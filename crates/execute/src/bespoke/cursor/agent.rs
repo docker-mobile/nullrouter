@@ -1,6 +1,6 @@
 //! Cursor `AgentService` (`agent.v1.AgentService/Run`) request and duplex decode.
 //!
-//! Ports the AgentService half of `open-sse/executors/cursor.js`. Cursor retired `ChatService` for
+//! Ports the `AgentService` half of `open-sse/executors/cursor.js`. Cursor retired `ChatService` for
 //! plain-text turns; those now go to this endpoint. The wire is still Connect-RPC protobuf, so this
 //! module reuses [`super::protobuf`] rather than inventing a second codec.
 //!
@@ -22,7 +22,7 @@ use serde_json::Value;
 use super::protobuf::{self, Message, bytes_field, frame, put_bool, put_str};
 use super::request;
 
-/// RPC path Cursor's AgentService listens on.
+/// RPC path Cursor's `AgentService` listens on.
 pub const RUN_PATH: &str = "/agent.v1.AgentService/Run";
 
 /// `agent.v1.AgentClientMessage.run_request`.
@@ -69,7 +69,7 @@ const UPDATE_TEXT: u32 = 1;
 /// `InteractionUpdate.turn_ended`.
 const UPDATE_ENDED: u32 = 14;
 
-/// One event decoded from an AgentService server frame.
+/// One event decoded from an `AgentService` server frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// Assistant text, already UTF-8.
@@ -101,7 +101,7 @@ pub fn run_frame(body: &Value, message_id: &str) -> Vec<u8> {
     ))
 }
 
-/// The empty-context acknowledgement AgentService waits for before producing the answer.
+/// The empty-context acknowledgement `AgentService` waits for before producing the answer.
 pub fn context_ack() -> Vec<u8> {
     // agent.v1.RequestContextSuccess (empty) → RequestContextResult.success →
     // ExecClientMessage.request_context_result → AgentClientMessage.exec_client_message.
@@ -111,7 +111,7 @@ pub fn context_ack() -> Vec<u8> {
     frame(&bytes_field(CLIENT_EXEC, &exec))
 }
 
-/// Decode one AgentService *payload* (the Connect frame's inner protobuf) into zero or more events.
+/// Decode one `AgentService` *payload* (the Connect frame's inner protobuf) into zero or more events.
 pub fn decode_payload(payload: &[u8]) -> Vec<Event> {
     let server = Message::decode(payload);
     let mut events = Vec::new();
@@ -137,7 +137,7 @@ pub fn decode_payload(payload: &[u8]) -> Vec<Event> {
     events
 }
 
-/// Split a byte stream into AgentService events, returning leftover incomplete-frame bytes.
+/// Split a byte stream into `AgentService` events, returning leftover incomplete-frame bytes.
 pub fn decode_stream(buffer: &[u8]) -> (Vec<Event>, usize) {
     let (frames, consumed) = protobuf::frames(buffer);
     let mut events = Vec::new();
@@ -236,7 +236,7 @@ pub fn encode_text_delta(text: &str) -> Vec<u8> {
     frame(&bytes_field(SERVER_INTERACTION, &update))
 }
 
-/// Encode the mid-stream RequestContext ask.
+/// Encode the mid-stream `RequestContext` ask.
 pub fn encode_request_context() -> Vec<u8> {
     let exec = bytes_field(EXEC_SERVER_CONTEXT, &[]);
     frame(&bytes_field(SERVER_EXEC, &exec))

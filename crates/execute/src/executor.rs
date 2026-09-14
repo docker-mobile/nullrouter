@@ -143,11 +143,13 @@ impl PreparedRequest {
     ///
     /// The binary body when the provider has one, and the serialised JSON otherwise.
     pub fn payload(&self) -> Result<Vec<u8>, ExecuteError> {
-        match self.binary_body.as_ref() {
-            Some(bytes) => Ok(bytes.clone()),
-            None => serde_json::to_vec(&self.body)
-                .map_err(|error| ExecuteError::Serialize(error.to_string())),
-        }
+        self.binary_body.as_ref().map_or_else(
+            || {
+                serde_json::to_vec(&self.body)
+                    .map_err(|error| ExecuteError::Serialize(error.to_string()))
+            },
+            |bytes| Ok(bytes.clone()),
+        )
     }
 }
 

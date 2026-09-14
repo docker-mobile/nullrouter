@@ -1,4 +1,4 @@
-//! Request shaping for `codex`, the ChatGPT Codex backend.
+//! Request shaping for `codex`, the `ChatGPT` Codex backend.
 //!
 //! Unlike the other bespoke protocols this one *is* the Responses API, so the registry already routes
 //! it correctly and the generic executor can already talk to it. What it cannot do is satisfy the
@@ -331,29 +331,25 @@ fn apply_reasoning(out: &mut Map<String, Value>) {
         .and_then(Value::as_str)
         .map(str::to_owned);
 
-    match out.get("reasoning").and_then(Value::as_object).cloned() {
-        Some(mut reasoning) => {
-            let effort = reasoning
-                .get("effort")
-                .and_then(Value::as_str)
-                .unwrap_or("low");
-            reasoning.insert("effort".to_owned(), json!(normalise_effort(effort)));
-            if reasoning.get("summary").is_none() {
-                reasoning.insert("summary".to_owned(), json!("auto"));
-            }
-            out.insert("reasoning".to_owned(), Value::Object(reasoning));
+    if let Some(mut reasoning) = out.get("reasoning").and_then(Value::as_object).cloned() {
+        let effort = reasoning
+            .get("effort")
+            .and_then(Value::as_str)
+            .unwrap_or("low");
+        reasoning.insert("effort".to_owned(), json!(normalise_effort(effort)));
+        if reasoning.get("summary").is_none() {
+            reasoning.insert("summary".to_owned(), json!("auto"));
         }
-        None => {
-            // Explicit param, else the model suffix, else upstream's default.
-            let effort = param_effort
-                .clone()
-                .or(suffix_effort)
-                .unwrap_or_else(|| "low".to_owned());
-            out.insert(
-                "reasoning".to_owned(),
-                json!({ "effort": normalise_effort(&effort), "summary": "auto" }),
-            );
-        }
+        out.insert("reasoning".to_owned(), Value::Object(reasoning));
+    } else {
+        // Explicit param, else the model suffix, else upstream's default.
+        let effort = param_effort
+            .or(suffix_effort)
+            .unwrap_or_else(|| "low".to_owned());
+        out.insert(
+            "reasoning".to_owned(),
+            json!({ "effort": normalise_effort(&effort), "summary": "auto" }),
+        );
     }
     out.remove("reasoning_effort");
 

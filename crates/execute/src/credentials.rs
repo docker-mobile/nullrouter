@@ -192,10 +192,12 @@ fn runtime_transport_url(
     credentials: &Credentials,
 ) -> Option<String> {
     if let Some(base) = transport.base_url.as_deref() {
-        return Some(match transport.url_suffix.as_deref() {
-            Some(suffix) => format!("{base}{suffix}"),
-            None => base.to_owned(),
-        });
+        return Some(
+            transport
+                .url_suffix
+                .as_deref()
+                .map_or_else(|| base.to_owned(), |suffix| format!("{base}{suffix}")),
+        );
     }
 
     // No URL of its own: fall back to the primary transport's host, region-resolved.

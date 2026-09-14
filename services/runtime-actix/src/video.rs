@@ -313,32 +313,31 @@ impl Runtime {
             let credentials = match selection {
                 Selection::Selected(credentials) => *credentials,
                 Selection::NoCredentials { message } => {
-                    return self
-                        .video_fail(context, target, StatusCode::BAD_REQUEST, &message)
-                        .await;
+                    return self.video_fail(context, target, StatusCode::BAD_REQUEST, &message);
                 }
                 Selection::AllRateLimited {
                     retry_at_ms,
                     last_error,
                     last_error_code,
                 } => {
-                    return self
-                        .video_rate_limited(
-                            context,
-                            target,
-                            retry_at_ms,
-                            last.as_ref()
-                                .map(|(_, message)| message.clone())
-                                .or(last_error),
-                            last.as_ref().map(|(status, _)| *status).or(last_error_code),
-                        )
-                        .await;
+                    return self.video_rate_limited(
+                        context,
+                        target,
+                        retry_at_ms,
+                        last.as_ref()
+                            .map(|(_, message)| message.clone())
+                            .or(last_error),
+                        last.as_ref().map(|(status, _)| *status).or(last_error_code),
+                    );
                 }
                 Selection::Exhausted => break,
                 Selection::Unavailable { message } => {
-                    return self
-                        .video_fail(context, target, StatusCode::SERVICE_UNAVAILABLE, &message)
-                        .await;
+                    return self.video_fail(
+                        context,
+                        target,
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        &message,
+                    );
                 }
             };
 
@@ -457,8 +456,7 @@ impl Runtime {
                     status,
                     started,
                     error: Some(message.clone()),
-                })
-                .await;
+                });
                 // A transport failure on a creation POST may still have created the
                 // job upstream, so this is reported rather than retried anywhere.
                 let status_code = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -488,8 +486,7 @@ impl Runtime {
                 status,
                 started,
                 error: Some(message.clone()),
-            })
-            .await;
+            });
             self.cool_down_video(credentials, target, status, &message)
                 .await;
 
@@ -514,8 +511,7 @@ impl Runtime {
             status,
             started,
             error: None,
-        })
-        .await;
+        });
         self.clear_video_error(credentials, target).await;
 
         let status_code = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);

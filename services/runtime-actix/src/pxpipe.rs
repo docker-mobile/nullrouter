@@ -92,7 +92,7 @@ async fn start(runtime: web::Data<Runtime>) -> HttpResponse {
                 );
             }
             Ok(nullrouter_pxpipe::InstallOutcome::Failed { message }) => {
-                return refused_owned(StatusCode::BAD_GATEWAY, "INSTALL_FAILED", message);
+                return refused_owned(StatusCode::BAD_GATEWAY, "INSTALL_FAILED", &message);
             }
             Err(error) => {
                 tracing::warn!(%error, "pxpipe install task failed");
@@ -159,13 +159,13 @@ fn refused(status: StatusCode, code: &'static str, error: &'static str) -> HttpR
     )
 }
 
-fn refused_owned(status: StatusCode, code: &'static str, error: String) -> HttpResponse {
+fn refused_owned(status: StatusCode, code: &'static str, error: &str) -> HttpResponse {
     responses::json(
         status,
         &Refusal {
             success: false,
             code,
-            error: &error,
+            error,
         },
     )
 }
@@ -177,9 +177,10 @@ fn refused_owned(status: StatusCode, code: &'static str, error: String) -> HttpR
 /// neither. Collapsing them into one 500 would hide which.
 fn start_failure(error: &StartError) -> HttpResponse {
     let status = match error {
-        StartError::NotInstalled => StatusCode::CONFLICT,
-        StartError::NodeMissing | StartError::UnsupportedNode(_) => StatusCode::CONFLICT,
+        StartError::NotInstalled | StartError::NodeMissing | StartError::UnsupportedNode(_) => {
+            StatusCode::CONFLICT
+        }
         StartError::Failed(_) => StatusCode::BAD_GATEWAY,
     };
-    refused_owned(status, error.code(), error.to_string())
+    refused_owned(status, error.code(), &error.to_string())
 }

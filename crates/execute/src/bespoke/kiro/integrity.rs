@@ -24,7 +24,7 @@ pub(crate) enum Kind {
 }
 
 /// The instruction the reference appends for a given failure.
-pub(crate) fn instruction(kind: Kind) -> &'static str {
+pub(crate) const fn instruction(kind: Kind) -> &'static str {
     match kind {
         Kind::Ellipsis => {
             "Retry the previous response because it ended with only an ellipsis. Return the complete final answer, not only ... or …."
@@ -119,14 +119,11 @@ pub(crate) fn pick_after_repair(
     repaired: &str,
     repaired_tools: &[ToolCall],
 ) -> Outcome {
-    match inspect(repaired, repaired_tools) {
-        None => Outcome::UseRepaired,
-        Some(_still_bad) => {
-            let _ = original;
-            let _ = original_tools;
-            Outcome::KeepOriginal
-        }
-    }
+    inspect(repaired, repaired_tools).map_or(Outcome::UseRepaired, |_still_bad| {
+        let _ = original;
+        let _ = original_tools;
+        Outcome::KeepOriginal
+    })
 }
 
 /// Which answer to surface after the one allowed retry.

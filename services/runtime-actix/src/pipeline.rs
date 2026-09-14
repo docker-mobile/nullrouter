@@ -344,7 +344,7 @@ impl Runtime {
     ///
     /// Video jobs report no token usage — the provider bills per second of output —
     /// so the usage row carries the status and latency only.
-    pub(crate) async fn record_video(&self, outcome: &crate::video::VideoRecord<'_>) {
+    pub(crate) fn record_video(&self, outcome: &crate::video::VideoRecord<'_>) {
         let succeeded = (200..300).contains(&outcome.status);
         self.record(
             outcome.context,
@@ -397,18 +397,18 @@ impl Runtime {
     }
 
     /// [`Self::fail`], reachable from the video module.
-    pub(crate) async fn video_fail(
+    pub(crate) fn video_fail(
         &self,
         context: &ChatContext<'_>,
         target: &model::ModelTarget,
         status: StatusCode,
         message: &str,
     ) -> HttpResponse {
-        self.fail(context, target, status, message).await
+        self.fail(context, target, status, message)
     }
 
     /// [`Self::rate_limited`], reachable from the video module.
-    pub(crate) async fn video_rate_limited(
+    pub(crate) fn video_rate_limited(
         &self,
         context: &ChatContext<'_>,
         target: &model::ModelTarget,
@@ -417,7 +417,6 @@ impl Runtime {
         last_error_code: Option<u16>,
     ) -> HttpResponse {
         self.rate_limited(context, target, retry_at_ms, last_error, last_error_code)
-            .await
     }
 
     /// Enforce `requireApiKey` when state has it enabled.
@@ -525,15 +524,12 @@ impl Runtime {
             .await;
 
         match answers.len() {
-            0 => {
-                self.fail(
-                    context,
-                    first,
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "All fusion panel models failed",
-                )
-                .await
-            }
+            0 => self.fail(
+                context,
+                first,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "All fusion panel models failed",
+            ),
             // One answer is the answer. Re-running it through the normal path keeps
             // the client's streaming and tool settings, which the panel call dropped.
             1 => {
@@ -736,9 +732,7 @@ impl Runtime {
         if !is_executor_supported(&target.provider) {
             let message = unsupported_executor_message(&target.provider);
             return TargetOutcome::Failed {
-                response: self
-                    .fail(context, target, StatusCode::NOT_IMPLEMENTED, &message)
-                    .await,
+                response: self.fail(context, target, StatusCode::NOT_IMPLEMENTED, &message),
             };
         }
 
@@ -757,9 +751,7 @@ impl Runtime {
                 // exactly what the next model is for.
                 Selection::NoCredentials { message } => {
                     return TargetOutcome::Failed {
-                        response: self
-                            .fail(context, target, StatusCode::NOT_FOUND, &message)
-                            .await,
+                        response: self.fail(context, target, StatusCode::NOT_FOUND, &message),
                     };
                 }
                 Selection::AllRateLimited {
@@ -768,29 +760,30 @@ impl Runtime {
                     last_error_code,
                 } => {
                     return TargetOutcome::Failed {
-                        response: self
-                            .rate_limited(
-                                context,
-                                target,
-                                retry_at_ms,
-                                last_error
-                                    .as_ref()
-                                    .map(|(_, message)| message.clone())
-                                    .or(reported),
-                                last_error
-                                    .as_ref()
-                                    .map(|(status, _)| *status)
-                                    .or(last_error_code),
-                            )
-                            .await,
+                        response: self.rate_limited(
+                            context,
+                            target,
+                            retry_at_ms,
+                            last_error
+                                .as_ref()
+                                .map(|(_, message)| message.clone())
+                                .or(reported),
+                            last_error
+                                .as_ref()
+                                .map(|(status, _)| *status)
+                                .or(last_error_code),
+                        ),
                     };
                 }
                 Selection::Exhausted => break,
                 Selection::Unavailable { message } => {
                     return TargetOutcome::Failed {
-                        response: self
-                            .fail(context, target, StatusCode::SERVICE_UNAVAILABLE, &message)
-                            .await,
+                        response: self.fail(
+                            context,
+                            target,
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            &message,
+                        ),
                     };
                 }
             };
@@ -826,7 +819,7 @@ impl Runtime {
             last_error.unwrap_or_else(|| (503, "All provider accounts are unavailable".to_owned()));
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
         TargetOutcome::Failed {
-            response: self.fail(context, target, status, &message).await,
+            response: self.fail(context, target, status, &message),
         }
     }
 
@@ -932,20 +925,19 @@ impl Runtime {
         }
 
         let futures = targets.into_iter().map(|target| async move {
-            let models = match self.probes.get(&target.connection_id) {
-                Some(cached) => cached,
-                None => {
-                    let fresh = self
-                        .executor
-                        .probe_models(
-                            &target.provider,
-                            &target.credentials,
-                            nullrouter_execute::probe::DEFAULT_TIMEOUT,
-                        )
-                        .await;
-                    self.probes.put(&target.connection_id, &fresh);
-                    fresh
-                }
+            let models = if let Some(cached) = self.probes.get(&target.connection_id) {
+                cached
+            } else {
+                let fresh = self
+                    .executor
+                    .probe_models(
+                        &target.provider,
+                        &target.credentials,
+                        nullrouter_execute::probe::DEFAULT_TIMEOUT,
+                    )
+                    .await;
+                self.probes.put(&target.connection_id, &fresh);
+                fresh
             };
             match models {
                 Ok(models) => Some((
@@ -1007,9 +999,7 @@ impl Runtime {
                 target.provider,
                 service_label(kind)
             );
-            return self
-                .fail(&context, &target, StatusCode::NOT_IMPLEMENTED, &message)
-                .await;
+            return self.fail(&context, &target, StatusCode::NOT_IMPLEMENTED, &message);
         };
 
         let started = Instant::now();
@@ -1020,33 +1010,31 @@ impl Runtime {
         let credentials = match selection {
             Selection::Selected(credentials) => *credentials,
             Selection::NoCredentials { message } => {
-                return self
-                    .fail(&context, &target, StatusCode::NOT_FOUND, &message)
-                    .await;
+                return self.fail(&context, &target, StatusCode::NOT_FOUND, &message);
             }
             Selection::AllRateLimited {
                 retry_at_ms,
                 last_error,
                 last_error_code,
             } => {
-                return self
-                    .rate_limited(&context, &target, retry_at_ms, last_error, last_error_code)
-                    .await;
+                return self.rate_limited(
+                    &context,
+                    &target,
+                    retry_at_ms,
+                    last_error,
+                    last_error_code,
+                );
             }
             Selection::Exhausted => {
-                return self
-                    .fail(
-                        &context,
-                        &target,
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "All provider accounts are unavailable",
-                    )
-                    .await;
+                return self.fail(
+                    &context,
+                    &target,
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "All provider accounts are unavailable",
+                );
             }
             Selection::Unavailable { message } => {
-                return self
-                    .fail(&context, &target, StatusCode::SERVICE_UNAVAILABLE, &message)
-                    .await;
+                return self.fail(&context, &target, StatusCode::SERVICE_UNAVAILABLE, &message);
             }
         };
 
@@ -1108,7 +1096,7 @@ impl Runtime {
                 let status =
                     StatusCode::from_u16(error.client_status()).unwrap_or(StatusCode::BAD_GATEWAY);
                 let message = error.to_string();
-                self.fail(&context, &target, status, &message).await
+                self.fail(&context, &target, status, &message)
             }
         }
     }
@@ -1767,7 +1755,7 @@ impl Runtime {
     }
 
     /// Report a terminal failure, recording it as usage first.
-    async fn fail(
+    fn fail(
         &self,
         context: &ChatContext<'_>,
         target: &model::ModelTarget,
@@ -1788,7 +1776,7 @@ impl Runtime {
     }
 
     /// Report that every account is cooling down, with a retry hint.
-    async fn rate_limited(
+    fn rate_limited(
         &self,
         context: &ChatContext<'_>,
         target: &model::ModelTarget,
