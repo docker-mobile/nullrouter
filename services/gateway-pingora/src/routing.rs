@@ -1,6 +1,24 @@
 use crate::RouteKind;
 
 pub(crate) fn route_for_path(path: &str) -> RouteKind {
+    // Fast path: direct runtime inference routes represent the hot path
+    if path.starts_with("/v1/")
+        || path == "/v1"
+        || path.starts_with("/v1beta/")
+        || path == "/v1beta"
+    {
+        return RouteKind::Runtime;
+    }
+
+    // Fast path: all non-API routes fall through to the dashboard host immediately
+    let Some(api_subpath) = path.strip_prefix("/api") else {
+        return RouteKind::Dashboard;
+    };
+
+    if api_subpath.is_empty() {
+        return RouteKind::Api;
+    }
+
     if is_events_path(path) {
         RouteKind::Events
     } else if is_auth_path(path) {
@@ -11,10 +29,8 @@ pub(crate) fn route_for_path(path: &str) -> RouteKind {
         RouteKind::Catalog
     } else if is_state_path(path) {
         RouteKind::State
-    } else if is_api_path(path) {
-        RouteKind::Api
     } else {
-        RouteKind::Dashboard
+        RouteKind::Api
     }
 }
 
@@ -107,8 +123,4 @@ fn is_collection_or_item_except(path: &str, collection: &str, reserved_items: &[
         return false;
     };
     !tail.is_empty() && !tail.contains('/') && !reserved_items.contains(&tail)
-}
-
-fn is_api_path(path: &str) -> bool {
-    path == "/api" || path.starts_with("/api/")
 }

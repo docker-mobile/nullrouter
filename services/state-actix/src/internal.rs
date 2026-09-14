@@ -166,15 +166,16 @@ impl CredentialsResponse {
             connection_id: connection.id.clone(),
             connection_name: connection
                 .email
-                .clone()
+                .as_deref()
                 .filter(|email| !email.is_empty())
                 .unwrap_or_else(|| {
                     if connection.name.is_empty() {
-                        connection.id.clone()
+                        &connection.id
                     } else {
-                        connection.name.clone()
+                        &connection.name
                     }
-                }),
+                })
+                .to_owned(),
             api_key: connection.api_key.clone(),
             access_token: connection.access_token.clone(),
             refresh_token: connection.refresh_token.clone(),
@@ -699,23 +700,27 @@ async fn routing_context(store: web::Data<StateStore>) -> HttpResponse {
             .iter()
             .filter(|connection| connection.is_active)
             .map(|connection| {
-                let extra = connection
+                let prefix = connection
                     .provider_specific_data
-                    .clone()
+                    .as_ref()
+                    .and_then(|extra| extra.get("prefix"))
+                    .and_then(serde_json::Value::as_str);
+                let enabled_models = connection
+                    .provider_specific_data
+                    .as_ref()
+                    .and_then(|extra| extra.get("enabledModels"))
+                    .and_then(serde_json::Value::as_array)
+                    .map(|models| {
+                        models
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default();
                 json!({
                     "provider": connection.provider,
-                    "prefix": extra.get("prefix").and_then(serde_json::Value::as_str),
-                    "enabledModels": extra
-                        .get("enabledModels")
-                        .and_then(serde_json::Value::as_array)
-                        .map(|models| {
-                            models
-                                .iter()
-                                .filter_map(serde_json::Value::as_str)
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default(),
+                    "prefix": prefix,
+                    "enabledModels": enabled_models,
                 })
             })
             .collect();
