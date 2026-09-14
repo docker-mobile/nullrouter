@@ -303,7 +303,9 @@ pub(crate) async fn video_status(
 /// on a create is also accepted, so a client that simply echoes back what it
 /// received works without rewriting the name.
 fn preferred_connection(request: &HttpRequest) -> Option<&str> {
-    header_str(request, "x-connection-id").or_else(|| header_str(request, video::CONNECTION_HEADER))
+    header_str(request, "x-connection-id")
+        .or_else(|| header_str(request, video::CONNECTION_HEADER))
+        .or_else(|| header_str(request, video::LEGACY_CONNECTION_HEADER))
 }
 
 /// A request header as a string, when present and valid UTF-8.

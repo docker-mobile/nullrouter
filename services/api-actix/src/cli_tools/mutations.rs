@@ -33,7 +33,9 @@ use super::write;
 /// Only some tools need it — copilot, opencode, droid and grok-build — and it is a placeholder, not
 /// a credential: those tools reject an empty key outright, so they are given something
 /// syntactically valid to hold until a real key is applied.
-pub(crate) const PLACEHOLDER_KEY: &str = "sk_9router";
+pub(crate) const PLACEHOLDER_KEY: &str = "sk_nullrouter";
+#[allow(dead_code)]
+pub(crate) const LEGACY_PLACEHOLDER_KEY: &str = "sk_9router";
 
 /// The provider name this router registers itself under in every config it writes.
 ///
@@ -41,11 +43,13 @@ pub(crate) const PLACEHOLDER_KEY: &str = "sk_9router";
 /// what [`super::spec`]'s markers grep for, and it is already sitting in the config files of every
 /// user who set their tools up before switching. Renaming it makes this port stop recognising a
 /// configured tool, and makes each tool stop resolving the models written against it.
-pub(crate) const PROVIDER: &str = "9router";
+pub(crate) const PROVIDER: &str = "nullrouter";
+pub(crate) const LEGACY_PROVIDER: &str = "9router";
 
 /// The display name, capitalised differently from [`PROVIDER`] and matched just as exactly —
 /// copilot searches its config array for an entry whose `name` equals this. Also not renameable.
-pub(crate) const DISPLAY: &str = "9Router";
+pub(crate) const DISPLAY: &str = "NullRouter";
+pub(crate) const LEGACY_DISPLAY: &str = "9Router";
 
 /// One request body, covering every field any tool reads.
 ///
@@ -309,11 +313,13 @@ fn codex_config_apply(document: &mut Value, payload: &Payload) {
 /// The condition is upstream's and it is the right one: a user who has since pointed Codex at
 /// another provider must not have their `model` deleted by a revoke of ours.
 fn codex_config_revoke(document: &mut Value) {
-    if document.get("model_provider").and_then(Value::as_str) == Some(PROVIDER) {
+    let prov = document.get("model_provider").and_then(Value::as_str);
+    if prov == Some(PROVIDER) || prov == Some(LEGACY_PROVIDER) {
         write::remove_path(document, &["model"]);
         write::remove_path(document, &["model_provider"]);
     }
     write::remove_path(document, &["model_providers", PROVIDER]);
+    write::remove_path(document, &["model_providers", LEGACY_PROVIDER]);
     write::remove_path(document, &["agents", "subagent"]);
 }
 
@@ -509,7 +515,10 @@ fn copilot_apply(document: &mut Value, payload: &Payload) {
 
 fn copilot_revoke(document: &mut Value) {
     with_array(document, |entries| {
-        entries.retain(|entry| entry.get("name").and_then(Value::as_str) != Some(DISPLAY));
+        entries.retain(|entry| {
+            let n = entry.get("name").and_then(Value::as_str);
+            n != Some(DISPLAY) && n != Some(LEGACY_DISPLAY)
+        });
     });
 }
 
@@ -602,6 +611,7 @@ fn opencode_apply(document: &mut Value, payload: &Payload) {
 /// Removes the provider, and the selection only while it still names this provider.
 fn opencode_revoke(document: &mut Value) {
     write::remove_path(document, &["provider", PROVIDER]);
+    write::remove_path(document, &["provider", LEGACY_PROVIDER]);
     if is_qualified(document.get("model")) {
         write::remove_path(document, &["model"]);
     }
@@ -633,7 +643,8 @@ fn is_qualified(value: Option<&Value>) -> bool {
 /// The id prefix droid entries carry, built on [`DISPLAY`] and so equally fixed. Matched by
 /// **prefix**, not equality: the entries are `custom:9Router-0`, `-1`, and so on, so an equality
 /// test would miss every one of them.
-pub(crate) const DROID_ID_PREFIX: &str = "custom:9Router";
+pub(crate) const DROID_ID_PREFIX: &str = "custom:NullRouter";
+pub(crate) const LEGACY_DROID_ID_PREFIX: &str = "custom:9Router";
 
 /// Droid's own placeholder, which is **not** [`PLACEHOLDER_KEY`].
 ///
@@ -729,7 +740,7 @@ fn has_droid_prefix(model: &Value) -> bool {
     model
         .get("id")
         .and_then(Value::as_str)
-        .is_some_and(|id| id.starts_with(DROID_ID_PREFIX))
+        .is_some_and(|id| id.starts_with(DROID_ID_PREFIX) || id.starts_with(LEGACY_DROID_ID_PREFIX))
 }
 
 /// Drop an array-valued key once it is empty.
@@ -893,6 +904,7 @@ fn jcode_config_apply(document: &mut Value, payload: &Payload) {
 
 fn jcode_config_revoke(document: &mut Value) {
     write::remove_path(document, &["providers", PROVIDER]);
+    write::remove_path(document, &["providers", LEGACY_PROVIDER]);
 }
 
 fn jcode_env_apply(document: &mut Value, payload: &Payload) {
@@ -904,7 +916,8 @@ fn jcode_env_apply(document: &mut Value, payload: &Payload) {
 /// only the provider entry this revoke just deleted ever read it.
 fn jcode_env_revoke(document: &mut Value) {
     let text = document.as_str().unwrap_or_default();
-    *document = Value::String(write::remove_env(text, JCODE_KEY_VAR));
+    let intermediate = write::remove_env(text, JCODE_KEY_VAR);
+    *document = Value::String(write::remove_env(&intermediate, LEGACY_JCODE_KEY_VAR));
 }
 
 /// The env var jcode looks the key up in, named in the config's `api_key_env`.
@@ -912,11 +925,14 @@ fn jcode_env_revoke(document: &mut Value) {
 /// An external wire contract twice over: jcode reads this exact variable, and a config already on
 /// disk names this exact spelling. Renaming it leaves the old variable set in the user's `.env`
 /// forever, because revoke removes the name it knows.
-const JCODE_KEY_VAR: &str = "JCODE_9ROUTER_API_KEY";
+const JCODE_KEY_VAR: &str = "JCODE_NULLROUTER_API_KEY";
+const LEGACY_JCODE_KEY_VAR: &str = "JCODE_9ROUTER_API_KEY";
 
 /// The file jcode loads that variable from, named in the config's `env_file`. Fixed for the same
 /// reason as [`JCODE_KEY_VAR`]: an existing config points at this filename.
-const JCODE_ENV_FILE: &str = "provider-9router.env";
+const JCODE_ENV_FILE: &str = "provider-nullrouter.env";
+#[allow(dead_code)]
+const LEGACY_JCODE_ENV_FILE: &str = "provider-9router.env";
 
 // ---------------------------------------------------------------------------------------------
 // OpenClaw — ~/.openclaw/openclaw.json, plus a models.json per agent directory
@@ -1022,6 +1038,7 @@ fn openclaw_apply(document: &mut Value, payload: &Payload) {
 /// Removes the provider, its allowlist entries, and the selection while it still names us.
 fn openclaw_revoke(document: &mut Value) {
     write::remove_path(document, &["models", "providers", PROVIDER]);
+    write::remove_path(document, &["models", "providers", LEGACY_PROVIDER]);
     retain_unqualified(document);
     let primary_is_ours = document
         .get("agents")
@@ -1168,7 +1185,9 @@ const GROK_SUBAGENT_TYPES: &[&str] = &["general-purpose", "explore", "plan"];
 ///
 /// The spelling is fixed: it is written into the user's own config file and read back by a later
 /// revoke, so renaming it strands every marker already on disk.
-const GROK_UNSET_SENTINEL: &str = "__9router_unset__";
+const GROK_UNSET_SENTINEL: &str = "__nullrouter_unset__";
+#[allow(dead_code)]
+const LEGACY_GROK_UNSET_SENTINEL: &str = "__9router_unset__";
 
 /// Grok Build's own built-in default, restored when there is no remembered one.
 const GROK_BUILTIN_DEFAULT: &str = "grok-build";
@@ -1256,8 +1275,10 @@ fn grok_revoke(document: &mut Value) {
     for kind in GROK_SUBAGENT_TYPES {
         text = grok_restore_subagent(&text, kind);
         text = toml_text::remove_section(&text, &grok_section(&grok_slot(kind)));
+        text = toml_text::remove_section(&text, &format!("model.{LEGACY_PROVIDER}-{kind}"));
     }
     text = toml_text::remove_section(&text, &grok_section(GROK_MAIN_SLOT));
+    text = toml_text::remove_section(&text, &format!("model.{LEGACY_PROVIDER}"));
     text = grok_restore_default(&text);
     *document = Value::String(toml_text::collapse_blank_runs(&text));
 }
@@ -1311,11 +1332,13 @@ fn positive_whole_number(value: &Value) -> Option<u64> {
 /// Written into the user's `config.toml` and read back by a later revoke, so the spelling is fixed:
 /// rename it and every marker already on disk becomes unreadable, which means a revoke silently
 /// resets the user to Grok Build's built-in default instead of restoring their own choice.
-const GROK_PREV_DEFAULT: &str = "9router-prev-default";
+const GROK_PREV_DEFAULT: &str = "nullrouter-prev-default";
+#[allow(dead_code)]
+const LEGACY_GROK_PREV_DEFAULT: &str = "9router-prev-default";
 
 /// Per-subagent equivalents of [`GROK_PREV_DEFAULT`], fixed for the same reason.
 fn grok_prev_subagent(kind: &str) -> String {
-    format!("9router-prev-subagent-{kind}")
+    format!("nullrouter-prev-subagent-{kind}")
 }
 
 /// Records the current default, unless one is already recorded or it is already ours.
@@ -1343,9 +1366,8 @@ fn grok_restore_default(text: &str) -> String {
         .unwrap_or_else(|| GROK_BUILTIN_DEFAULT.to_owned());
     let mut next = toml_text::remove_marker(text, GROK_PREV_DEFAULT);
     // Only when the selection is still ours: a user who has since chosen another model keeps it.
-    if toml_text::get_field(&next, GROK_MODELS_SECTION, "default").as_deref()
-        == Some(GROK_MAIN_SLOT)
-    {
+    let cur = toml_text::get_field(&next, GROK_MODELS_SECTION, "default");
+    if cur.as_deref() == Some(GROK_MAIN_SLOT) || cur.as_deref() == Some(LEGACY_PROVIDER) {
         next = toml_text::set_field(&next, GROK_MODELS_SECTION, "default", &previous);
     }
     next

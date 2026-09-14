@@ -89,3 +89,15 @@ flamegraph.svg
 
 # Stylesheet toolchain. The generated app.css IS committed so the Rust build needs no Node.
 /apps/dashboard-leptos/node_modules/
+
+# oh-my-agent runtime (local artifacts — do not commit)
+.agents/oma-config.local.cue
+.agents/oma-config.local.yaml
+.antigravitycli/
+.agents/results/
+.agents/state/
+.agents/backup/
+docs/plans/
+.migration-backup/
+.qwen/tmp/
+.serena/

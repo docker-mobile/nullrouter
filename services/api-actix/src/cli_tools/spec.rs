@@ -25,7 +25,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use super::mutations::{DISPLAY, PROVIDER};
+use super::mutations::{DISPLAY, LEGACY_DISPLAY, LEGACY_PROVIDER, PROVIDER};
 
 /// The config file format, which decides how a merge is done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,7 +240,10 @@ pub(crate) enum Writable {
 /// user may have configured — a tool set up before switching has that string in its `baseUrl`, and
 /// failing to recognise it would report a configured tool as unconfigured.
 fn looks_like_router_url(url: &str) -> bool {
-    url.contains("localhost") || url.contains("127.0.0.1") || url.contains(PROVIDER)
+    url.contains("localhost")
+        || url.contains("127.0.0.1")
+        || url.contains(PROVIDER)
+        || url.contains(LEGACY_PROVIDER)
 }
 
 /// The other local-URL test, used by hermes and deepseek-tui.
@@ -319,7 +322,11 @@ pub(crate) const TOOLS: &[Tool] = &[
         marker: Marker::Json(|config| {
             config
                 .get("provider")
-                .and_then(|providers| providers.get(PROVIDER))
+                .and_then(|providers| {
+                    providers
+                        .get(PROVIDER)
+                        .or_else(|| providers.get(LEGACY_PROVIDER))
+                })
                 .is_some()
         }),
         writable: Writable::Yes,
@@ -367,7 +374,11 @@ pub(crate) const TOOLS: &[Tool] = &[
             settings
                 .get("models")
                 .and_then(|models| models.get("providers"))
-                .and_then(|providers| providers.get(PROVIDER))
+                .and_then(|providers| {
+                    providers
+                        .get(PROVIDER)
+                        .or_else(|| providers.get(LEGACY_PROVIDER))
+                })
                 .is_some()
         }),
         writable: Writable::Yes,
@@ -384,7 +395,7 @@ pub(crate) const TOOLS: &[Tool] = &[
         }),
         // Hermes' config is edited as text by block, so its marker reads text too: anywhere the
         // provider name appears in the YAML means an apply has been through it.
-        marker: Marker::Text(|text| text.contains(PROVIDER)),
+        marker: Marker::Text(|text| text.contains(PROVIDER) || text.contains(LEGACY_PROVIDER)),
         writable: Writable::Yes,
     },
     Tool {
@@ -433,9 +444,10 @@ pub(crate) const TOOLS: &[Tool] = &[
         // it for one named [`DISPLAY`] — the capitalised spelling, matched exactly.
         marker: Marker::Json(|config| {
             config.as_array().is_some_and(|entries| {
-                entries
-                    .iter()
-                    .any(|entry| entry.get("name").and_then(Value::as_str) == Some(DISPLAY))
+                entries.iter().any(|entry| {
+                    let name = entry.get("name").and_then(Value::as_str);
+                    name == Some(DISPLAY) || name == Some(LEGACY_DISPLAY)
+                })
             })
         }),
         writable: Writable::Yes,
@@ -474,7 +486,10 @@ pub(crate) const TOOLS: &[Tool] = &[
         // which release wrote it, and spells the URL key `baseUrl` or `baseURL` for the same reason.
         // All four combinations are live in the wild, so all four are accepted.
         marker: Marker::Json(|auth| {
-            let entry = auth.get("openai-compatible").or_else(|| auth.get(PROVIDER));
+            let entry = auth
+                .get("openai-compatible")
+                .or_else(|| auth.get(PROVIDER))
+                .or_else(|| auth.get(LEGACY_PROVIDER));
             entry.is_some_and(|entry| {
                 let url = match entry.get("baseUrl").and_then(Value::as_str) {
                     Some(url) => url.to_owned(),
@@ -532,6 +547,7 @@ pub(crate) const TOOLS: &[Tool] = &[
                 return false;
             };
             providers.contains_key(PROVIDER)
+                || providers.contains_key(LEGACY_PROVIDER)
                 || providers
                     .values()
                     .any(|provider| string_at(provider, &["base_url"]).contains("localhost:20128"))
@@ -556,6 +572,7 @@ pub(crate) const TOOLS: &[Tool] = &[
         // only because an apply wrote it, so its presence already carries the answer.
         marker: Marker::Json(|config| {
             !string_at(config, &["model", PROVIDER, "base_url"]).is_empty()
+                || !string_at(config, &["model", LEGACY_PROVIDER, "base_url"]).is_empty()
         }),
         writable: Writable::Yes,
     },

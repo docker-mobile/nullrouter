@@ -40,7 +40,8 @@ const DEFAULT_VIDEO_PROVIDER: &str = "xai";
 /// captured it from an earlier response has to find the same name on the next one. Renaming it
 /// breaks every existing client mid-job. The shorter `x-connection-id` is also accepted inbound,
 /// because some clients send that instead.
-pub(crate) const CONNECTION_HEADER: &str = "x-9router-connection-id";
+pub(crate) const CONNECTION_HEADER: &str = "x-nullrouter-connection-id";
+pub(crate) const LEGACY_CONNECTION_HEADER: &str = "x-9router-connection-id";
 
 /// Which creation failures may be retried against another account.
 ///

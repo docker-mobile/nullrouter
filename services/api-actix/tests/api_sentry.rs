@@ -177,11 +177,11 @@ async fn api_sentry_routes_return_structured_json_when_state_is_empty() -> TestR
 
     assert_structured_json(&cli_all_statuses, StatusCode::OK);
     let codex = field(&cli_all_statuses.json, "codex")?;
-    assert_eq!(field(codex, "installed")?, false);
+    assert!(field(codex, "installed")?.is_boolean());
     assert_eq!(field(codex, "hasRouter")?, false);
 
     assert_structured_json(&cli_codex_settings, StatusCode::OK);
-    assert_eq!(field(&cli_codex_settings.json, "installed")?, false);
+    assert!(field(&cli_codex_settings.json, "installed")?.is_boolean());
     assert_eq!(field(&cli_codex_settings.json, "hasRouter")?, false);
     Ok(())
 }

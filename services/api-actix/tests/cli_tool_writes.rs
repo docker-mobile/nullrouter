@@ -188,7 +188,7 @@ const HERMES_CONFIG: &str = ".hermes/config.yaml";
 const HERMES_ENV: &str = ".hermes/.env";
 const DEEPSEEK_CONFIG: &str = ".deepseek/config.toml";
 const JCODE_CONFIG: &str = ".jcode/config.toml";
-const JCODE_ENV: &str = ".config/jcode/provider-9router.env";
+const JCODE_ENV: &str = ".config/jcode/provider-nullrouter.env";
 const OPENCLAW_SETTINGS: &str = ".openclaw/openclaw.json";
 const GROK_CONFIG: &str = ".grok/config.toml";
 const COWORK_META: &str = ".config/Claude/configLibrary/_meta.json";
@@ -349,8 +349,11 @@ async fn a_codex_apply_writes_both_the_config_and_the_credential() -> TestResult
     // A config written without the second file leaves Codex pointing here with nothing to
     // authenticate with, which is why both are `Required::Yes`.
     let config = home.read(CODEX_CONFIG);
-    assert!(config.contains(r#"model_provider = "9router""#), "{config}");
-    assert!(config.contains("[model_providers.9router]"), "{config}");
+    assert!(
+        config.contains(r#"model_provider = "nullrouter""#),
+        "{config}"
+    );
+    assert!(config.contains("[model_providers.nullrouter]"), "{config}");
     assert!(
         config.contains(r#"base_url = "http://127.0.0.1:20128/v1""#),
         "the /v1 suffix codex needs: {config}"
@@ -382,7 +385,7 @@ async fn a_codex_revoke_keeps_a_model_the_user_repointed_elsewhere() -> TestResu
     home.seed(
         CODEX_CONFIG,
         "model = \"gpt-5\"\nmodel_provider = \"openai\"\n\n\
-         [model_providers.9router]\nbase_url = \"http://127.0.0.1:20128/v1\"\n",
+         [model_providers.nullrouter]\nbase_url = \"http://127.0.0.1:20128/v1\"\n",
     );
 
     // When: the revoke runs.
@@ -392,7 +395,7 @@ async fn a_codex_revoke_keeps_a_model_the_user_repointed_elsewhere() -> TestResu
     // Then: our section is gone but their model selection is untouched. Deleting `model` here
     // would break a Codex the user had working.
     let config = home.read(CODEX_CONFIG);
-    assert!(!config.contains("model_providers.9router"), "{config}");
+    assert!(!config.contains("model_providers.nullrouter"), "{config}");
     assert!(config.contains(r#"model = "gpt-5""#), "{config}");
     assert!(config.contains(r#"model_provider = "openai""#), "{config}");
     Ok(())
@@ -402,7 +405,7 @@ async fn a_codex_revoke_keeps_a_model_the_user_repointed_elsewhere() -> TestResu
 async fn a_codex_revoke_unlinks_an_auth_file_it_emptied() -> TestResult {
     // Given: an `auth.json` holding nothing but what an apply put there.
     let home = HomeGuard::new();
-    home.seed(CODEX_CONFIG, "model_provider = \"9router\"\n");
+    home.seed(CODEX_CONFIG, "model_provider = \"nullrouter\"\n");
     home.seed(
         CODEX_AUTH,
         r#"{"OPENAI_API_KEY": "sk-codex", "auth_mode": "apikey"}"#,
@@ -425,7 +428,7 @@ async fn a_codex_revoke_unlinks_an_auth_file_it_emptied() -> TestResult {
 async fn a_codex_revoke_keeps_an_auth_file_holding_a_chatgpt_login() -> TestResult {
     // Given: an `auth.json` that also holds tokens from a ChatGPT login.
     let home = HomeGuard::new();
-    home.seed(CODEX_CONFIG, "model_provider = \"9router\"\n");
+    home.seed(CODEX_CONFIG, "model_provider = \"nullrouter\"\n");
     home.seed(
         CODEX_AUTH,
         r#"{"OPENAI_API_KEY": "sk-codex", "auth_mode": "apikey", "tokens": {"id": "keep"}}"#,
@@ -534,7 +537,7 @@ async fn kilo_writes_its_own_auth_and_vs_codes_settings() -> TestResult {
     // Then: VS Code's dotted keys are written as single keys, not as a nested object. Nesting
     // would produce `{"kilocode": {"customProvider": ...}}`, which the extension does not read.
     let vscode = home.read_json(VSCODE_SETTINGS);
-    assert_eq!(vscode["kilocode.customProvider"]["name"], "9Router");
+    assert_eq!(vscode["kilocode.customProvider"]["name"], "NullRouter");
     // `baseURL` here, against `baseUrl` in auth.json — the extension's own spelling.
     assert_eq!(
         vscode["kilocode.customProvider"]["baseURL"],
@@ -575,12 +578,12 @@ async fn copilot_is_written_as_a_top_level_array_with_the_azure_fragment() -> Te
 
     let ours = &entries[1];
     assert_eq!(
-        ours["name"], "9Router",
+        ours["name"], "NullRouter",
         "the capitalisation copilot matches on"
     );
     assert_eq!(ours["vendor"], "azure");
     // The key is defaulted, not required.
-    assert_eq!(ours["apiKey"], "sk_9router");
+    assert_eq!(ours["apiKey"], "sk_nullrouter");
     // The endpoint carries the Azure dialect fragment and takes **no** `/v1`. Normalising this
     // URL would break the one copilot builds from it.
     assert_eq!(
@@ -618,7 +621,10 @@ async fn a_second_copilot_apply_replaces_its_entry_rather_than_appending() -> Te
     assert_eq!(entries[0]["models"][0]["id"], "b");
 
     // And a revoke takes only ours, leaving a non-empty file as an array.
-    home.seed(COPILOT_MODELS, r#"[{"name": "mine"}, {"name": "9Router"}]"#);
+    home.seed(
+        COPILOT_MODELS,
+        r#"[{"name": "mine"}, {"name": "NullRouter"}]"#,
+    );
     revoke("copilot-settings").await?;
     let config = home.read_json(COPILOT_MODELS);
     assert_eq!(config.as_array().map(Vec::len), Some(1), "{config}");
@@ -632,7 +638,7 @@ async fn opencode_keeps_the_npm_client_and_models_a_previous_apply_wrote() -> Te
     let home = HomeGuard::new();
     home.seed(
         OPENCODE_CONFIG,
-        r#"{"provider": {"9router": {"npm": "@ai-sdk/openai-compatible",
+        r#"{"provider": {"nullrouter": {"npm": "@ai-sdk/openai-compatible",
              "options": {"custom": "keep"}, "models": {"old/model": {"name": "old/model"}}}},
              "theme": "mine"}"#,
     );
@@ -648,7 +654,7 @@ async fn opencode_keeps_the_npm_client_and_models_a_previous_apply_wrote() -> Te
     // Then: the npm client survives — opencode loads its client from that key, so losing it
     // leaves a provider it cannot instantiate.
     let config = home.read_json(OPENCODE_CONFIG);
-    let provider = &config["provider"]["9router"];
+    let provider = &config["provider"]["nullrouter"];
     assert_eq!(provider["npm"], "@ai-sdk/openai-compatible");
     // And so does the earlier model, alongside the new one.
     assert_eq!(provider["models"]["old/model"]["name"], "old/model");
@@ -656,9 +662,9 @@ async fn opencode_keeps_the_npm_client_and_models_a_previous_apply_wrote() -> Te
     // Unrelated options are merged, not replaced.
     assert_eq!(provider["options"]["custom"], "keep");
     assert_eq!(provider["options"]["baseURL"], "http://127.0.0.1:20128/v1");
-    assert_eq!(provider["options"]["apiKey"], "sk_9router");
+    assert_eq!(provider["options"]["apiKey"], "sk_nullrouter");
     // The selection is qualified with the provider name.
-    assert_eq!(config["model"], "9router/new/model");
+    assert_eq!(config["model"], "nullrouter/new/model");
     assert_eq!(config["agent"]["explorer"]["mode"], "subagent");
     assert_eq!(config["theme"], "mine");
     Ok(())
@@ -681,7 +687,7 @@ async fn an_empty_active_model_clears_the_opencode_selection() -> TestResult {
     let config = home.read_json(OPENCODE_CONFIG);
     assert_eq!(config["model"], "", "{config}");
     assert!(
-        config["provider"]["9router"]["models"]["a"].is_object(),
+        config["provider"]["nullrouter"]["models"]["a"].is_object(),
         "{config}"
     );
 
@@ -691,7 +697,7 @@ async fn an_empty_active_model_clears_the_opencode_selection() -> TestResult {
         &json!({"baseUrl": "http://x", "models": ["a", "b"]}),
     )
     .await?;
-    assert_eq!(home.read_json(OPENCODE_CONFIG)["model"], "9router/a");
+    assert_eq!(home.read_json(OPENCODE_CONFIG)["model"], "nullrouter/a");
     Ok(())
 }
 
@@ -701,7 +707,7 @@ async fn an_opencode_revoke_leaves_a_selection_pointing_elsewhere() -> TestResul
     let home = HomeGuard::new();
     home.seed(
         OPENCODE_CONFIG,
-        r#"{"provider": {"9router": {"models": {}}, "other": {}}, "model": "anthropic/opus"}"#,
+        r#"{"provider": {"nullrouter": {"models": {}}, "other": {}}, "model": "anthropic/opus"}"#,
     );
 
     // When: the revoke runs.
@@ -710,7 +716,7 @@ async fn an_opencode_revoke_leaves_a_selection_pointing_elsewhere() -> TestResul
     // Then: our provider is gone and their selection is not. Clearing `model` here would leave
     // opencode with no model chosen because of a revoke of a provider it was not using.
     let config = home.read_json(OPENCODE_CONFIG);
-    assert!(config["provider"]["9router"].is_null(), "{config}");
+    assert!(config["provider"]["nullrouter"].is_null(), "{config}");
     assert_eq!(config["model"], "anthropic/opus");
     assert!(config["provider"]["other"].is_object(), "{config}");
     Ok(())
@@ -749,11 +755,11 @@ async fn droid_ids_are_indexed_and_the_default_is_moved_to_the_front() -> TestRe
         assert_eq!(model["index"], position, "{settings}");
     }
     // Ids are prefixed and numbered. `spec`'s marker matches this by prefix; an equality test
-    // against `custom:9Router` would match none of them.
+    // against `custom:NullRouter` would match none of them.
     let ours: Vec<&str> = models
         .iter()
         .filter_map(|model| model["id"].as_str())
-        .filter(|id| id.starts_with("custom:9Router"))
+        .filter(|id| id.starts_with("custom:NullRouter"))
         .collect();
     assert_eq!(ours.len(), 3, "{settings}");
     // The user's own model and other settings survived.
@@ -768,7 +774,7 @@ async fn droid_ids_are_indexed_and_the_default_is_moved_to_the_front() -> TestRe
         .find(|model| {
             model["id"]
                 .as_str()
-                .is_some_and(|id| id.starts_with("custom:9Router"))
+                .is_some_and(|id| id.starts_with("custom:NullRouter"))
         })
         .and_then(|model| model["apiKey"].as_str());
     assert_eq!(placeholder, Some("your_api_key"), "{settings}");
@@ -793,7 +799,7 @@ async fn a_droid_reapply_replaces_its_entries_rather_than_stacking_them() -> Tes
     .await?;
 
     // Then: the two dropped models are gone. Matching by prefix is what makes this work; an
-    // equality match would leave `custom:9Router-1` and `-2` behind forever.
+    // equality match would leave `custom:NullRouter-1` and `-2` behind forever.
     let settings = home.read_json(DROID_SETTINGS);
     assert_eq!(
         settings["customModels"].as_array().map(Vec::len),
@@ -917,7 +923,7 @@ async fn deepseek_is_merged_rather_than_overwritten() -> TestResult {
     // The provider name appears nowhere in a deepseek config, which is why `spec`'s marker tests the
     // provider field and URL rather than grepping for a name.
     assert_eq!(
-        config.matches("9router").count(),
+        config.matches("nullrouter").count(),
         1,
         "only the placeholder key: {config}"
     );
@@ -970,11 +976,11 @@ async fn jcode_points_at_an_env_file_it_also_writes() -> TestResult {
     // nothing sets, and `requires_api_key` makes it fail rather than send an unauthenticated call.
     let config = home.read(JCODE_CONFIG);
     assert!(
-        config.contains(r#"api_key_env = "JCODE_9ROUTER_API_KEY""#),
+        config.contains(r#"api_key_env = "JCODE_NULLROUTER_API_KEY""#),
         "{config}"
     );
     assert!(
-        config.contains(r#"env_file = "provider-9router.env""#),
+        config.contains(r#"env_file = "provider-nullrouter.env""#),
         "{config}"
     );
     assert!(
@@ -988,17 +994,17 @@ async fn jcode_points_at_an_env_file_it_also_writes() -> TestResult {
     );
     assert!(
         home.read(JCODE_ENV)
-            .contains("JCODE_9ROUTER_API_KEY=sk-jcode")
+            .contains("JCODE_NULLROUTER_API_KEY=sk-jcode")
     );
 
     // And a revoke takes both, since this variable name is ours and nothing else reads it.
     revoke("jcode-settings").await?;
     assert!(
-        !home.read(JCODE_CONFIG).contains("9router"),
+        !home.read(JCODE_CONFIG).contains("nullrouter"),
         "{}",
         home.read(JCODE_CONFIG)
     );
-    assert!(!home.read(JCODE_ENV).contains("JCODE_9ROUTER_API_KEY"));
+    assert!(!home.read(JCODE_ENV).contains("JCODE_NULLROUTER_API_KEY"));
     Ok(())
 }
 
@@ -1022,7 +1028,7 @@ async fn openclaw_writes_the_provider_the_selection_and_the_allowlist() -> TestR
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let settings = home.read_json(OPENCLAW_SETTINGS);
-    let provider = &settings["models"]["providers"]["9router"];
+    let provider = &settings["models"]["providers"]["nullrouter"];
     assert_eq!(provider["baseUrl"], "http://127.0.0.1:20128/v1");
     assert_eq!(provider["api"], "openai-completions");
     assert_eq!(provider["models"][0]["id"], "cc/opus");
@@ -1031,10 +1037,10 @@ async fn openclaw_writes_the_provider_the_selection_and_the_allowlist() -> TestR
     // The selection and the allowlist are both qualified with the provider name.
     assert_eq!(
         settings["agents"]["defaults"]["model"]["primary"],
-        "9router/cc/opus"
+        "nullrouter/cc/opus"
     );
     assert!(
-        settings["agents"]["defaults"]["models"]["9router/cc/opus"].is_object(),
+        settings["agents"]["defaults"]["models"]["nullrouter/cc/opus"].is_object(),
         "the allowlist gates the selection: {settings}"
     );
     Ok(())
@@ -1047,7 +1053,7 @@ async fn a_reapply_clears_stale_openclaw_allowlist_entries() -> TestResult {
     let home = HomeGuard::new();
     home.seed(
         OPENCLAW_SETTINGS,
-        r#"{"agents": {"defaults": {"models": {"9router/old": {}, "anthropic/opus": {}}}}}"#,
+        r#"{"agents": {"defaults": {"models": {"nullrouter/old": {}, "anthropic/opus": {}}}}}"#,
     );
 
     // When: a new apply names a different model.
@@ -1060,8 +1066,8 @@ async fn a_reapply_clears_stale_openclaw_allowlist_entries() -> TestResult {
     // Then: the stale entry is gone and the unrelated one is not. Leaving an old qualified model
     // behind would keep allowing a model the provider no longer serves.
     let models = &home.read_json(OPENCLAW_SETTINGS)["agents"]["defaults"]["models"];
-    assert!(models["9router/old"].is_null(), "{models}");
-    assert!(models["9router/new"].is_object(), "{models}");
+    assert!(models["nullrouter/old"].is_null(), "{models}");
+    assert!(models["nullrouter/new"].is_object(), "{models}");
     assert!(
         models["anthropic/opus"].is_object(),
         "the user's entry: {models}"
@@ -1076,9 +1082,9 @@ async fn an_openclaw_revoke_leaves_an_agent_pointed_at_another_provider() -> Tes
     let home = HomeGuard::new();
     home.seed(
         OPENCLAW_SETTINGS,
-        r#"{"models": {"providers": {"9router": {}}},
-            "agents": {"defaults": {"model": {"primary": "9router/a"}},
-            "list": [{"id": "one", "model": {"primary": "9router/a"}},
+        r#"{"models": {"providers": {"nullrouter": {}}},
+            "agents": {"defaults": {"model": {"primary": "nullrouter/a"}},
+            "list": [{"id": "one", "model": {"primary": "nullrouter/a"}},
                      {"id": "two", "model": "anthropic/opus"}]}}"#,
     );
 
@@ -1088,7 +1094,7 @@ async fn an_openclaw_revoke_leaves_an_agent_pointed_at_another_provider() -> Tes
     // Then: ours is cleared in both forms of the field, and theirs is untouched.
     let settings = home.read_json(OPENCLAW_SETTINGS);
     assert!(
-        settings["models"]["providers"]["9router"].is_null(),
+        settings["models"]["providers"]["nullrouter"].is_null(),
         "{settings}"
     );
     assert!(
@@ -1139,11 +1145,11 @@ async fn a_per_agent_models_file_is_written_only_into_a_directory_that_exists() 
     // default.
     let models: Value = serde_json::from_str(&std::fs::read_to_string(real.join("models.json"))?)?;
     assert_eq!(
-        models["providers"]["9router"]["models"][0]["id"],
+        models["providers"]["nullrouter"]["models"][0]["id"],
         "cc/sonnet"
     );
     assert_eq!(
-        models["providers"]["9router"]["baseUrl"],
+        models["providers"]["nullrouter"]["baseUrl"],
         "http://127.0.0.1:20128/v1"
     );
 
@@ -1187,7 +1193,7 @@ async fn grok_remembers_the_users_previous_default_across_a_revoke() -> TestResu
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let applied = home.read(GROK_CONFIG);
-    assert!(applied.contains("[model.9router]"), "{applied}");
+    assert!(applied.contains("[model.nullrouter]"), "{applied}");
     assert!(
         applied.contains(r#"base_url = "http://127.0.0.1:20128/v1""#),
         "{applied}"
@@ -1197,10 +1203,10 @@ async fn grok_remembers_the_users_previous_default_across_a_revoke() -> TestResu
         "{applied}"
     );
     assert!(applied.contains("context_window = 200000"), "{applied}");
-    assert!(applied.contains(r#"default = "9router""#), "{applied}");
+    assert!(applied.contains(r#"default = "nullrouter""#), "{applied}");
     // The previous choice is recorded in a comment, which is why this file is edited as text.
     assert!(
-        applied.contains(r#"# 9router-prev-default = "grok-4""#),
+        applied.contains(r#"# nullrouter-prev-default = "grok-4""#),
         "{applied}"
     );
     // The user's own content is still there.
@@ -1216,9 +1222,9 @@ async fn grok_remembers_the_users_previous_default_across_a_revoke() -> TestResu
         reverted.contains(r#"default = "grok-4""#),
         "the user's own default must come back, not grok-build's: {reverted}"
     );
-    assert!(!reverted.contains("[model.9router]"), "{reverted}");
+    assert!(!reverted.contains("[model.nullrouter]"), "{reverted}");
     assert!(
-        !reverted.contains("9router-prev-default"),
+        !reverted.contains("nullrouter-prev-default"),
         "the marker is consumed: {reverted}"
     );
     assert!(reverted.contains("theme = \"dark\""), "{reverted}");
@@ -1240,7 +1246,7 @@ async fn a_second_grok_apply_does_not_overwrite_the_remembered_default() -> Test
     // Then: the marker still holds their model, and a revoke restores it.
     assert!(
         home.read(GROK_CONFIG)
-            .contains(r#"# 9router-prev-default = "grok-4""#),
+            .contains(r#"# nullrouter-prev-default = "grok-4""#),
         "{}",
         home.read(GROK_CONFIG)
     );
@@ -1259,7 +1265,7 @@ async fn a_grok_revoke_with_nothing_remembered_uses_the_builtin_default() -> Tes
     )
     .await?;
     // No marker, because there was no previous value to remember.
-    assert!(!home.read(GROK_CONFIG).contains("9router-prev-default"));
+    assert!(!home.read(GROK_CONFIG).contains("nullrouter-prev-default"));
 
     // When: the revoke runs.
     revoke("grok-build-settings").await?;
@@ -1293,13 +1299,13 @@ async fn grok_subagent_slots_restore_an_unset_key_by_deleting_it() -> TestResult
     )
     .await?;
     let applied = home.read(GROK_CONFIG);
-    assert!(applied.contains("[model.9router-explore]"), "{applied}");
+    assert!(applied.contains("[model.nullrouter-explore]"), "{applied}");
     assert!(
-        applied.contains(r#"explore = "9router-explore""#),
+        applied.contains(r#"explore = "nullrouter-explore""#),
         "{applied}"
     );
     // The sentinel records that there was nothing there before.
-    assert!(applied.contains("__9router_unset__"), "{applied}");
+    assert!(applied.contains("__nullrouter_unset__"), "{applied}");
 
     revoke("grok-build-settings").await?;
 
@@ -1309,8 +1315,11 @@ async fn grok_subagent_slots_restore_an_unset_key_by_deleting_it() -> TestResult
         !reverted.contains("explore ="),
         "the key must be deleted: {reverted}"
     );
-    assert!(!reverted.contains("[model.9router-explore]"), "{reverted}");
-    assert!(!reverted.contains("__9router_unset__"), "{reverted}");
+    assert!(
+        !reverted.contains("[model.nullrouter-explore]"),
+        "{reverted}"
+    );
+    assert!(!reverted.contains("__nullrouter_unset__"), "{reverted}");
     Ok(())
 }
 
