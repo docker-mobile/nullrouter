@@ -28,7 +28,7 @@ serde_json.workspace = true
 
 [[bin]]
 name = "mock-mcp-server"
-path = "tests/mock_mcp_server.rs"
+path = "tests/bin/mock_mcp_server.rs"
 
 [dev-dependencies]
 futures-util.workspace = true

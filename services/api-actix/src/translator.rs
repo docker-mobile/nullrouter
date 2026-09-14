@@ -38,6 +38,7 @@ struct SendRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TranslateRequest {
     step: Option<u8>,
     body: Option<serde_json::Value>,
@@ -60,12 +61,14 @@ struct SuccessResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 struct TranslateResponse {
     success: bool,
     result: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
+#[allow(dead_code)]
 struct ConsoleLogs {
     success: bool,
     logs: &'static [serde_json::Value],

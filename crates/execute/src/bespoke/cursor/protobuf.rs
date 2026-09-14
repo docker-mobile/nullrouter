@@ -163,6 +163,7 @@ impl Message {
     ///
     /// Needed for repeated protobuf fields (`messages`, history entries). `get` would hide every
     /// value after the first.
+    #[allow(dead_code)]
     pub(crate) fn all(&self, field: u32) -> impl Iterator<Item = &FieldValue> {
         self.fields
             .iter()

@@ -21,7 +21,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::process::{Child, ChildStdin};
 use tokio::sync::{Mutex, mpsc};
 
 use super::plugins::Plugin;
@@ -111,21 +111,25 @@ impl Listener {
     }
 
     /// Mutable access to the frame channel, for a caller polling it inside its own stream.
+    #[allow(dead_code)]
     pub(crate) fn frames_mut(&mut self) -> &mut mpsc::Receiver<String> {
         &mut self.frames
     }
 
     /// Which plugin this listener is attached to.
+    #[allow(dead_code)]
     pub(crate) const fn plugin(&self) -> &'static str {
         self.plugin
     }
 
     /// The bridge this listener came from, so a caller can detach on its own schedule.
+    #[allow(dead_code)]
     pub(crate) fn bridge(&self) -> Bridge {
         self.bridge.clone()
     }
 
     /// This listener's id, needed to detach it.
+    #[allow(dead_code)]
     pub(crate) const fn id(&self) -> u64 {
         self.id
     }
@@ -138,6 +142,7 @@ impl Listener {
 
 impl Bridge {
     /// Whether a child is currently running for this plugin.
+    #[allow(dead_code)]
     pub(crate) async fn is_running(&self, plugin: &str) -> bool {
         self.sessions.lock().await.contains_key(plugin)
     }
@@ -310,13 +315,15 @@ where
 
 /// A stdout reader wired to a fresh listener map, for tests that need the pump without a child.
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn test_listeners() -> Listeners {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
 /// Pump a child's stdout, exposed so a test can supply its own `ChildStdout`.
 #[cfg(test)]
-pub(crate) async fn pump_child_stdout(stdout: ChildStdout, listeners: Listeners) {
+#[allow(dead_code)]
+pub(crate) async fn pump_child_stdout(stdout: tokio::process::ChildStdout, listeners: Listeners) {
     pump(BufReader::new(stdout), listeners).await;
 }
 

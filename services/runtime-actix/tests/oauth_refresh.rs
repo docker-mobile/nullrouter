@@ -154,7 +154,7 @@ async fn serve(
         .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
         .map(|(_, value)| value.trim().to_owned())
         .unwrap_or_default();
-    let body = raw.get(head_end..).unwrap_or_default().to_owned();
+    let _body = raw.get(head_end..).unwrap_or_default().to_owned();
     if let Ok(mut sink) = seen.lock() {
         sink.push(Seen {
             path: path.clone(),

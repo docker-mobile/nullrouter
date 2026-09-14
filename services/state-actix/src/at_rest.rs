@@ -215,7 +215,7 @@ impl Drop for KeyGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{AtRestError, KEY_VAR, KeyGuard as Key, MAGIC, is_sealed, open, seal};
+    use super::{AtRestError, KeyGuard as Key, MAGIC, is_sealed, open, seal};
 
     const SECRET: &[u8] = br#"{"apiKeys":[{"key":"sk-live-do-not-leak-this"}]}"#;
 

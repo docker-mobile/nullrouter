@@ -120,8 +120,7 @@ pub fn install_with_default_filter(service: &'static str, default_filter: &str) 
 /// `NULLROUTER_LOG_FORMAT=json`.
 fn json_requested() -> bool {
     std::env::var("NULLROUTER_LOG_FORMAT")
-        .map(|value| value.trim().eq_ignore_ascii_case("json"))
-        .unwrap_or(false)
+        .is_ok_and(|value| value.trim().eq_ignore_ascii_case("json"))
 }
 
 /// The state service's address, from the same variable the other services read.
@@ -268,7 +267,8 @@ impl Message {
         if !self.text.is_empty() {
             self.text.push(' ');
         }
-        self.text.push_str(&format!("{}={rendered}", field.name()));
+        use std::fmt::Write as _;
+        let _ = write!(self.text, "{}={rendered}", field.name());
     }
 }
 
@@ -289,11 +289,10 @@ async fn drain(
     mut receiver: mpsc::Receiver<Line>,
     dropped: Arc<AtomicU64>,
 ) {
-    let client = match reqwest::Client::builder().timeout(POST_TIMEOUT).build() {
-        Ok(client) => client,
+    let Ok(client) = reqwest::Client::builder().timeout(POST_TIMEOUT).build() else {
         // Nothing to log this to that would not go through the layer that just failed to get a
         // client, so the task ends rather than spinning.
-        Err(_) => return,
+        return;
     };
     let mut batch: Vec<Line> = Vec::with_capacity(MAX_BATCH_LINES);
 

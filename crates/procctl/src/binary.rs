@@ -105,9 +105,7 @@ pub const DISCOVERY_VAR: &str = "NULLROUTER_BINARY_DISCOVERY";
 
 /// Whether scanning [`BinarySpec::candidates`] and [`BinarySpec::search_dirs`] is permitted.
 fn discovery_enabled() -> bool {
-    std::env::var(DISCOVERY_VAR)
-        .map(|value| !value.trim().eq_ignore_ascii_case("off"))
-        .unwrap_or(true)
+    std::env::var(DISCOVERY_VAR).map_or(true, |value| !value.trim().eq_ignore_ascii_case("off"))
 }
 
 /// Directories searched for tunnel binaries.

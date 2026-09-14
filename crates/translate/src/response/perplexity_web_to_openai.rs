@@ -341,7 +341,7 @@ fn advance(full: &str, state: &mut StreamState) -> Option<Value> {
     }
     let delta = full.get(state.pplx_seen..)?.to_owned();
     state.pplx_seen = full.len();
-    state.pplx_answer = full.to_owned();
+    full.clone_into(&mut state.pplx_answer);
     // Markup is stripped without collapsing whitespace: a mid-stream delta continues from the previous
     // one, and collapsing would change text the high-water mark has already counted.
     let visible = clean(&delta, false);

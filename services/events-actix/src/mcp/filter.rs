@@ -231,7 +231,10 @@ mod tests {
     fn a_long_repeated_group_collapses_and_says_so() {
         let mut text = String::new();
         for index in 0..COLLAPSE_THRESHOLD + 20 {
-            text.push_str(&format!("  - listitem \"row {index}\"\n"));
+            let _ = std::fmt::Write::write_fmt(
+                &mut text,
+                format_args!("  - listitem \"row {index}\"\n"),
+            );
         }
         // Padded past the filter floor so the collapse path is the one under test.
         text.push_str(&"x".repeat(3_000));

@@ -241,11 +241,10 @@ async fn a_worker_that_dies_mid_transform_is_a_bypass_not_a_hang() {
     install_stub(
         &paths,
         "1.0.0",
-        r#"
+        r"
 export async function transformAnthropicMessages() {
   process.exit(3);
-}
-"#,
+}",
     );
     let bridge = Bridge::new(paths);
     let outcome = bridge.transform(&request("{\"a\":1}"), 10_000, true).await;
@@ -588,12 +587,11 @@ async fn a_timed_out_request_is_counted_as_an_error_and_the_body_is_untouched() 
     install_stub(
         &paths,
         "1.0.0",
-        r#"
+        r"
 export async function transformAnthropicMessages() {
   const until = Date.now() + 30000;
   while (Date.now() < until) { /* uninterruptible */ }
-}
-"#,
+}",
     );
     let saver = TokenSaver::new(paths);
     let gate = Gate {
