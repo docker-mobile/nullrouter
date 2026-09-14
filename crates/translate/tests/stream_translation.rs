@@ -785,3 +785,85 @@ fn malformed_chunks_never_panic_and_yield_nothing() {
         let _ = response::openai_to_claude::translate(&chunk, &mut state);
     }
 }
+
+#[test]
+fn claude_to_openai_tool_use_with_initial_arguments() {
+    let mut state = state();
+    let start = json!({
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {
+            "type": "tool_use",
+            "id": "toolu_abc",
+            "name": "lookup",
+            "input": { "key": "val" }
+        }
+    });
+
+    let chunks = response::claude_to_openai::translate(&start, &mut state);
+    let args = chunks
+        .first()
+        .and_then(|c| c.pointer("/choices/0/delta/tool_calls/0/function/arguments"));
+    assert_eq!(args, Some(&json!(r#"{"key":"val"}"#)));
+}
+
+#[test]
+fn openai_to_claude_tool_call_without_id_generates_fallback_id() {
+    let mut state = state();
+    let chunk = json!({
+        "id": "chunk-1",
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "function": { "name": "my_func", "arguments": "{\"a\":1}" }
+                }]
+            }
+        }]
+    });
+
+    let frames = response::openai_to_claude::translate(&chunk, &mut state);
+    let tool_start = frames
+        .iter()
+        .find(|f| f.pointer("/content_block/type").and_then(Value::as_str) == Some("tool_use"));
+    assert!(
+        tool_start.is_some(),
+        "tool_use block was opened despite missing id"
+    );
+    let id = tool_start
+        .unwrap()
+        .pointer("/content_block/id")
+        .and_then(Value::as_str);
+    assert!(id.unwrap_or_default().starts_with("toolu_gen_"));
+}
+
+#[test]
+fn openai_to_claude_deepseek_prompt_cache_hit_streamed() {
+    let mut state = state();
+    let usage_chunk = json!({
+        "id": "chunk-finish",
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 500,
+            "completion_tokens": 100,
+            "total_tokens": 600,
+            "prompt_cache_hit_tokens": 450,
+            "prompt_cache_miss_tokens": 50
+        }
+    });
+
+    let frames = response::openai_to_claude::translate(&usage_chunk, &mut state);
+    let message_delta = frames
+        .iter()
+        .find(|f| f.get("type").and_then(Value::as_str) == Some("message_delta"));
+    assert!(message_delta.is_some());
+    let cache_read = message_delta
+        .unwrap()
+        .pointer("/usage/cache_read_input_tokens");
+    assert_eq!(cache_read, Some(&json!(450)));
+}

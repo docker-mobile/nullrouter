@@ -365,6 +365,37 @@ pub fn for_model(provider: &str, model: &str) -> Capabilities {
             |delta| delta.apply(TABLE.default),
         );
 
+    // Infer capabilities for modern reasoning models missing from static dump.
+    if !resolved.reasoning {
+        let lowered = base_model.to_ascii_lowercase();
+        if lowered.contains("claude-3-7") || lowered.contains("claude-3.7") {
+            resolved.reasoning = true;
+            resolved.thinking_format = Some(ThinkingFormat::ClaudeBudget);
+            resolved.thinking_can_disable = true;
+            resolved.max_output = resolved.max_output.max(64000);
+        } else if lowered.contains("deepseek-r1") || lowered == "deepseek-reasoner" {
+            resolved.reasoning = true;
+            resolved.thinking_format = Some(ThinkingFormat::DeepSeek);
+            resolved.thinking_can_disable = true;
+            resolved.max_output = resolved.max_output.max(64000);
+        } else if lowered.contains("flash-thinking")
+            || (lowered.contains("gemini-2.0") && lowered.contains("thinking"))
+        {
+            resolved.reasoning = true;
+            resolved.thinking_format = Some(ThinkingFormat::GeminiBudget);
+            resolved.thinking_can_disable = false;
+            resolved.max_output = resolved.max_output.max(65536);
+        } else if lowered.starts_with("o1")
+            || lowered.starts_with("o3")
+            || lowered.starts_with("o4")
+        {
+            resolved.reasoning = true;
+            resolved.thinking_format = Some(ThinkingFormat::OpenAi);
+            resolved.thinking_can_disable = true;
+            resolved.max_output = resolved.max_output.max(64000);
+        }
+    }
+
     // Registry-stated limits win over the capability table.
     let key = crate::registry::entry(provider)
         .map_or(provider, crate::registry::RegistryEntry::models_key);

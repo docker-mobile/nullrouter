@@ -118,11 +118,16 @@ fn handle_block_start(event: &Value, state: &mut StreamState, out: &mut Vec<Valu
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned();
+            let initial_args = block
+                .and_then(|b| b.get("input"))
+                .filter(|v| !v.is_null() && !v.as_object().is_some_and(serde_json::Map::is_empty))
+                .and_then(|v| serde_json::to_string(v).ok())
+                .unwrap_or_default();
             let call = OpenAiToolCall {
                 index: tool_index,
                 id: id.clone(),
                 name: name.clone(),
-                arguments: String::new(),
+                arguments: initial_args.clone(),
             };
             if let Some(index) = index {
                 state.openai_tool_calls.insert(index, call);
@@ -134,7 +139,7 @@ fn handle_block_start(event: &Value, state: &mut StreamState, out: &mut Vec<Valu
                         "index": tool_index,
                         "id": id,
                         "type": crate::schema::openai_block::FUNCTION,
-                        "function": { "name": name, "arguments": "" },
+                        "function": { "name": name, "arguments": initial_args },
                     }],
                 }),
                 None,

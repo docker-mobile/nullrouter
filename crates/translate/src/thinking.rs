@@ -585,12 +585,39 @@ fn apply_budget_thinking(
         return;
     }
     let thinking = match to_budget(intent, range) {
-        // -1 is "provider decides": send the marker with no quantity.
-        Some(-1) => json!({ "type": "enabled" }),
-        Some(budget) if budget > 0 => json!({ "type": "enabled", "budget_tokens": budget }),
+        // -1 is "provider decides": for Claude budget models, Anthropic requires budget_tokens if type: "enabled".
+        Some(-1) => {
+            let auto_budget = 8192_u64;
+            let current_max = object
+                .get("max_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if current_max <= auto_budget {
+                object.insert("max_tokens".to_owned(), json!(auto_budget + 4096));
+            }
+            json!({ "type": "enabled", "budget_tokens": auto_budget })
+        }
+        Some(budget) if budget > 0 => {
+            #[allow(clippy::cast_sign_loss)]
+            let budget_val = budget as u64;
+            if let Some(current_max) = object.get("max_tokens").and_then(Value::as_u64)
+                && current_max <= budget_val
+            {
+                object.insert("max_tokens".to_owned(), json!(budget_val + 4096));
+            }
+            json!({ "type": "enabled", "budget_tokens": budget_val })
+        }
         // A zero or unrecognised budget still means "reason": upstream's
         // `budget || 8192` lands on the medium default rather than disabling.
-        _ => json!({ "type": "enabled", "budget_tokens": 8192 }),
+        _ => {
+            let default_budget = 8192_u64;
+            if let Some(current_max) = object.get("max_tokens").and_then(Value::as_u64)
+                && current_max <= default_budget
+            {
+                object.insert("max_tokens".to_owned(), json!(default_budget + 4096));
+            }
+            json!({ "type": "enabled", "budget_tokens": default_budget })
+        }
     };
     object.insert("thinking".to_owned(), thinking);
 }

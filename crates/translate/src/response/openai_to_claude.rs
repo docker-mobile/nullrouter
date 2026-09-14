@@ -104,8 +104,16 @@ fn capture_usage(chunk: &Value, state: &mut StreamState) {
             .and_then(Value::as_u64)
             .unwrap_or(0)
     };
-    let cache_read = detail("cached_tokens");
+    let mut cache_read = detail("cached_tokens");
+    if cache_read == 0 {
+        cache_read = read("prompt_cache_hit_tokens");
+    }
     let cache_create = detail("cache_creation_tokens");
+    let reasoning = usage
+        .get("completion_tokens_details")
+        .and_then(|d| d.get("reasoning_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
 
     // OpenAI's prompt_tokens already includes cache tokens, so Claude's
     // input_tokens is the remainder.
@@ -121,7 +129,7 @@ fn capture_usage(chunk: &Value, state: &mut StreamState) {
         total_tokens: prompt + output,
         cached_tokens: cache_read,
         cache_creation_tokens: cache_create,
-        reasoning_tokens: 0,
+        reasoning_tokens: reasoning,
     });
 }
 
@@ -184,16 +192,25 @@ fn emit_message_start(chunk: &Value, state: &mut StreamState, out: &mut Vec<Valu
 fn handle_tool_calls(tool_calls: &[Value], state: &mut StreamState, out: &mut Vec<Value>) {
     for call in tool_calls {
         let index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
-        let id = call.get("id").and_then(Value::as_str).unwrap_or_default();
+        let id_str = call.get("id").and_then(Value::as_str).unwrap_or_default();
         let function_name = call
             .get("function")
             .and_then(|function| function.get("name"))
+            .or_else(|| call.get("name"))
             .and_then(Value::as_str)
             .unwrap_or_default();
 
+        let effective_id = if id_str.is_empty() {
+            format!("toolu_gen_{}_{}", state.clock.now_millis(), index)
+        } else {
+            id_str.to_owned()
+        };
+
         // Some vendors repeat id with a null name on every argument chunk, so a
         // block is opened only once per index.
-        if !id.is_empty() && !state.claude_tool_calls.contains_key(&index) {
+        if (!id_str.is_empty() || !function_name.is_empty())
+            && !state.claude_tool_calls.contains_key(&index)
+        {
             stop_thinking_block(state, out);
             stop_text_block(state, out);
 
@@ -202,7 +219,7 @@ fn handle_tool_calls(tool_calls: &[Value], state: &mut StreamState, out: &mut Ve
             state.claude_tool_calls.insert(
                 index,
                 ClaudeToolCall {
-                    id: id.to_owned(),
+                    id: effective_id.clone(),
                     name: function_name.to_owned(),
                     block_index,
                 },
@@ -216,18 +233,25 @@ fn handle_tool_calls(tool_calls: &[Value], state: &mut StreamState, out: &mut Ve
                 "index": block_index,
                 "content_block": {
                     "type": claude_block::TOOL_USE,
-                    "id": id,
+                    "id": effective_id,
                     "name": display_name,
                     "input": {},
                 },
             }));
+        } else if let Some(existing) = state.claude_tool_calls.get_mut(&index)
+            && existing.name.is_empty()
+            && !function_name.is_empty()
+        {
+            function_name.clone_into(&mut existing.name);
         }
 
-        if let Some(arguments) = call
+        let arguments = call
             .get("function")
             .and_then(|function| function.get("arguments"))
-            .and_then(Value::as_str)
-            .filter(|arguments| !arguments.is_empty())
+            .or_else(|| call.get("arguments"))
+            .and_then(Value::as_str);
+
+        if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty())
             && state.claude_tool_calls.contains_key(&index)
         {
             // Buffered, not streamed: arguments are sanitized at finish.

@@ -69,10 +69,12 @@ pub enum UsageKind {
     Kiro,
     Ollama,
     CommandCode,
+    OpenAi,
 }
 
 /// Convert a provider-native usage object to OpenAI shape
 /// (upstream `toOpenAIUsage`). Each provider keeps its exact arithmetic.
+#[allow(clippy::too_many_lines)]
 pub fn to_openai_usage(raw: &Value, kind: UsageKind) -> Option<Usage> {
     if !raw.is_object() {
         return None;
@@ -155,6 +157,33 @@ pub fn to_openai_usage(raw: &Value, kind: UsageKind) -> Option<Usage> {
                 completion_tokens: output,
                 total_tokens: total,
                 ..Usage::default()
+            }
+        }
+        UsageKind::OpenAi => {
+            let prompt = num(raw, "prompt_tokens");
+            let completion = num(raw, "completion_tokens");
+            let total = raw
+                .get("total_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(prompt + completion);
+            let cached = raw
+                .get("prompt_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+                .and_then(Value::as_u64)
+                .or_else(|| raw.get("prompt_cache_hit_tokens").and_then(Value::as_u64))
+                .unwrap_or(0);
+            let reasoning = raw
+                .get("completion_tokens_details")
+                .and_then(|d| d.get("reasoning_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            Usage {
+                prompt_tokens: prompt,
+                completion_tokens: completion,
+                total_tokens: total,
+                cached_tokens: cached,
+                cache_creation_tokens: 0,
+                reasoning_tokens: reasoning,
             }
         }
     })
@@ -359,6 +388,61 @@ mod tests {
         });
         let usage = to_openai_usage(&raw, UsageKind::Gemini).expect("parses");
         assert_eq!(usage.completion_tokens, 50);
+    }
+
+    #[test]
+    fn openai_usage_kind_extracts_cached_and_reasoning_tokens() {
+        let raw = json!({
+            "prompt_tokens": 120,
+            "completion_tokens": 80,
+            "total_tokens": 200,
+            "prompt_tokens_details": { "cached_tokens": 50 },
+            "completion_tokens_details": { "reasoning_tokens": 30 },
+        });
+        let usage = to_openai_usage(&raw, UsageKind::OpenAi).expect("parsed usage");
+        assert_eq!(usage.prompt_tokens, 120);
+        assert_eq!(usage.completion_tokens, 80);
+        assert_eq!(usage.total_tokens, 200);
+        assert_eq!(usage.cached_tokens, 50);
+        assert_eq!(usage.reasoning_tokens, 30);
+
+        let val = usage.to_value();
+        assert_eq!(
+            val.pointer("/prompt_tokens_details/cached_tokens"),
+            Some(&json!(50))
+        );
+        assert_eq!(
+            val.pointer("/completion_tokens_details/reasoning_tokens"),
+            Some(&json!(30))
+        );
+    }
+
+    #[test]
+    fn openai_usage_kind_extracts_deepseek_prompt_cache_hit_tokens() {
+        let raw = json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "total_tokens": 1200,
+            "prompt_cache_hit_tokens": 800,
+            "prompt_cache_miss_tokens": 200,
+            "completion_tokens_details": { "reasoning_tokens": 150 },
+        });
+        let usage = to_openai_usage(&raw, UsageKind::OpenAi).expect("parsed usage");
+        assert_eq!(usage.prompt_tokens, 1000);
+        assert_eq!(usage.completion_tokens, 200);
+        assert_eq!(usage.total_tokens, 1200);
+        assert_eq!(usage.cached_tokens, 800);
+        assert_eq!(usage.reasoning_tokens, 150);
+
+        let val = usage.to_value();
+        assert_eq!(
+            val.pointer("/prompt_tokens_details/cached_tokens"),
+            Some(&json!(800))
+        );
+        assert_eq!(
+            val.pointer("/completion_tokens_details/reasoning_tokens"),
+            Some(&json!(150))
+        );
     }
 
     #[test]

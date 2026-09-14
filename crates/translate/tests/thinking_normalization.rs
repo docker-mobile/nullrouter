@@ -476,3 +476,53 @@ fn qwen_sends_its_boolean_plus_a_budget() {
     assert_eq!(result.get("thinking_budget"), Some(&json!(8192)));
     assert!(result.get("thinking").is_none());
 }
+
+#[test]
+fn max_tokens_is_elevated_above_budget_for_claude() {
+    // Given: an OpenAI request with max_tokens set too low for high reasoning effort.
+    let body = json!({
+        "model": "claude-sonnet-4-20250514",
+        "reasoning_effort": "high",
+        "max_tokens": 2000,
+        "messages": [{"role": "user", "content": "hello"}],
+    });
+
+    // When: normalized for Claude.
+    let result = normalized(
+        Format::Claude,
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        &body,
+    );
+
+    // Then: budget is 24576 and max_tokens is raised above budget (24576 + 4096 = 28672)
+    // so Anthropic does not reject the request with 400 Bad Request.
+    assert_eq!(
+        result.get("thinking"),
+        Some(&json!({"type": "enabled", "budget_tokens": 24576}))
+    );
+    assert_eq!(result.get("max_tokens"), Some(&json!(28672)));
+}
+
+#[test]
+fn claude_auto_reasoning_sets_medium_budget_and_elevates_max_tokens() {
+    let body = json!({
+        "model": "claude-3-7-sonnet-20250219",
+        "reasoning_effort": "auto",
+        "max_tokens": 1000,
+        "messages": [{"role": "user", "content": "hello"}],
+    });
+
+    let result = normalized(
+        Format::Claude,
+        "anthropic",
+        "claude-3-7-sonnet-20250219",
+        &body,
+    );
+
+    assert_eq!(
+        result.get("thinking"),
+        Some(&json!({"type": "enabled", "budget_tokens": 8192}))
+    );
+    assert_eq!(result.get("max_tokens"), Some(&json!(12288)));
+}

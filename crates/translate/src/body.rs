@@ -289,6 +289,20 @@ fn openai_body_to_claude(body: &Value, state: &StreamState) -> Value {
     let prompt = usage_field(usage, "prompt_tokens", "input_tokens");
     let completion_tokens = usage_field(usage, "completion_tokens", "output_tokens");
 
+    let mut usage_obj = json!({ "input_tokens": prompt, "output_tokens": completion_tokens });
+    if let Some(cached) = usage
+        .and_then(|u| {
+            u.pointer("/prompt_tokens_details/cached_tokens")
+                .or_else(|| u.get("prompt_cache_hit_tokens"))
+                .or_else(|| u.get("cache_read_input_tokens"))
+                .and_then(Value::as_u64)
+        })
+        .filter(|&c| c > 0)
+        && let Some(map) = usage_obj.as_object_mut()
+    {
+        map.insert("cache_read_input_tokens".to_owned(), json!(cached));
+    }
+
     json!({
         "id": body
             .get("id")
@@ -306,7 +320,7 @@ fn openai_body_to_claude(body: &Value, state: &StreamState) -> Value {
             "claude",
         ),
         "stop_sequence": Value::Null,
-        "usage": { "input_tokens": prompt, "output_tokens": completion_tokens },
+        "usage": usage_obj,
     })
 }
 
@@ -632,6 +646,25 @@ mod tests {
         assert_eq!(
             translate_body(Format::Kiro, Format::OpenAi, &body, &state()),
             body
+        );
+    }
+
+    #[test]
+    fn openai_body_to_claude_preserves_prompt_cache_hit_tokens() {
+        let body = json!({
+            "choices": [{ "index": 0, "message": { "role": "assistant", "content": "hello" }, "finish_reason": "stop" }],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "prompt_cache_hit_tokens": 80
+            }
+        });
+        let out = translate_body(Format::OpenAi, Format::Claude, &body, &state());
+        assert_eq!(out.pointer("/usage/input_tokens"), Some(&json!(100)));
+        assert_eq!(out.pointer("/usage/output_tokens"), Some(&json!(20)));
+        assert_eq!(
+            out.pointer("/usage/cache_read_input_tokens"),
+            Some(&json!(80))
         );
     }
 
