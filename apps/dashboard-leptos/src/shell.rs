@@ -468,6 +468,7 @@ async fn apply_language(tag: &str) {
 
 /// Native builds have no document to reload.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::unused_async)]
 async fn apply_language(_tag: &str) {}
 
 /// Cycles System → Light → Dark.
@@ -525,6 +526,7 @@ fn ThemeToggle() -> impl IntoView {
     }
 }
 
+#[allow(clippy::missing_const_for_fn)]
 fn viewport_is_narrow() -> bool {
     #[cfg(target_arch = "wasm32")]
     {

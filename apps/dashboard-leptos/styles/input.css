@@ -78,7 +78,7 @@
   --radius: 0.65rem;
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas,
     "Liberation Mono", monospace;
 
@@ -158,6 +158,7 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    overflow-wrap: break-word;
   }
 
   body {
