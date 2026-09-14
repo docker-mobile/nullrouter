@@ -1,7 +1,7 @@
 //! Interactive chat playground for testing models and providers.
 //!
-//! Directly maps `/api/dashboard/chat/completions` to an enterprise, reactive Leptos WASM UI.
-//! Supports multi-turn conversations, system prompts, model switching, and real-time streaming feedback.
+//! Maps `/api/dashboard/chat/completions` to a reactive Leptos WASM UI supporting multi-turn
+//! conversations, system prompts, model switching, and real-time streaming feedback.
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -95,33 +95,135 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
     (text.to_owned(), None)
 }
 
+fn append_turn(set_messages: WriteSignal<Vec<ChatMessage>>, user_content: String) -> String {
+    let mut asst_id = String::new();
+    set_messages.update(|msgs| {
+        let u_id = format!("u_{}", msgs.len());
+        let a_id = format!("a_{}", msgs.len() + 1);
+        asst_id.clone_from(&a_id);
+        msgs.push(ChatMessage {
+            id: u_id,
+            role: "user".to_owned(),
+            content: user_content,
+            is_streaming: false,
+            error: None,
+        });
+        msgs.push(ChatMessage {
+            id: a_id,
+            role: "assistant".to_owned(),
+            content: String::new(),
+            is_streaming: true,
+            error: None,
+        });
+    });
+    asst_id
+}
+
+fn build_chat_request(
+    model: String,
+    stream: bool,
+    temp_str: &str,
+    system_prompt: &str,
+    messages: &[ChatMessage],
+) -> DashboardChatCompletionRequest {
+    let mut wire_messages = Vec::new();
+    let sys = system_prompt.trim();
+    if !sys.is_empty() {
+        wire_messages.push(WireMessage {
+            role: "system".to_owned(),
+            content: sys.to_owned(),
+        });
+    }
+
+    for msg in messages {
+        if !msg.is_streaming && msg.error.is_none() && !msg.content.is_empty() {
+            wire_messages.push(WireMessage {
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+            });
+        }
+    }
+
+    DashboardChatCompletionRequest {
+        model,
+        messages: wire_messages,
+        stream,
+        temperature: temp_str.parse::<f32>().ok(),
+    }
+}
+
 #[component]
-#[allow(clippy::too_many_lines, clippy::similar_names)]
+fn ConversationBox(
+    messages: ReadSignal<Vec<ChatMessage>>,
+    on_send_suggestion: Callback<String>,
+    input_text: ReadSignal<String>,
+    set_input_text: WriteSignal<String>,
+    is_generating: ReadSignal<bool>,
+    on_send: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <div class="rounded-lg border border-border bg-card min-h-[420px] max-h-[640px] flex flex-col justify-between overflow-hidden shadow-sm">
+            <div class="p-4 space-y-4 overflow-y-auto flex-1">
+                {move || {
+                    let msgs = messages.get();
+                    if msgs.is_empty() {
+                        view! { <EmptyState on_select=on_send_suggestion /> }.into_any()
+                    } else {
+                        view! { <MessageList messages=msgs /> }.into_any()
+                    }
+                }}
+            </div>
+            <ChatInput
+                input_text=input_text
+                set_input_text=set_input_text
+                is_generating=is_generating
+                on_send=on_send
+            />
+        </div>
+    }
+}
+
+#[component]
+fn ChatHeader(
+    label_title: String,
+    label_desc: String,
+    label_params: String,
+    label_clear: String,
+    set_show_params: WriteSignal<bool>,
+    on_clear: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <PageHeader
+            title=label_title
+            description=label_desc
+        >
+            <div class="flex items-center gap-2">
+                <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-accent transition-colors cursor-pointer"
+                    on:click=move |_| set_show_params.update(|v| *v = !*v)
+                >
+                    {label_params}
+                </button>
+                <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                    on:click=move |_| on_clear.run(())
+                >
+                    {label_clear}
+                </button>
+            </div>
+        </PageHeader>
+    }
+}
+
+#[component]
 pub fn Chat() -> impl IntoView {
     let locale = crate::i18n::use_locale();
-
     let label_title = locale.get("chat.title").to_owned();
     let label_desc = locale.get("chat.description").to_owned();
     let label_params = locale.get("chat.parameters").to_owned();
     let label_clear = locale.get("chat.clear").to_owned();
-    let label_sys_prompt = locale.get("chat.system_prompt").to_owned();
-    let label_sys_placeholder = locale.get("chat.system_placeholder").to_owned();
-    let label_temp = locale.get("chat.temperature").to_owned();
-    let label_stream = locale.get("chat.stream").to_owned();
-    let label_model = locale.get("chat.model").to_owned();
-    let label_latency = locale.get("chat.latency").to_owned();
-    let label_tokens = locale.get("chat.tokens").to_owned();
-    let label_empty_title = locale.get("chat.empty_title").to_owned();
-    let label_empty_hint = locale.get("chat.empty_hint").to_owned();
-    let label_sug1 = locale.get("chat.suggestion_1").to_owned();
-    let label_sug2 = locale.get("chat.suggestion_2").to_owned();
-    let label_sug3 = locale.get("chat.suggestion_3").to_owned();
-    let label_user = locale.get("chat.user_label").to_owned();
-    let label_asst = locale.get("chat.assistant_label").to_owned();
-    let label_copy = locale.get("chat.copy").to_owned();
-    let label_streaming = locale.get("chat.streaming").to_owned();
-    let label_placeholder = locale.get("chat.input_placeholder").to_owned();
-    let label_send = locale.get("chat.send").to_owned();
 
     let (catalogue, set_catalogue) = signal(Hydrate::<ModelsList>::Loading);
     load("/api/models", set_catalogue);
@@ -145,116 +247,36 @@ pub fn Chat() -> impl IntoView {
             return;
         }
 
-        let user_msg_id = format!("u_{}", messages.get().len());
-        let assistant_msg_id = format!("a_{}", messages.get().len() + 1);
-
-        let user_msg = ChatMessage {
-            id: user_msg_id,
-            role: "user".to_owned(),
-            content: trimmed.clone(),
-            is_streaming: false,
-            error: None,
-        };
-
-        let assistant_msg = ChatMessage {
-            id: assistant_msg_id.clone(),
-            role: "assistant".to_owned(),
-            content: String::new(),
-            is_streaming: true,
-            error: None,
-        };
-
-        set_messages.update(|msgs| {
-            msgs.push(user_msg);
-            msgs.push(assistant_msg);
-        });
+        let assistant_msg_id = append_turn(set_messages, trimmed);
 
         set_input_text.set(String::new());
         set_is_generating.set(true);
         set_error_banner.set(None);
 
-        let model = selected_model.get();
-        let stream = stream_enabled.get();
-        let temp_val = temperature.get().parse::<f32>().ok();
-        let sys_prompt = system_prompt.get().trim().to_owned();
-
-        let mut wire_messages = Vec::new();
-        if !sys_prompt.is_empty() {
-            wire_messages.push(WireMessage {
-                role: "system".to_owned(),
-                content: sys_prompt,
-            });
-        }
-
-        for msg in messages.get() {
-            if !msg.is_streaming && msg.error.is_none() && !msg.content.is_empty() {
-                wire_messages.push(WireMessage {
-                    role: msg.role.clone(),
-                    content: msg.content.clone(),
-                });
-            }
-        }
-
-        let req = DashboardChatCompletionRequest {
-            model,
-            messages: wire_messages,
-            stream,
-            temperature: temp_val,
-        };
+        let cur_msgs = messages.get();
+        let temp_str = temperature.get();
+        let sys_str = system_prompt.get();
+        let req = build_chat_request(
+            selected_model.get(),
+            stream_enabled.get(),
+            &temp_str,
+            &sys_str,
+            &cur_msgs,
+        );
 
         let payload_str = serde_json::to_string(&req).unwrap_or_default();
-
-        leptos::task::spawn_local(async move {
-            let start_time = web_time_millis();
-            let result = write_reporting(
-                Method::Post,
-                "/api/dashboard/chat/completions",
-                Some(&payload_str),
-            )
-            .await;
-
-            let elapsed_ms = web_time_millis().saturating_sub(start_time);
-            set_is_generating.set(false);
-
-            match result {
-                Ok(raw) => {
-                    let (content, err) = parse_chat_response(&raw);
-                    let words = content.split_whitespace().count();
-                    set_metrics.set(Some((elapsed_ms, words)));
-
-                    set_messages.update(|msgs| {
-                        if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
-                            target.is_streaming = false;
-                            if let Some(e) = err {
-                                target.error = Some(e);
-                            } else {
-                                target.content = content;
-                            }
-                        }
-                    });
-                }
-                Err(err_msg) => {
-                    let err_display = if err_msg.is_empty() {
-                        "Failed to communicate with provider".to_owned()
-                    } else {
-                        err_msg
-                    };
-                    set_error_banner.set(Some(err_display.clone()));
-                    set_messages.update(|msgs| {
-                        if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
-                            target.is_streaming = false;
-                            target.error = Some(err_display);
-                        }
-                    });
-                }
-            }
-        });
+        leptos::task::spawn_local(dispatch_chat_turn(
+            payload_str,
+            assistant_msg_id,
+            set_is_generating,
+            set_metrics,
+            set_messages,
+            set_error_banner,
+        ));
     };
 
-    let on_submit = move || {
-        let current = input_text.get();
-        send_message(current);
-    };
+    let on_send_suggestion = Callback::new(move |s: String| send_message(s));
+    let on_submit_input = Callback::new(move |()| send_message(input_text.get()));
 
     let clear_conversation = move || {
         set_messages.set(Vec::new());
@@ -262,321 +284,402 @@ pub fn Chat() -> impl IntoView {
         set_error_banner.set(None);
     };
 
-    let drawer_params = label_params.clone();
-    let drawer_sys = label_sys_prompt.clone();
-    let drawer_sys_ph = label_sys_placeholder.clone();
-    let drawer_temp = label_temp.clone();
-    let drawer_stream = label_stream.clone();
-
-    let metrics_lat = label_latency.clone();
-    let metrics_tok = label_tokens.clone();
-
-    let win_empty_title = label_empty_title.clone();
-    let win_empty_hint = label_empty_hint.clone();
-    let win_sug1 = label_sug1.clone();
-    let win_sug2 = label_sug2.clone();
-    let win_sug3 = label_sug3.clone();
-    let win_user = label_user.clone();
-    let win_asst = label_asst.clone();
-    let win_copy = label_copy.clone();
-    let win_streaming = label_streaming.clone();
-
     view! {
         <div class="max-w-5xl mx-auto space-y-4">
-            <PageHeader
-                title=label_title
-                description=label_desc
-            >
-                <div class="flex items-center gap-2">
-                    <button
-                        type="button"
-                        class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-accent transition-colors"
-                        on:click=move |_| set_show_params.update(|v| *v = !*v)
-                    >
-                        {label_params.clone()}
-                    </button>
-                    <button
-                        type="button"
-                        class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-destructive/10 hover:text-destructive transition-colors"
-                        on:click=move |_| clear_conversation()
-                    >
-                        {label_clear.clone()}
-                    </button>
-                </div>
-            </PageHeader>
+            <ChatHeader
+                label_title=label_title
+                label_desc=label_desc
+                label_params=label_params
+                label_clear=label_clear
+                set_show_params=set_show_params
+                on_clear=Callback::new(move |()| clear_conversation())
+            />
 
-            // Configuration drawer
-            {
-                let p_lbl = drawer_params.clone();
-                let s_lbl = drawer_sys.clone();
-                let sph_lbl = drawer_sys_ph.clone();
-                let t_lbl = drawer_temp.clone();
-                let st_lbl = drawer_stream.clone();
-                move || if show_params.get() {
-                    view! {
-                        <section class="rounded-lg border border-border bg-card p-4 space-y-3">
-                            <h2 class="text-sm font-semibold">{p_lbl.clone()}</h2>
-                            <div class="grid gap-3 sm:grid-cols-2">
-                                <label class="space-y-1 text-xs">
-                                    <span class="text-muted-foreground font-medium">{s_lbl.clone()}</span>
-                                    <textarea
-                                        class="w-full rounded-md border border-input bg-background p-2 text-xs h-20 resize-none font-mono"
-                                        prop:value=move || system_prompt.get()
-                                        on:input=move |ev| set_system_prompt.set(event_target_value(&ev))
-                                        placeholder=sph_lbl.clone()
-                                    />
-                                </label>
-                                <div class="space-y-3">
-                                    <label class="space-y-1 text-xs block">
-                                        <div class="flex justify-between">
-                                            <span class="text-muted-foreground font-medium">{t_lbl.clone()}</span>
-                                            <span class="font-mono">{move || temperature.get()}</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="2"
-                                            step="0.1"
-                                            class="w-full"
-                                            prop:value=move || temperature.get()
-                                            on:input=move |ev| set_temperature.set(event_target_value(&ev))
-                                        />
-                                    </label>
-                                    <label class="flex items-center gap-2 text-xs cursor-pointer select-none">
-                                        <input
-                                            type="checkbox"
-                                            class="rounded border-input text-primary"
-                                            prop:checked=move || stream_enabled.get()
-                                            on:change=move |ev| set_stream_enabled.set(event_target_checked(&ev))
-                                        />
-                                        <span>{st_lbl.clone()}</span>
-                                    </label>
-                                </div>
-                            </div>
-                        </section>
-                    }.into_any()
-                } else {
-                    view! { <span class="hidden"></span> }.into_any()
+            {move || show_params.get().then(|| view! {
+                <ParametersDrawer
+                    system_prompt=system_prompt
+                    set_system_prompt=set_system_prompt
+                    temperature=temperature
+                    set_temperature=set_temperature
+                    stream_enabled=stream_enabled
+                    set_stream_enabled=set_stream_enabled
+                />
+            })}
+
+            <ModelBar
+                catalogue=catalogue
+                selected_model=selected_model
+                set_selected_model=set_selected_model
+                metrics=metrics
+            />
+
+            {move || error_banner.get().map(|err| view! {
+                <div class="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium">
+                    {err}
+                </div>
+            })}
+
+            <ConversationBox
+                messages=messages
+                on_send_suggestion=on_send_suggestion
+                input_text=input_text
+                set_input_text=set_input_text
+                is_generating=is_generating
+                on_send=on_submit_input
+            />
+        </div>
+    }
+}
+
+async fn dispatch_chat_turn(
+    payload: String,
+    assistant_msg_id: String,
+    set_is_generating: WriteSignal<bool>,
+    set_metrics: WriteSignal<Option<(u64, usize)>>,
+    set_messages: WriteSignal<Vec<ChatMessage>>,
+    set_error_banner: WriteSignal<Option<String>>,
+) {
+    let start_time = web_time_millis();
+    let result = write_reporting(
+        Method::Post,
+        "/api/dashboard/chat/completions",
+        Some(&payload),
+    )
+    .await;
+
+    let elapsed_ms = web_time_millis().saturating_sub(start_time);
+    set_is_generating.set(false);
+
+    match result {
+        Ok(raw) => {
+            let (content, err) = parse_chat_response(&raw);
+            let words = content.split_whitespace().count();
+            set_metrics.set(Some((elapsed_ms, words)));
+
+            set_messages.update(|msgs| {
+                if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
+                    target.is_streaming = false;
+                    if let Some(e) = err {
+                        target.error = Some(e);
+                    } else {
+                        target.content = content;
+                    }
                 }
-            }
+            });
+        }
+        Err(err_msg) => {
+            let err_display = if err_msg.is_empty() {
+                "Failed to communicate with provider".to_owned()
+            } else {
+                err_msg
+            };
+            set_error_banner.set(Some(err_display.clone()));
+            set_messages.update(|msgs| {
+                if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
+                    target.is_streaming = false;
+                    target.error = Some(err_display);
+                }
+            });
+        }
+    }
+}
 
-            // Model Selector Bar
-            <div class="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-border bg-card/60">
-                <div class="flex items-center gap-2 min-w-0 flex-1">
-                    <span class="text-xs font-semibold text-muted-foreground shrink-0">{label_model}:</span>
-                    {move || match catalogue.get() {
-                        Hydrate::Ready(data) if !data.models.is_empty() => {
-                            let models = data.models.clone();
-                            view! {
-                                <select
-                                    class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono max-w-sm truncate"
-                                    prop:value=move || selected_model.get()
-                                    on:change=move |ev| set_selected_model.set(event_target_value(&ev))
-                                >
-                                    {models.into_iter().map(|m| {
-                                        let name = if m.full_model.is_empty() {
-                                            format!("{}/{}", m.provider, m.model)
-                                        } else {
-                                            m.full_model
-                                        };
-                                        view! { <option value=name.clone()>{name.clone()}</option> }
-                                    }).collect::<Vec<_>>()}
-                                </select>
-                            }.into_any()
-                        }
-                        _ => view! {
-                            <input
-                                type="text"
-                                class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono w-64"
-                                prop:value=move || selected_model.get()
-                                on:input=move |ev| set_selected_model.set(event_target_value(&ev))
-                                placeholder="provider/model"
-                            />
-                        }.into_any()
-                    }}
+#[component]
+fn ParametersDrawer(
+    system_prompt: ReadSignal<String>,
+    set_system_prompt: WriteSignal<String>,
+    temperature: ReadSignal<String>,
+    set_temperature: WriteSignal<String>,
+    stream_enabled: ReadSignal<bool>,
+    set_stream_enabled: WriteSignal<bool>,
+) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let label_title = locale.get("chat.parameters").to_owned();
+    let label_prompt = locale.get("chat.system_prompt").to_owned();
+    let placeholder_prompt = locale.get("chat.system_placeholder").to_owned();
+    let label_temp = locale.get("chat.temperature").to_owned();
+    let label_stream = locale.get("chat.stream").to_owned();
+
+    view! {
+        <section class="rounded-lg border border-border bg-card p-4 space-y-3">
+            <h2 class="text-sm font-semibold">{label_title}</h2>
+            <div class="grid gap-3 sm:grid-cols-2">
+                <label class="space-y-1 text-xs">
+                    <span class="text-muted-foreground font-medium">{label_prompt}</span>
+                    <textarea
+                        class="w-full rounded-md border border-input bg-background p-2 text-xs h-20 resize-none font-mono"
+                        prop:value=move || system_prompt.get()
+                        on:input=move |ev| set_system_prompt.set(event_target_value(&ev))
+                        placeholder=placeholder_prompt
+                    />
+                </label>
+                <div class="space-y-3">
+                    <label class="space-y-1 text-xs block">
+                        <div class="flex justify-between">
+                            <span class="text-muted-foreground font-medium">{label_temp}</span>
+                            <span class="font-mono">{move || temperature.get()}</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="2"
+                            step="0.1"
+                            class="w-full"
+                            prop:value=move || temperature.get()
+                            on:input=move |ev| set_temperature.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <label class="flex items-center gap-2 text-xs cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            class="rounded border-input text-primary"
+                            prop:checked=move || stream_enabled.get()
+                            on:change=move |ev| set_stream_enabled.set(event_target_checked(&ev))
+                        />
+                        <span>{label_stream}</span>
+                    </label>
                 </div>
+            </div>
+        </section>
+    }
+}
 
-                // Metrics indicator
-                {
-                    let lat_lbl = metrics_lat.clone();
-                    let tok_lbl = metrics_tok.clone();
-                    move || metrics.get().map(|(ms, words)| {
+#[component]
+fn ModelBar(
+    catalogue: ReadSignal<Hydrate<ModelsList>>,
+    selected_model: ReadSignal<String>,
+    set_selected_model: WriteSignal<String>,
+    metrics: ReadSignal<Option<(u64, usize)>>,
+) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let label_model = locale.get("chat.model").to_owned();
+    let label_latency = locale.get("chat.latency").to_owned();
+    let label_tokens = locale.get("chat.tokens").to_owned();
+
+    view! {
+        <div class="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-border bg-card/60">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+                <span class="text-xs font-semibold text-muted-foreground shrink-0">{label_model}:</span>
+                {move || match catalogue.get() {
+                    Hydrate::Ready(data) if !data.models.is_empty() => {
+                        let models = data.models;
                         view! {
-                            <div class="flex items-center gap-3 text-xs text-muted-foreground font-mono">
-                                <span>{lat_lbl.clone()}: {ms}ms</span>
-                                <span>{tok_lbl.clone()}: ~{words}</span>
-                            </div>
-                        }
-                    })
-                }
+                            <select
+                                class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono max-w-sm truncate"
+                                prop:value=move || selected_model.get()
+                                on:change=move |ev| set_selected_model.set(event_target_value(&ev))
+                            >
+                                {models.into_iter().map(|m| {
+                                    let name = if m.full_model.is_empty() {
+                                        format!("{}/{}", m.provider, m.model)
+                                    } else {
+                                        m.full_model
+                                    };
+                                    let val = name.clone();
+                                    view! { <option value=val>{name}</option> }
+                                }).collect::<Vec<_>>()}
+                            </select>
+                        }.into_any()
+                    }
+                    _ => view! {
+                        <input
+                            type="text"
+                            class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono w-64"
+                            prop:value=move || selected_model.get()
+                            on:input=move |ev| set_selected_model.set(event_target_value(&ev))
+                            placeholder="provider/model"
+                        />
+                    }.into_any()
+                }}
             </div>
 
-            // Error banner
-            {move || error_banner.get().map(|err| {
+            {move || metrics.get().map(|(ms, words)| {
                 view! {
-                    <div class="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium">
-                        {err}
+                    <div class="flex items-center gap-3 text-xs text-muted-foreground font-mono">
+                        <span>{label_latency.clone()}: {ms}ms</span>
+                        <span>{label_tokens.clone()}: ~{words}</span>
                     </div>
                 }
             })}
+        </div>
+    }
+}
 
-            // Message Window
-            <div class="rounded-lg border border-border bg-card min-h-[420px] max-h-[640px] flex flex-col justify-between overflow-hidden shadow-sm">
-                <div class="p-4 space-y-4 overflow-y-auto flex-1">
-                    {
-                        let empty_title = win_empty_title.clone();
-                        let empty_hint = win_empty_hint.clone();
-                        let s1 = win_sug1.clone();
-                        let s2 = win_sug2.clone();
-                        let s3 = win_sug3.clone();
-                        let user_lbl = win_user.clone();
-                        let asst_lbl = win_asst.clone();
-                        let copy_lbl = win_copy.clone();
-                        let stream_lbl = win_streaming.clone();
+#[component]
+fn EmptyState(on_select: Callback<String>) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let title = locale.get("chat.empty_title").to_owned();
+    let hint = locale.get("chat.empty_hint").to_owned();
+    let sug1 = locale.get("chat.suggestion_1").to_owned();
+    let sug2 = locale.get("chat.suggestion_2").to_owned();
+    let sug3 = locale.get("chat.suggestion_3").to_owned();
 
-                        move || {
-                            let msgs = messages.get();
-                            if msgs.is_empty() {
-                                let s1_btn = s1.clone();
-                                let s2_btn = s2.clone();
-                                let s3_btn = s3.clone();
+    let s1_click = {
+        let text = sug1.clone();
+        move |_| on_select.run(text.clone())
+    };
+    let s2_click = {
+        let text = sug2.clone();
+        move |_| on_select.run(text.clone())
+    };
+    let s3_click = {
+        let text = sug3.clone();
+        move |_| on_select.run(text.clone())
+    };
+
+    view! {
+        <div class="py-16 text-center space-y-3">
+            <div class="size-12 rounded-full bg-primary/10 text-primary mx-auto flex items-center justify-center">
+                <svg class="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+            </div>
+            <h3 class="font-semibold text-sm">{title}</h3>
+            <p class="text-xs text-muted-foreground max-w-sm mx-auto">{hint}</p>
+            <div class="pt-4 flex flex-wrap justify-center gap-2 max-w-xl mx-auto">
+                <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
+                    on:click=s1_click
+                >
+                    {sug1}
+                </button>
+                <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
+                    on:click=s2_click
+                >
+                    {sug2}
+                </button>
+                <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
+                    on:click=s3_click
+                >
+                    {sug3}
+                </button>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn MessageList(messages: Vec<ChatMessage>) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let label_user = locale.get("chat.user_label").to_owned();
+    let label_asst = locale.get("chat.assistant_label").to_owned();
+    let label_copy = locale.get("chat.copy").to_owned();
+    let label_streaming = locale.get("chat.streaming").to_owned();
+
+    view! {
+        <div class="space-y-4">
+            {messages.into_iter().map(|msg| {
+                let is_user = msg.role == "user";
+                let role_label = if is_user { label_user.clone() } else { label_asst.clone() };
+                let copy_label = label_copy.clone();
+                let streaming_label = label_streaming.clone();
+                let content = msg.content;
+
+                view! {
+                    <div class=format!("flex gap-3 {}", if is_user { "justify-end" } else { "justify-start" })>
+                        <div class=format!(
+                            "max-w-[80%] rounded-lg p-3.5 text-sm {}",
+                            if is_user {
+                                "bg-primary text-primary-foreground"
+                            } else {
+                                "bg-muted border border-border text-foreground"
+                            }
+                        )>
+                            <div class="flex items-center justify-between gap-2 mb-1 opacity-80 text-[11px]">
+                                <span class="font-semibold">{role_label}</span>
+                                {(!is_user && !content.is_empty()).then(|| {
+                                    let copy_text = content.clone();
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="hover:underline cursor-pointer opacity-75 hover:opacity-100"
+                                            on:click=move |_| copy_to_clipboard(&copy_text)
+                                        >
+                                            {copy_label}
+                                        </button>
+                                    }
+                                })}
+                            </div>
+
+                            {if msg.is_streaming {
                                 view! {
-                                    <div class="py-16 text-center space-y-3">
-                                        <div class="size-12 rounded-full bg-primary/10 text-primary mx-auto flex items-center justify-center">
-                                            <svg class="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                                            </svg>
-                                        </div>
-                                        <h3 class="font-semibold text-sm">{empty_title.clone()}</h3>
-                                        <p class="text-xs text-muted-foreground max-w-sm mx-auto">{empty_hint.clone()}</p>
-                                        <div class="pt-4 flex flex-wrap justify-center gap-2 max-w-xl mx-auto">
-                                            <button
-                                                type="button"
-                                                class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
-                                                on:click=move |_| send_message(s1_btn.clone())
-                                            >
-                                                {s1.clone()}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
-                                                on:click=move |_| send_message(s2_btn.clone())
-                                            >
-                                                {s2.clone()}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
-                                                on:click=move |_| send_message(s3_btn.clone())
-                                            >
-                                                {s3.clone()}
-                                            </button>
-                                        </div>
+                                    <div class="flex items-center gap-2 py-1 text-muted-foreground text-xs italic">
+                                        <span class="size-2 rounded-full bg-primary animate-ping" />
+                                        <span>{streaming_label}</span>
+                                    </div>
+                                }.into_any()
+                            } else if let Some(err) = msg.error {
+                                view! {
+                                    <div class="text-destructive font-mono text-xs whitespace-pre-wrap">
+                                        {err}
                                     </div>
                                 }.into_any()
                             } else {
                                 view! {
-                                    <div class="space-y-4">
-                                        {msgs.into_iter().map(|msg| {
-                                            let is_user = msg.role == "user";
-                                            let content = msg.content.clone();
-                                            let role_lbl = if is_user { user_lbl.clone() } else { asst_lbl.clone() };
-                                            let copy_text = copy_lbl.clone();
-                                            let streaming_text = stream_lbl.clone();
-                                            view! {
-                                                <div class=format!("flex gap-3 {}", if is_user { "justify-end" } else { "justify-start" })>
-                                                    <div class=format!(
-                                                        "max-w-[80%] rounded-lg p-3.5 text-sm {}",
-                                                        if is_user {
-                                                            "bg-primary text-primary-foreground"
-                                                        } else {
-                                                            "bg-muted border border-border text-foreground"
-                                                        }
-                                                    )>
-                                                        <div class="flex items-center justify-between gap-2 mb-1 opacity-80 text-[11px]">
-                                                            <span class="font-semibold">
-                                                                {role_lbl}
-                                                            </span>
-                                                            {(!is_user && !content.is_empty()).then(|| {
-                                                                let text_to_copy = content.clone();
-                                                                view! {
-                                                                    <button
-                                                                        type="button"
-                                                                        class="hover:underline cursor-pointer opacity-75 hover:opacity-100"
-                                                                        on:click=move |_| copy_to_clipboard(&text_to_copy)
-                                                                    >
-                                                                        {copy_text}
-                                                                    </button>
-                                                                }
-                                                            })}
-                                                        </div>
-
-                                                        {if msg.is_streaming {
-                                                            view! {
-                                                                <div class="flex items-center gap-2 py-1 text-muted-foreground text-xs italic">
-                                                                    <span class="size-2 rounded-full bg-primary animate-ping"></span>
-                                                                    <span>{streaming_text}</span>
-                                                                </div>
-                                                            }.into_any()
-                                                        } else if let Some(err) = msg.error {
-                                                            view! {
-                                                                <div class="text-destructive font-mono text-xs whitespace-pre-wrap">
-                                                                    {err}
-                                                                </div>
-                                                            }.into_any()
-                                                        } else {
-                                                            view! {
-                                                                <div class="whitespace-pre-wrap leading-relaxed">
-                                                                    {msg.content}
-                                                                </div>
-                                                            }.into_any()
-                                                        }}
-                                                    </div>
-                                                </div>
-                                            }
-                                        }).collect::<Vec<_>>()}
+                                    <div class="whitespace-pre-wrap leading-relaxed">
+                                        {content}
                                     </div>
                                 }.into_any()
-                            }
-                        }
-                    }
-                </div>
+                            }}
+                        </div>
+                    </div>
+                }
+            }).collect::<Vec<_>>()}
+        </div>
+    }
+}
 
-                // Input Bar
-                <div class="p-3 border-t border-border bg-card/80">
-                    <form
-                        class="flex gap-2 items-end"
-                        on:submit=move |ev| {
+#[component]
+fn ChatInput(
+    input_text: ReadSignal<String>,
+    set_input_text: WriteSignal<String>,
+    is_generating: ReadSignal<bool>,
+    on_send: Callback<()>,
+) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let placeholder = locale.get("chat.input_placeholder").to_owned();
+    let label_send = locale.get("chat.send").to_owned();
+
+    let on_submit = move || on_send.run(());
+
+    view! {
+        <div class="p-3 border-t border-border bg-card/80">
+            <form
+                class="flex gap-2 items-end"
+                on:submit=move |ev| {
+                    ev.prevent_default();
+                    on_submit();
+                }
+            >
+                <textarea
+                    class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[44px] max-h-32 leading-tight"
+                    rows="1"
+                    placeholder=placeholder
+                    prop:value=move || input_text.get()
+                    on:input=move |ev| set_input_text.set(event_target_value(&ev))
+                    on:keydown=move |ev| {
+                        if ev.key() == "Enter" && !ev.shift_key() {
                             ev.prevent_default();
                             on_submit();
                         }
-                    >
-                        <textarea
-                            class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[44px] max-h-32 leading-tight"
-                            rows="1"
-                            placeholder=label_placeholder
-                            prop:value=move || input_text.get()
-                            on:input=move |ev| set_input_text.set(event_target_value(&ev))
-                            on:keydown=move |ev| {
-                                if ev.key() == "Enter" && !ev.shift_key() {
-                                    ev.prevent_default();
-                                    on_submit();
-                                }
-                            }
-                        />
-                        <button
-                            type="submit"
-                            disabled=move || input_text.get().trim().is_empty() || is_generating.get()
-                            class="px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
-                        >
-                            <span>{label_send}</span>
-                            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                            </svg>
-                        </button>
-                    </form>
-                </div>
-            </div>
+                    }
+                />
+                <button
+                    type="submit"
+                    disabled=move || input_text.get().trim().is_empty() || is_generating.get()
+                    class="px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
+                >
+                    <span>{label_send}</span>
+                    <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                </button>
+            </form>
         </div>
     }
 }
@@ -598,9 +701,7 @@ fn web_time_millis() -> u64 {
 fn copy_to_clipboard(_text: &str) {
     #[cfg(target_arch = "wasm32")]
     if let Some(window) = web_sys::window() {
-        let nav = window.navigator();
-        let clipboard = nav.clipboard();
-        let _ = clipboard.write_text(_text);
+        let _ = window.navigator().clipboard().write_text(_text);
     }
 }
 
