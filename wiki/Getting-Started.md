@@ -151,7 +151,7 @@ http://localhost:20128/dashboard
 Key Dashboard sections:
 - **Overview**: Real-time request volume, active routing tier, token compression metrics.
 - **Providers**: Add and manage API keys for 40+ providers.
-- **Combos**: Define smart fallback chains (e.g., `smart = claude-3-7-sonnet -> deepseek-r1 -> kiro`).
+- **Combos**: Define smart fallback chains (e.g., `smart = claude-sonnet-4-6 -> deepseek-v4-pro -> kiro` per `models.dev`).
 - **Chat Playground**: Test models interactively with live streaming and collapsible `<think>` reasoning chains.
 - **Settings**: Adjust RTK token compression strength, rate limits, and network timeouts.
 

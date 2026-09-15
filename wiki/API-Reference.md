@@ -52,9 +52,9 @@ Cache-Control: no-cache
 Connection: keep-alive
 server: pingora
 
-data: {"id":"chatcmpl-null-01","object":"chat.completion.chunk","created":1789418000,"model":"claude-3-7-sonnet","choices":[{"index":0,"delta":{"role":"assistant","content":"Pingora"},"finish_reason":null}]}
+data: {"id":"chatcmpl-null-01","object":"chat.completion.chunk","created":1789418000,"model":"claude-opus-5","choices":[{"index":0,"delta":{"role":"assistant","content":"Pingora"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-null-01","object":"chat.completion.chunk","created":1789418000,"model":"claude-3-7-sonnet","choices":[{"index":0,"delta":{"content":" uses"},"finish_reason":null}]}
+data: {"id":"chatcmpl-null-01","object":"chat.completion.chunk","created":1789418000,"model":"claude-opus-5","choices":[{"index":0,"delta":{"content":" uses"},"finish_reason":null}]}
 
 data: [DONE]
 ```
@@ -79,13 +79,13 @@ Returns the aggregated catalog of all active upstream models, combo aliases, and
       "owned_by": "nullrouter-combo"
     },
     {
-      "id": "claude-3-7-sonnet",
+      "id": "claude-opus-5",
       "object": "model",
       "created": 1789400000,
       "owned_by": "anthropic"
     },
     {
-      "id": "deepseek-r1",
+      "id": "deepseek-v4-pro",
       "object": "model",
       "created": 1789400000,
       "owned_by": "deepseek"
@@ -102,10 +102,10 @@ Returns the aggregated catalog of all active upstream models, combo aliases, and
 
 Native Anthropic schema support for Claude Code and Anthropic SDKs.
 
-#### Request Schema:
+#### Request Schema (per `models.dev` `anthropic` — e.g. `claude-opus-5` 2026-07-24):
 ```json
 {
-  "model": "claude-3-7-sonnet-20250219",
+  "model": "claude-opus-5",
   "max_tokens": 8192,
   "thinking": {
     "type": "enabled",

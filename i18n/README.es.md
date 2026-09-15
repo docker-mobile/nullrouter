@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edici%C3%B3n%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/impulsado%20por-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/Licencia-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/latencia%20de%20despacho-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/proveedores-40%2B%20integrados-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Los flujos de trabajo modernos con agentes de código (Claude Code, Cursor, Clin
 | **Uso de Memoria** | **~18 MB** en reposo | 120 – 350 MB |
 | **Asignación en SSE** | Escritor directo a búfer (`0` copias intermedias) | Concatenación de strings y bucles JSON |
 | **Compresor RTK** | Compresión multipaso de diffs (ahorro 20–40%) | Sin compresión o expresiones regulares simples |
-| **Normalización de Razonamiento** | Soporte Claude 3.7, DeepSeek R1, o1/o3/o4 | Pérdida frecuente de cadenas `<think>` |
+| **Normalización de Razonamiento** | Soporte Claude 4, DeepSeek R1/V3.2, o3/o4 | Pérdida frecuente de cadenas `<think>` |
 | **Interfaz de Usuario** | Leptos WebAssembly SPA en 35 idiomas | Paquetes pesados de Webpack/React |
 
 ---
@@ -86,7 +86,7 @@ claude
 1. Abre **Cursor Settings** ➔ **Models**.
 2. Activa **OpenAI API Key**: `nullrouter-local`.
 3. Configura **OpenAI Base URL**: `http://localhost:20128/v1`.
-4. Ingresa el modelo preferido (por ejemplo: `claude-3-7-sonnet`, `deepseek-r1` o `auto`).
+4. Ingresa el modelo preferido (por ejemplo: `claude-sonnet-4-6`, `deepseek-v4-pro` o `auto`).
 
 #### 🔹 Cline (Extensión de VS Code)
 1. Abre los ajustes de Cline.
@@ -110,4 +110,4 @@ claude
 
 ## 📄 Licencia
 
-NullRouter es software de código abierto bajo licencia [MIT](LICENSE).
+NullRouter es software de código abierto bajo licencia [EPL-2.0](LICENSE).

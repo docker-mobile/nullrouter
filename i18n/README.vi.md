@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-phi%C3%AAn%20b%E1%BA%A3n%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/%C4%91%C6%B0%E1%BB%A3c%20cung%20c%E1%BA%A5p%20b%E1%BB%9Fi-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/Gi%E1%BA%A5y%20ph%C3%A9p-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/%C4%91%E1%BB%99%20tr%E1%BB%85%20%C4%91i%E1%BB%81u%20ph%E1%BB%91i-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/Giao%20di%E1%BB%87n-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/nh%C3%A0%20cung%20c%E1%BA%A5p-40%2B%20%C4%91%C3%A3%20t%C3%ADch%20h%E1%BB%A3p-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Các công cụ lập trình tự hành (Claude Code, Cursor, Cline, Roo Code, C
 | **Bộ nhớ RAM chiếm dụng** | **~18 MB** khi nhàn rỗi | 120 – 350 MB |
 | **Cấp phát luồng SSE** | Ghi trực tiếp vào bộ đệm đầu ra (`0` lần cấp phát trung gian) | Nối chuỗi liên tục và giải mã JSON lặp lại |
 | **Bộ nén RTK** | Nén thông minh kết quả công cụ (tiết kiệm 20–40%) | Không nén |
-| **Chuẩn hóa chuỗi suy nghĩ**| Hỗ trợ đầy đủ Claude 3.7, DeepSeek R1, o1/o3/o4 | Dễ bị mất thẻ `<think>` |
+| **Chuẩn hóa chuỗi suy nghĩ**| Hỗ trợ đầy đủ Claude 4, DeepSeek R1/V3.2, o3/o4 | Dễ bị mất thẻ `<think>` |
 | **Bảng điều khiển** | Leptos WebAssembly SPA hỗ trợ 35 ngôn ngữ | Các gói Webpack/React nặng nề |
 
 ---
@@ -80,7 +80,7 @@ claude
 1. Vào **Cursor Settings** ➔ **Models**.
 2. Kích hoạt **OpenAI API Key** và điền `nullrouter-local`.
 3. Ghi đè **OpenAI Base URL**: `http://localhost:20128/v1`.
-4. Thêm mô hình muốn sử dụng (`claude-3-7-sonnet`, `deepseek-r1`, `auto`).
+4. Thêm mô hình muốn sử dụng (`claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`).
 
 ---
 
@@ -98,4 +98,4 @@ Truy cập [NullRouter GitHub Wiki](../wiki/Home.md) để xem chi tiết:
 
 ## 📄 Giấy phép
 
-NullRouter được phát hành dưới giấy phép mã nguồn mở [MIT](LICENSE).
+NullRouter được phát hành dưới giấy phép mã nguồn mở [EPL-2.0](LICENSE).

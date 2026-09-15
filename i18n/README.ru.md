@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-%D1%80%D0%B5%D0%B4%D0%B0%D0%BA%D1%86%D0%B8%D1%8F%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/%D0%BD%D0%B0%20%D0%B1%D0%B0%D0%B7%D0%B5-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/%D0%9B%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/%D0%B7%D0%B0%D0%B4%D0%B5%D1%80%D0%B6%D0%BA%D0%B0%20%D0%BC%D0%B0%D1%80%D1%88%D1%80%D1%83%D1%82%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D0%B8-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/%D0%BF%D1%80%D0%BE%D0%B2%D0%B0%D0%B9%D0%B4%D0%B5%D1%80%D1%8B-40%2B%20%D0%B8%D0%BD%D1%82%D0%B5%D0%B3%D1%80%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%BE-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@
 | **Память (idle)** | **~18 МБ** | 120 – 350 МБ |
 | **Аллокация в SSE** | Прямая запись в буфер (`0` промежуточных копий) | Конкатенация строк и частый парсинг JSON |
 | **Сжатие токенов RTK** | Нативная дифференциальная компактизация (20–40%) | Отсутствует |
-| **Нормализация рассуждений**| Полная поддержка Claude 3.7, DeepSeek R1, o1/o3/o4 | Часто теряются теги `<think>` |
+| **Нормализация рассуждений**| Полная поддержка Claude 4, DeepSeek R1/V3.2, o3/o4 | Часто теряются теги `<think>` |
 | **Панель управления** | Легкий Leptos WebAssembly SPA на 35 языках | Тяжелые бандлы Webpack/React |
 
 ---
@@ -80,7 +80,7 @@ claude
 1. Перейдите в **Cursor Settings** ➔ **Models**.
 2. Установите **OpenAI API Key**: `nullrouter-local`.
 3. Переопределите **OpenAI Base URL**: `http://localhost:20128/v1`.
-4. Укажите модели (например, `claude-3-7-sonnet`, `deepseek-r1` или `auto`).
+4. Укажите модели (например, `claude-sonnet-4-6`, `deepseek-v4-pro` или `auto`).
 
 ---
 
@@ -97,4 +97,4 @@ claude
 
 ## 📄 Лицензия
 
-NullRouter лицензирован под открытой лицензией [MIT](LICENSE).
+NullRouter лицензирован под открытой лицензией [EPL-2.0](LICENSE).

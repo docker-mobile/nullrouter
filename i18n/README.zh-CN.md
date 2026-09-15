@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/powered%20by-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/dispatch%20latency-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/providers-40%2B%20integrated-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@
 | **静态内存占用** | **~18 MB** | 120 – 350 MB |
 | **SSE 流式内存分配** | 直接缓冲区写入 (`0` 次中间分配) | 频繁字符串拼接与 JSON 解析 |
 | **RTK Token 压缩** | 原生多阶段工具结果压缩 (省 20–40%) | 无压缩或简陋正则替换 |
-| **推理协议规范化** | 完整支持 Claude 3.7、DeepSeek R1、o1/o3/o4 | 易丢失 `<think>` 思考链 |
+| **推理协议规范化** | 完整支持 Claude 4、DeepSeek R1、o3/o4 | 易丢失 `<think>` 思考链 |
 | **控制台界面** | 纯 Leptos WebAssembly SPA (支持 35 种语言) | 庞大慢速的 Webpack 前端 |
 | **并发模型** | Tokio 工作窃取多线程运行时 | 单线程 Event Loop 易受 I/O 阻塞 |
 
@@ -69,9 +69,9 @@
 │  • Anthropic ↔ OpenAI 双向桥接 │       │  • 零拷贝快照投影                       │
 └───────────────┬───────────────┘       └─────────────────────────────────────────┘
                 │
-                ├─► [第 1 层级: 订阅套餐] Claude 3.7 / 3.5, OpenAI o3-mini, GitHub Copilot
+                ├─► [第 1 层级: 订阅套餐] Claude 4 Sonnet / Opus, OpenAI o4-mini, GitHub Copilot
                 │   ↓ 达到配额上限或触发 429 速率限制
-                ├─► [第 2 层级: 超低成本] DeepSeek R1/V3, GLM-4, MiniMax, Groq, Mistral
+                ├─► [第 2 层级: 超低成本] DeepSeek R1/V3.2, GLM-4, MiniMax, Groq, Mistral
                 │   ↓ 达到自定义预算上限
                 └─► [第 3 层级: 免费与本地] Kiro AI, OpenCode Free, Vertex 免费层, Ollama, vLLM
 
@@ -130,7 +130,7 @@ claude
 1. 进入 **Cursor Settings** ➔ **Models**。
 2. 开启 **OpenAI API Key**，填入 `nullrouter-local`。
 3. 勾选并覆盖 **OpenAI Base URL**: `http://localhost:20128/v1`。
-4. 添加需要使用的模型 (例如 `claude-3-7-sonnet`, `deepseek-r1`, `auto`)。
+4. 添加需要使用的模型 (例如 `claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`)。
 
 #### 🔹 Cline (VS Code 扩展)
 1. 打开 Cline 设置。
@@ -166,7 +166,7 @@ claude
 ## ✨ 核心亮点
 
 1. **RTK (Runtime Token-Kompact) 工具输出智能压缩**：实时压缩 git diff、文件检索、编译器报错日志，在完全保留语义的前提下立省 20%~40% Token。
-2. **混合深度思考 (Hybrid Extended Thinking) 协议规范化**：无缝对接 Claude 3.7、DeepSeek R1、o1/o3/o4，控制台 Chat Playground 实时展开/收起 `<think>` 思考过程。
+2. **混合深度思考 (Hybrid Extended Thinking) 协议规范化**：无缝对接 Claude 4、DeepSeek R1、o3/o4，控制台 Chat Playground 实时展开/收起 `<think>` 思考过程。
 3. **无缝三级故障转移**：遇到 429 限流或 5xx 故障时，在 <1ms 内无感切换下一个层级，保证编码会话不掉线。
 4. **零拷贝 Cloudflare Pingora 内核**：彻底摒弃 Node.js 虚拟机与 V8 垃圾回收，单机支持超 40,000+ QPS 吞吐。
 5. **多语言 Leptos WASM 控制台**：完全在浏览器端以 WebAssembly 原生渲染，内建中文、英语、日语、西班牙语等 35 种本地化语言支持。
@@ -189,4 +189,4 @@ claude
 
 ## 📄 开源许可证
 
-NullRouter 采用 [MIT 开源许可证](LICENSE)。
+NullRouter 采用 [Eclipse Public License 2.0](LICENSE)。

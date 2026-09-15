@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edi%C3%A7%C3%A3o%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/desenvolvido%20com-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/Licen%C3%A7a-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/lat%C3%AAncia%20de%20despacho-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/provedores-40%2B%20integrados-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Fluxos modernos com agentes de codificação (Claude Code, Cursor, Cline, Roo Co
 | **Uso de Memória** | **~18 MB** em repouso | 120 – 350 MB |
 | **Alocação de Streaming SSE** | Escrita direta no buffer (`0` alocações intermediárias) | Concatenações contínuas de string e JSON |
 | **Compressão RTK** | Compactação diferencial de diffs (economia de 20–40%) | Sem compressão ou regex simples |
-| **Normalização de Raciocínio**| Suporte nativo Claude 3.7, DeepSeek R1, o1/o3/o4 | Perda frequente de cadeias `<think>` |
+| **Normalização de Raciocínio**| Suporte nativo Claude 4, DeepSeek R1/V3.2, o3/o4 | Perda frequente de cadeias `<think>` |
 | **Dashboard** | Leptos WebAssembly SPA com 35 idiomas | Bundles pesados em React/Webpack |
 
 ---
@@ -80,7 +80,7 @@ claude
 1. Acesse **Cursor Settings** ➔ **Models**.
 2. Ative **OpenAI API Key** e defina como `nullrouter-local`.
 3. Sobrescreva **OpenAI Base URL**: `http://localhost:20128/v1`.
-4. Adicione os modelos desejados (`claude-3-7-sonnet`, `deepseek-r1`, `auto`).
+4. Adicione os modelos desejados (`claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`).
 
 ---
 
@@ -98,4 +98,4 @@ Consulte a [NullRouter GitHub Wiki](../wiki/Home.md) para guias técnicos detalh
 
 ## 📄 Licença
 
-NullRouter é distribuído sob licença [MIT](LICENSE).
+NullRouter é distribuído sob licença [EPL-2.0](LICENSE).

@@ -92,7 +92,7 @@ taskkill /F /PID <PID>
 开发过程中经常遇到 Claude 或 OpenAI 速率限制：
 1. **添加多账号轮询**：在控制台 **Providers** 中为同一提供商添加多个 API 密钥，NullRouter 会自动通过权重分发负载，并在某个 Key 触发 429 时自动隔离该 Key 60 秒。
 2. **多层级智能兜底**：设置 `auto` 组合：
-   `Claude 3.7 (订阅优先) ➔ DeepSeek R1 (便宜兜底) ➔ Kiro AI / OpenCode (完全免费)`。
+   `Claude 4 (订阅优先) ➔ DeepSeek R1 (便宜兜底) ➔ Kiro AI / OpenCode (完全免费)`。
    触发 429 时客户端 IDE 完全无感知，直接平滑继续输出代码。
 
 ---

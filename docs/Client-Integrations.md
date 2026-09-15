@@ -31,7 +31,7 @@ Then run:
 claude
 ```
 
-NullRouter will intercept Claude Code's large tool outputs (`git diff`, `bash`, `grep`), apply RTK token compression, and preserve Claude 3.7 extended thinking tokens automatically.
+NullRouter will intercept Claude Code's large tool outputs (`git diff`, `bash`, `grep`), apply RTK token compression, and preserve Claude Opus 5 / Sonnet 4.6 extended thinking tokens automatically (per `models.dev` `anthropic`).
 
 ---
 
@@ -45,10 +45,10 @@ NullRouter will intercept Claude Code's large tool outputs (`git diff`, `bash`, 
    http://localhost:20128/v1
    ```
 5. In the model list, add:
-   - `auto` (Smart combo routing)
-   - `claude-3-7-sonnet`
-   - `deepseek-r1`
-   - `gpt-4o`
+   - `auto` (Smart combo routing — resolves via `models.dev` catalog)
+   - `claude-sonnet-4-6` (Anthropic 2026-02-17)
+   - `deepseek-v4-pro` (DeepSeek 2026-08-12)
+   - `gpt-5.6` / `gpt-6-astra` (OpenAI 2026)
 6. Click **Save**.
 
 ---
@@ -61,7 +61,7 @@ NullRouter will intercept Claude Code's large tool outputs (`git diff`, `bash`, 
 4. Configure fields:
    - **Base URL**: `http://localhost:20128/v1`
    - **API Key**: `nullrouter-local`
-   - **Model ID**: `auto` (or `claude-3-7-sonnet`)
+   - **Model ID**: `auto` (or `claude-sonnet-4-6`)
 5. Click **Done**.
 
 ---
@@ -108,16 +108,16 @@ Edit your Continue configuration file at `~/.continue/config.json`:
       "apiKey": "nullrouter-local"
     },
     {
-      "title": "Claude 3.7 Thinking",
+      "title": "Claude Opus 5 Thinking",
       "provider": "openai",
-      "model": "claude-3-7-sonnet",
+      "model": "claude-opus-5",
       "apiBase": "http://localhost:20128/v1",
       "apiKey": "nullrouter-local"
     },
     {
-      "title": "DeepSeek R1",
+      "title": "DeepSeek V4",
       "provider": "openai",
-      "model": "deepseek-r1",
+      "model": "deepseek-v4-pro",
       "apiBase": "http://localhost:20128/v1",
       "apiKey": "nullrouter-local"
     }
@@ -153,8 +153,8 @@ For reasoning models with architect mode:
 aider \
   --openai-api-base http://localhost:20128/v1 \
   --openai-api-key nullrouter-local \
-  --model claude-3-7-sonnet \
-  --editor-model deepseek-r1
+  --model claude-sonnet-4-6 \
+  --editor-model deepseek-v4-pro
 ```
 
 ---

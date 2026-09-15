@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/powered%20by-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/dispatch%20latency-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/providers-40%2B%20integrated-success.svg)](wiki/Provider-Configuration)
@@ -40,7 +40,7 @@ Modern agentic coding workflows (Claude Code, Cursor, Cline, Roo Code, Codex) ru
 | **Memory Footprint** | **~18 MB** steady state | 120 – 350 MB |
 | **SSE Streaming Allocation** | Direct buffer writer (`0` intermediate allocations) | Repeated string concatenation & JSON parse loops |
 | **RTK Token Saver** | Native multi-pass chunk compression (saves 20–40%) | Naive regex or uncompressed tool payloads |
-| **Reasoning Normalization** | Full hybrid thinking (Claude 3.7, DeepSeek R1, o1/o3/o4) | Often stripped, broken, or dropped in SSE |
+| **Reasoning Normalization** | Full hybrid thinking (Claude 5, DeepSeek V4, GPT-6/o3/o4, Gemini 3.8) | Often stripped, broken, or dropped in SSE |
 | **Dashboard UI** | Pure Leptos WebAssembly SPA with 35 languages | Heavy React/Webpack bundles |
 | **Concurrency Model** | Work-stealing multi-threaded Tokio runtime | Single-threaded Event Loop bottlenecked on I/O |
 
@@ -69,9 +69,9 @@ Modern agentic coding workflows (Claude Code, Cursor, Cline, Roo Code, Codex) ru
 │  • Anthropic ↔ OpenAI Bridge  │       │  • Zero-Copy Snapshot Projections       │
 └───────────────┬───────────────┘       └─────────────────────────────────────────┘
                 │
-                ├─► [Tier 1: SUBSCRIPTION] Claude 3.7 / 3.5, OpenAI o3-mini, GitHub Copilot
+                ├─► [Tier 1: SUBSCRIPTION] Claude Opus 5 / Sonnet 4.6, GPT-6 Astra, GitHub Copilot
                 │   ↓ Quota reached / 429 rate limit
-                ├─► [Tier 2: CHEAP] DeepSeek R1/V3, GLM-4, MiniMax, Groq, Mistral
+                ├─► [Tier 2: CHEAP] DeepSeek V4, GLM-5.2, MiniMax M3, Groq, Mistral
                 │   ↓ Budget limit reached
                 └─► [Tier 3: FREE & LOCAL] Kiro AI, OpenCode Free, Vertex Free, Ollama, vLLM
 
@@ -130,14 +130,14 @@ claude
 1. Go to **Cursor Settings** ➔ **Models**.
 2. Enable **OpenAI API Key** and set to `nullrouter-local`.
 3. Override **OpenAI Base URL**: `http://localhost:20128/v1`.
-4. Add desired model names (e.g., `claude-3-7-sonnet`, `deepseek-r1`, `gpt-4o`).
+4. Add desired model names (e.g., `claude-sonnet-4-6`, `deepseek-v4-pro`, `gpt-5.6` — see `models.dev`).
 
 #### 🔹 Cline (VS Code Extension)
 1. Open Cline Settings.
 2. Select Provider: **OpenAI Compatible**.
 3. **Base URL**: `http://localhost:20128/v1`
 4. **API Key**: `nullrouter-local`
-5. **Model ID**: `auto` (or `claude-3-7-sonnet`, `deepseek-r1`).
+5. **Model ID**: `auto` (or `claude-sonnet-4-6`, `deepseek-v4-pro`).
 
 #### 🔹 Roo Code
 1. Open Roo Code Settings.
@@ -185,9 +185,9 @@ Coding assistants burn up to 40% of their context windows on redundant tool outp
 
 ### 2. 🧠 Native Hybrid Extended Thinking & Reasoning
 Supports state-of-the-art reasoning protocols without dropping chain-of-thought blocks:
-- **Claude 3.7 Sonnet**: Automatic budget allocation (`medium` default = 8,192 tokens; `high` = 16,384 tokens). Dynamic `max_tokens` elevation above thinking budgets.
-- **DeepSeek R1**: Preserves `<think>` output tags and maps prompt caching (`prompt_cache_hit_tokens` to `cache_read_input_tokens`).
-- **OpenAI o1 / o3 / o4**: Seamless parameter translation between `reasoning_effort` and standard chat parameters.
+- **Claude 4.6 / Opus 5 / Fable 5.1** (per `models.dev`): Automatic budget allocation (`medium` default = 8,192 tokens; `high` = 16,384 tokens). Dynamic `max_tokens` elevation above thinking budgets.
+- **DeepSeek V4 Pro / V4 Flash**: Preserves `<think>` output tags and maps prompt caching (`prompt_cache_hit_tokens` to `cache_read_input_tokens`).
+- **OpenAI GPT-6 Astra / o3 / o4**: Seamless parameter translation between `reasoning_effort` and standard chat parameters.
 
 ### 3. 🛡️ Resilient Multi-Tier Failover
 Never hit a hard stop during critical refactors:
@@ -213,16 +213,16 @@ NullRouter integrates with **40+ providers** across all tiers:
 
 | Provider | Supported Models | Reasoning Support | Prompt Caching | Free Tier Available |
 | :--- | :--- | :---: | :---: | :---: |
-| **Anthropic** | Claude 3.7 Sonnet, 3.5 Sonnet, 3.5 Haiku | ✅ (Hybrid) | ✅ | ❌ |
-| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3-mini | ✅ | ✅ | ❌ |
-| **DeepSeek** | DeepSeek-V3, DeepSeek-R1 | ✅ (Native) | ✅ | ❌ (Ultra-cheap) |
-| **Google Gemini** | Gemini 2.0 Flash, Gemini 1.5 Pro | ✅ | ✅ | ✅ (Free API tier) |
-| **Groq** | Llama 3.3 70B, DeepSeek R1 Distill | ✅ | ❌ | ✅ (Generous free tier) |
-| **Mistral AI** | Mistral Large 2, Codestral, Pixtral | ❌ | ❌ | ✅ |
-| **MiniMax** | MiniMax-Text-01 | ❌ | ❌ | ❌ ($0.20/1M tokens) |
-| **GLM (Zhipu)** | GLM-4-Plus, GLM-4-Flash | ❌ | ❌ | ✅ |
-| **Kiro AI** | Claude 3.5 Sonnet, MiniMax, GLM | ❌ | ❌ | ✅ (Free monthly quota) |
-| **OpenCode Free** | Qwen 2.5 Coder, Llama 3 | ❌ | ❌ | ✅ (No signup required) |
+| **Anthropic** | Claude Opus 5, Sonnet 4.6, Haiku 4.5 | ✅ (Hybrid) | ✅ | ❌ |
+| **OpenAI** | GPT-6 Astra, GPT-5.6, o4-mini | ✅ | ✅ | ❌ |
+| **DeepSeek** | DeepSeek V4 Pro, V4 Flash | ✅ (Native) | ✅ | ❌ (Ultra-cheap) |
+| **Google Gemini** | Gemini 3.8 Flash, 3.7 Flash | ✅ | ✅ | ✅ (Free API tier) |
+| **Groq** | Qwen3.8 27B, GPT-OSS 120B | ✅ | ❌ | ✅ (Generous free tier) |
+| **Mistral AI** | Mistral Medium 3.5, Devstral 2, Codestral | ❌ | ❌ | ✅ |
+| **MiniMax** | MiniMax M3, M2.5 | ❌ | ❌ | ❌ ($0.20/1M tokens) |
+| **GLM (Zhipu)** | GLM-5.2, GLM-5.3 Flash | ❌ | ❌ | ✅ |
+| **Kiro AI** | Claude Sonnet 4.6, MiniMax M3, GLM-5.2 | ❌ | ❌ | ✅ (Free monthly quota) |
+| **OpenCode Free** | Qwen3.8 Coder, Llama 4 | ❌ | ❌ | ✅ (No signup required) |
 | **Ollama / vLLM** | Any locally served GGUF/Safetensors | ✅ | ✅ | ✅ (100% Local & Free) |
 
 ---
@@ -286,4 +286,4 @@ For complete troubleshooting of port collisions (`E1001`), upstream timeouts (`E
 
 ## 📄 License
 
-NullRouter is open source software licensed under the [MIT License](LICENSE).
+NullRouter is open source software licensed under the [Eclipse Public License 2.0](LICENSE).

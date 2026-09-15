@@ -366,28 +366,51 @@ pub fn for_model(provider: &str, model: &str) -> Capabilities {
         );
 
     // Infer capabilities for modern reasoning models missing from static dump.
+    // Source for model family coverage: https://models.dev/api.json (anthropic: claude-opus-5 2026-07-24,
+    // claude-sonnet-4-6 2026-02-17; openai: gpt-6-astra 2026-09-04, gpt-5.6 2026-07-09; deepseek: v4 2026-09-10;
+    // google: gemini-3.8-flash 2026-09-02; zhipu: glm-5.2 2026-06-13).
     if !resolved.reasoning {
         let lowered = base_model.to_ascii_lowercase();
-        if lowered.contains("claude-3-7") || lowered.contains("claude-3.7") {
+        if lowered.contains("claude-5")
+            || lowered.contains("claude-4")
+            || lowered.contains("claude-fable")
+            || lowered.contains("claude-3-7")
+            || lowered.contains("claude-3.7")
+        {
             resolved.reasoning = true;
             resolved.thinking_format = Some(ThinkingFormat::ClaudeBudget);
             resolved.thinking_can_disable = true;
             resolved.max_output = resolved.max_output.max(64000);
-        } else if lowered.contains("deepseek-r1") || lowered == "deepseek-reasoner" {
+        } else if lowered.contains("deepseek-r1")
+            || lowered.contains("deepseek-v4")
+            || lowered == "deepseek-reasoner"
+        {
             resolved.reasoning = true;
             resolved.thinking_format = Some(ThinkingFormat::DeepSeek);
             resolved.thinking_can_disable = true;
             resolved.max_output = resolved.max_output.max(64000);
         } else if lowered.contains("flash-thinking")
             || (lowered.contains("gemini-2.0") && lowered.contains("thinking"))
+            || (lowered.contains("gemini-2.5") && lowered.contains("thinking"))
+            || (lowered.contains("gemini-3.") && lowered.contains("thinking"))
+            || lowered.contains("gemini-3.8-flash")
+            || lowered.contains("gemini-3.7-flash")
         {
             resolved.reasoning = true;
             resolved.thinking_format = Some(ThinkingFormat::GeminiBudget);
             resolved.thinking_can_disable = false;
             resolved.max_output = resolved.max_output.max(65536);
+        } else if lowered.contains("glm-5") || lowered.contains("glm-4.7") {
+            // Zhipu GLM-5.2 (2026-06-13) per models.dev `alibaba`/`zhipuai` — reasoning model.
+            resolved.reasoning = true;
+            resolved.thinking_format = Some(ThinkingFormat::OpenAi);
+            resolved.thinking_can_disable = true;
+            resolved.max_output = resolved.max_output.max(64000);
         } else if lowered.starts_with("o1")
             || lowered.starts_with("o3")
             || lowered.starts_with("o4")
+            || lowered.starts_with("gpt-5")
+            || lowered.starts_with("gpt-6")
         {
             resolved.reasoning = true;
             resolved.thinking_format = Some(ThinkingFormat::OpenAi);

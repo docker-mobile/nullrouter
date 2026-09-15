@@ -3,7 +3,7 @@ name = "nullrouter-auth"
 version = "0.5.20"
 edition = "2024"
 rust-version = "1.88"
-license = "MIT"
+license = "EPL-2.0"
 description = "Actix authentication and authorization microservice for nullrouter"
 
 [lib]

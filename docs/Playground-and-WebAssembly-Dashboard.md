@@ -41,7 +41,7 @@ The Chat Playground allows developers to test model configurations, inspect toke
 
 ### Key Features of the Playground:
 1. **Collapsible `<think>` Reasoning Blocks**:
-   - Native parser captures thoughts from Claude 3.7 hybrid thinking, DeepSeek R1, and Gemini 2.0 Flash Thinking.
+   - Native parser captures thoughts from Claude Opus 5 / Sonnet 4.6 hybrid thinking, DeepSeek V4, and Gemini 3.8 Flash Thinking (per `models.dev` 2026-09).
    - Formatted in an interactive collapsible panel with live token counters.
 2. **Real-Time Token & Latency Metrics**:
    - Time to First Token (TTFT) in milliseconds.

@@ -12,10 +12,10 @@ Instead of hardcoding a specific provider model in your editor, NullRouter lets 
 
 | Combo Name | Target Models (in priority order) | Typical Use Case |
 | :--- | :--- | :--- |
-| `auto` | `claude-3-7-sonnet` ➔ `deepseek-r1` ➔ `kiro-claude` | Best general coding agent setup |
-| `fast` | `gpt-4o-mini` ➔ `gemini-2.0-flash` ➔ `groq-llama-3.3-70b` | Autocompletion, quick inline edits |
-| `smart` | `o3-mini` ➔ `claude-3-7-sonnet` ➔ `deepseek-r1` | Complex architectural reasoning |
-| `coder` | `qwen-2.5-coder-32b` ➔ `codestral` ➔ `deepseek-v3` | Dedicated code generation & test writing |
+| `auto` | `claude-sonnet-4-6` ➔ `deepseek-v4-pro` ➔ `kiro-claude` | Best general coding agent setup (source: `models.dev` `anthropic`/`deepseek`) |
+| `fast` | `gpt-5.6` ➔ `gemini-3.8-flash` ➔ `groq/qwen3.8-27b` | Autocompletion, quick inline edits |
+| `smart` | `gpt-6-astra` ➔ `claude-opus-5` ➔ `deepseek-v4-flash` | Complex architectural reasoning |
+| `coder` | `qwen3.8-coder` ➔ `devstral-2` ➔ `deepseek-v4-pro` | Dedicated code generation & test writing |
 
 ### Customizing Combos in the Dashboard
 1. Go to **Dashboard** ➔ **Combos**.

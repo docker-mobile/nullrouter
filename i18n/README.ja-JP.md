@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/powered%20by-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/dispatch%20latency-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/providers-40%2B%20integrated-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Claude Code、Cursor、Cline、Roo Code、Codexなどのエージェントツー
 | **常駐メモリ使用量** | **~18 MB** | 120 〜 350 MB |
 | **SSEストリーミング割り当て** | 出力バッファ直接書き込み（中間アロケーション `0`） | 頻繁な文字列結合とJSONパース |
 | **RTK トークン圧縮** | ネイティブ差分圧縮（20〜40%節約） | 圧縮なし、または単純な正規表現 |
-| **思考プロセス正規化** | Claude 3.7、DeepSeek R1、o1/o3/o4ネイティブ対応 | `<think>` タグが喪失しやすい |
+| **思考プロセス正規化** | Claude 4、DeepSeek R1、o3/o4ネイティブ対応 | `<think>` タグが喪失しやすい |
 | **ダッシュボード UI** | Leptos WebAssembly SPA（35言語対応） | 巨大なReact/Webpackバンドル |
 
 ---
@@ -86,7 +86,7 @@ claude
 1. **Cursor Settings** ➔ **Models** を開く。
 2. **OpenAI API Key** を有効にし、`nullrouter-local` と入力。
 3. **OpenAI Base URL** を上書き: `http://localhost:20128/v1`。
-4. 使用したいモデル名（例: `claude-3-7-sonnet`, `deepseek-r1`, `auto`）を追加。
+4. 使用したいモデル名（例: `claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`）を追加。
 
 #### 🔹 Cline (VS Code 拡張機能)
 1. Cline 設定を開く。
@@ -111,4 +111,4 @@ claude
 
 ## 📄 ライセンス
 
-NullRouter は [MIT License](LICENSE) の下で公開されているオープンソースソフトウェアです。
+NullRouter は [EPL-2.0](LICENSE) の下で公開されているオープンソースソフトウェアです。

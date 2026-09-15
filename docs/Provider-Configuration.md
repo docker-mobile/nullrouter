@@ -12,7 +12,7 @@ NullRouter prioritizes routes across three distinct tiers:
    - High-cost or fixed monthly billing (e.g. Anthropic Pro/Team, OpenAI Team/Plus, GitHub Copilot).
    - Use these first until quota reset periods or rate limits hit.
 2. **Tier 2: Ultra-Cheap Pay-as-you-go**
-   - Providers offering high-intelligence frontier models at $0.10–$0.60 per million tokens (e.g. DeepSeek R1/V3, GLM-4, MiniMax, Groq).
+   - Providers offering high-intelligence frontier models at $0.10–$0.60 per million tokens (e.g. DeepSeek R1/V3.2, GLM-4.7, MiniMax, Groq).
    - Activates automatically when Tier 1 reaches quota limits.
 3. **Tier 3: Free & Local Models**
    - Zero-cost providers (e.g. Kiro AI, OpenCode Free, Google Vertex free credits) or local engines (Ollama, vLLM, LM Studio).
@@ -34,36 +34,36 @@ Alternatively, edit `./nullrouter-state.json` directly.
 
 ## 📋 Configuration Details by Provider
 
-### 1. Anthropic (Claude 3.7 & 3.5)
-- **Supported Models**: `claude-3-7-sonnet-20250219`, `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`.
+### 1. Anthropic (Claude 5 / 4.6)
+- **Supported Models**: `claude-opus-5` (2026-07-24), `claude-sonnet-4-6` (2026-02-17), `claude-haiku-4-5` (2025-10-15), `claude-fable-5.1` (2026-09-01) — source: `models.dev` `anthropic` (see `https://models.dev/api.json`).
 - **Hybrid Extended Thinking**: Automatically supported. When requests omit `thinking`, NullRouter defaults to medium budget (8,192 tokens) and elevates `max_tokens` appropriately.
 - **Prompt Caching**: Automatically enabled; cached blocks reuse context across requests.
 
-### 2. DeepSeek (R1 & V3)
-- **Supported Models**: `deepseek-reasoner` (R1), `deepseek-chat` (V3).
+### 2. DeepSeek (V4)
+- **Supported Models**: `deepseek-v4-pro` (2026-08-12), `deepseek-v4-flash` (2026-09-10), `deepseek-v3.2` (2025-12-01) — per `models.dev` `deepseek`.
 - **Prompt Caching Normalization**: DeepSeek's `prompt_cache_hit_tokens` and `prompt_cache_miss_tokens` are translated into standard `cache_read_input_tokens` and `cache_creation_input_tokens`.
 - **Native `<think>` Streaming**: Reasoning tokens are streamed cleanly without polluting downstream tool call inputs.
 
-### 3. OpenAI (GPT-4o & Reasoning Models)
-- **Supported Models**: `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini`.
+### 3. OpenAI (GPT-6 / 5.6 & Reasoning)
+- **Supported Models**: `gpt-6-astra` (2026-09-04), `gpt-5.6` (2026-07-09), `gpt-5.4-mini` (2026-03-17), `o3`, `o4-mini` — per `models.dev` `openai`.
 - **Reasoning Effort Translation**: Seamlessly maps `reasoning_effort: "low" | "medium" | "high"` to upstream models.
 
-### 4. Google Gemini
-- **Supported Models**: `gemini-2.0-flash`, `gemini-1.5-pro`.
+### 4. Google Gemini (3.8)
+- **Supported Models**: `gemini-3.8-flash` (2026-09-02), `gemini-3.7-flash` (2026-08-13), `gemini-3.6-flash` (2026-07-21) — per `models.dev` `google`.
 - **Free Quota**: Gemini's free tier (15 requests/minute) is handled gracefully with automatic retry on 429.
 
 ### 5. Kiro AI (Free Tier)
-- **Features**: Free monthly tier providing access to Claude 3.5, GLM-4, and MiniMax models.
+- **Features**: Free monthly tier providing access to Claude Sonnet 4.6, GLM-5.2, and MiniMax M3 — proxied free models tracked via `models.dev`.
 - **Setup**: One-click connect in Dashboard without manual token creation.
 
 ### 6. OpenCode Free (Zero Auth)
-- **Features**: Free open-source model proxy (Qwen 2.5 Coder, Llama 3.3).
+- **Features**: Free open-source model proxy (Qwen3.8 Coder, Llama 4).
 - **Setup**: Toggle ON in Dashboard; no API key required.
 
 ### 7. Local Models (Ollama, vLLM, LM Studio)
 - **Ollama**:
   - Default Endpoint: `http://localhost:11434/v1`
-  - Recommended Models: `qwen2.5-coder:32b`, `deepseek-r1:14b`, `llama3.3:70b`.
+  - Recommended Models: `qwen3.8-coder:30b`, `deepseek-v4:32b`, `llama4:maverick`.
 - **vLLM**:
   - Point the connection URL to `http://localhost:8000/v1`.
 - **LM Studio**:

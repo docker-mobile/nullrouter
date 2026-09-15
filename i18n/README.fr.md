@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-%C3%A9dition%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/propuls%C3%A9%20par-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/Licence-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/latence%20de%20routage-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/fournisseurs-40%2B%20int%C3%A9gr%C3%A9s-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Les assistants de programmation agéntiques modernes (Claude Code, Cursor, Cline
 | **Empreinte Mémoire** | **~18 Mo** au repos | 120 – 350 Mo |
 | **Flux SSE** | Écriture directe dans le tampon (`0` allocation intermédiaire) | Concaténations répétitives et parse JSON |
 | **Compresseur RTK** | Réduction intelligente des sorties d'outils (20–40% d'économie) | Aucune compression |
-| **Gestion du Raisonnement** | Claude 3.7, DeepSeek R1, o1/o3/o4 natif | Perte fréquente des blocs `<think>` |
+| **Gestion du Raisonnement** | Claude 4, DeepSeek R1/V3.2, o3/o4 natif | Perte fréquente des blocs `<think>` |
 | **Tableau de Bord** | Leptos WebAssembly SPA en 35 langues | Bundles lourds Webpack / React |
 
 ---
@@ -80,7 +80,7 @@ claude
 1. Accédez à **Cursor Settings** ➔ **Models**.
 2. Activez **OpenAI API Key** : `nullrouter-local`.
 3. Surchargez **OpenAI Base URL** : `http://localhost:20128/v1`.
-4. Ajoutez les modèles souhaités (`claude-3-7-sonnet`, `deepseek-r1`, `auto`).
+4. Ajoutez les modèles souhaités (`claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`).
 
 ---
 
@@ -97,4 +97,4 @@ Consultez le [NullRouter GitHub Wiki](../wiki/Home.md) pour les guides approfond
 
 ## 📄 Licence
 
-NullRouter est un logiciel libre distribué sous licence [MIT](LICENSE).
+NullRouter est un logiciel libre distribué sous licence [EPL-2.0](LICENSE).

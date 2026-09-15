@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/powered%20by-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/routing%20latenz-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/provider-40%2B%20integriert-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Moderne KI-Coding-Agenten (Claude Code, Cursor, Cline, Roo Code, Codex) führen 
 | **Speicherverbrauch** | **~18 MB** im Leerlauf | 120 – 350 MB |
 | **SSE-Stream-Allokation**| Direkter Buffer-Writer (`0` Zwischenallokationen) | Ständige String-Verkettungen und JSON-Parsen |
 | **RTK-Token-Komprimierung** | Native Diff-Kompaktierung (20–40% Ersparnis) | Keine Kompression |
-| **Reasoning-Unterstützung** | Vollständig für Claude 3.7, DeepSeek R1, o1/o3/o4 | Häufiger Verlust von `<think>`-Ketten |
+| **Reasoning-Unterstützung** | Vollständig für Claude 4, DeepSeek R1/V3.2, o3/o4 | Häufiger Verlust von `<think>`-Ketten |
 | **Dashboard** | Leptos WebAssembly SPA in 35 Sprachen | Aufgeblähte Webpack/React-Bundles |
 
 ---
@@ -80,7 +80,7 @@ claude
 1. Öffnen Sie **Cursor Settings** ➔ **Models**.
 2. Setzen Sie **OpenAI API Key** auf `nullrouter-local`.
 3. Überschreiben Sie **OpenAI Base URL**: `http://localhost:20128/v1`.
-4. Tragen Sie die gewünschten Modelle ein (z. B. `claude-3-7-sonnet`, `deepseek-r1`, `auto`).
+4. Tragen Sie die gewünschten Modelle ein (z. B. `claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`).
 
 ---
 
@@ -97,4 +97,4 @@ Weitere detaillierte Anleitungen finden Sie im [NullRouter GitHub Wiki](../wiki/
 
 ## 📄 Lizenz
 
-NullRouter ist freie Open-Source-Software unter der [MIT-Lizenz](LICENSE).
+NullRouter ist freie Open-Source-Software unter der [EPL-2.0](LICENSE).

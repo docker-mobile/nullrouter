@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Pingora](https://img.shields.io/badge/powered%20by-Cloudflare%20Pingora-blue.svg?logo=cloudflare)](https://github.com/cloudflare/pingora)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/dispatch%20latency-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
 [![Providers](https://img.shields.io/badge/providers-40%2B%20integrated-success.svg)](../wiki/Provider-Configuration.md)
@@ -40,7 +40,7 @@ Claude Code, Cursor, Cline, Roo Code, Codex와 같은 현대적인 코딩 에이
 | **메모리 사용량** | **~18 MB** (유휴 상태) | 120 ~ 350 MB |
 | **SSE 스트리밍 할당** | 출력 버퍼 직접 쓰기 (`0`회 중간 할당) | 빈번한 문자열 결합 및 JSON 파싱 |
 | **RTK 토큰 압축** | 네이티브 차분 압축 (20~40% 절감) | 압축 없음 |
-| **추론 체인 표준화**| Claude 3.7, DeepSeek R1, o1/o3/o4 완벽 지원 | `<think>` 블록 누락 빈번 |
+| **추론 체인 표준화**| Claude 4, DeepSeek R1/V3.2, o3/o4 완벽 지원 | `<think>` 블록 누락 빈번 |
 | **대시보드 UI** | Leptos WebAssembly SPA (35개 언어) | 무거운 Webpack/React 번들 |
 
 ---
@@ -80,7 +80,7 @@ claude
 1. **Cursor Settings** ➔ **Models**로 이동합니다.
 2. **OpenAI API Key**를 켜고 `nullrouter-local`을 입력합니다.
 3. **OpenAI Base URL**을 재정의합니다: `http://localhost:20128/v1`.
-4. 사용할 모델 이름을 추가합니다 (`claude-3-7-sonnet`, `deepseek-r1`, `auto`).
+4. 사용할 모델 이름을 추가합니다 (`claude-sonnet-4-6`, `deepseek-v4-pro`, `auto`).
 
 ---
 
@@ -97,4 +97,4 @@ claude
 
 ## 📄 라이선스
 
-NullRouter는 [MIT 라이선스](LICENSE)를 따르는 오픈 소스 소프트웨어입니다.
+NullRouter는 [EPL-2.0](LICENSE)를 따르는 오픈 소스 소프트웨어입니다.
