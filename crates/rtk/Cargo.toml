@@ -1,0 +1,20 @@
+[package]
+name = "nullrouter-rtk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "NullStack RTK — zero-copy rule-based tool-result compression (own brand, not a 9Router copy)"
+repository.workspace = true
+
+[lib]
+name = "nullrouter_rtk"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -14,6 +14,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// How a combo picks among its models.
+///
+/// Own brand: NullRouter ships the Rust/Pingora equivalents of OmniRoute's
+/// `19` strategies and 9Router's `capacity` adapter, but in zero-copy style.
+/// Stub variants below are parseable now and execute as `Fallback` until their
+/// scorer lands — this keeps the API stable while the scorers land incrementally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComboStrategy {
     /// Try models in their configured order.
@@ -22,6 +27,18 @@ pub(crate) enum ComboStrategy {
     RoundRobin,
     /// Ask every model in parallel, then have a judge synthesize one answer.
     Fusion,
+    /// Weighted random by `weight` (port of OmniRoute `weighted`).
+    Weighted,
+    /// Least-used / P2C power-of-two-choices (port of OmniRoute `p2c`/`least-used`).
+    P2c,
+    /// Cost-optimized: cheapest healthy first (port of OmniRoute `cost-optimized`).
+    CostOptimized,
+    /// Quota-share DRR with per-connection semaphore (port of OmniRoute quota-share).
+    QuotaShare,
+    /// Auto: 16-factor scored (`health + quota + costInv + latencyP95 + taskFit`).
+    Auto,
+    /// Capacity: auto-float vision/pdf capable model (port of 9Router `capacity`).
+    Capacity,
 }
 
 impl ComboStrategy {
@@ -32,7 +49,28 @@ impl ComboStrategy {
         match raw {
             Some("round-robin") => Self::RoundRobin,
             Some("fusion") => Self::Fusion,
+            Some("weighted") => Self::Weighted,
+            Some("p2c") | Some("least-used") => Self::P2c,
+            Some("cost-optimized") | Some("cost_optimized") | Some("cheap") => Self::CostOptimized,
+            Some("quota-share") | Some("quota_share") => Self::QuotaShare,
+            Some("auto") => Self::Auto,
+            Some("capacity") => Self::Capacity,
             _ => Self::Fallback,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Fallback => "fallback",
+            Self::RoundRobin => "round-robin",
+            Self::Fusion => "fusion",
+            Self::Weighted => "weighted",
+            Self::P2c => "p2c",
+            Self::CostOptimized => "cost-optimized",
+            Self::QuotaShare => "quota-share",
+            Self::Auto => "auto",
+            Self::Capacity => "capacity",
         }
     }
 }

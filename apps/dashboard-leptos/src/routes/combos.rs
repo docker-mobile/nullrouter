@@ -420,10 +420,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_models("openai/gpt-5\ngemini/gemini-2.5-pro"),
+            parse_models("openai/gpt-5\ngemini/gemini-3.8-flash"),
             vec![
                 "openai/gpt-5".to_owned(),
-                "gemini/gemini-2.5-pro".to_owned()
+                "gemini/gemini-3.8-flash".to_owned()
             ]
         );
     }

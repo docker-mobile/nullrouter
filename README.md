@@ -9,10 +9,10 @@
 [![License: EPL-2.0](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Latency](https://img.shields.io/badge/dispatch%20latency-%3C50%C2%B5s-brightgreen.svg)](https://github.com/nullrouter/nullrouter)
 [![WebAssembly](https://img.shields.io/badge/UI-Leptos%20WASM-purple.svg?logo=webassembly)](apps/dashboard-leptos)
-[![Providers](https://img.shields.io/badge/providers-40%2B%20integrated-success.svg)](wiki/Provider-Configuration)
+[![Providers](https://img.shields.io/badge/providers-352%20integrated-success.svg)](wiki/Provider-Configuration)
 
 <p align="center">
-  <b>Never drop an agentic session. Cut token usage by 20–40% with RTK. Route intelligently across 40+ providers with sub-millisecond dispatch.</b>
+  <b>Never drop an agentic session. Cut token usage by 15–95% with NullStack (RTK+Caveman). Route intelligently across 352 providers with sub-millisecond dispatch.</b>
 </p>
 
 [🚀 Quick Start](#-quick-start) • [✨ Key Features](#-key-features) • [🔌 Client Integrations](#-client-integrations) • [🌐 Providers](#-supported-providers) • [📊 Benchmarks](#-benchmarks) • [📖 Documentation Wiki](wiki/Home.md) • [🩺 Diagnostics](wiki/Diagnostics-and-Troubleshooting.md)
@@ -39,7 +39,7 @@ Modern agentic coding workflows (Claude Code, Cursor, Cline, Roo Code, Codex) ru
 | **Internal Routing Latency** | **< 50 microseconds** fast path | 15 – 45 milliseconds |
 | **Memory Footprint** | **~18 MB** steady state | 120 – 350 MB |
 | **SSE Streaming Allocation** | Direct buffer writer (`0` intermediate allocations) | Repeated string concatenation & JSON parse loops |
-| **RTK Token Saver** | Native multi-pass chunk compression (saves 20–40%) | Naive regex or uncompressed tool payloads |
+| **NullStack Token Saver** | Rust RTK (49 filters) + Caveman stacked, 15–95% (`crates/rtk`, `crates/caveman`) | Naive regex or uncompressed tool payloads |
 | **Reasoning Normalization** | Full hybrid thinking (Claude 5, DeepSeek V4, GPT-6/o3/o4, Gemini 3.8) | Often stripped, broken, or dropped in SSE |
 | **Dashboard UI** | Pure Leptos WebAssembly SPA with 35 languages | Heavy React/Webpack bundles |
 | **Concurrency Model** | Work-stealing multi-threaded Tokio runtime | Single-threaded Event Loop bottlenecked on I/O |
@@ -209,7 +209,7 @@ Never hit a hard stop during critical refactors:
 
 ## 🌐 Supported Providers
 
-NullRouter integrates with **40+ providers** across all tiers:
+NullRouter integrates with **352 providers (1312 chat IDs, syncing via `models.dev` + OmniRoute catalog)** across all tiers:
 
 | Provider | Supported Models | Reasoning Support | Prompt Caching | Free Tier Available |
 | :--- | :--- | :---: | :---: | :---: |

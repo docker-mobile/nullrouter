@@ -3243,6 +3243,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullrouter-caveman"
+version = "0.5.20"
+dependencies = [
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "nullrouter-contracts"
 version = "0.5.20"
 dependencies = [
@@ -3405,6 +3413,15 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nullrouter-rtk"
+version = "0.5.20"
+dependencies = [
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

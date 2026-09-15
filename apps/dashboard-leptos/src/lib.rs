@@ -73,6 +73,7 @@ pub fn App() -> impl leptos::IntoView {
                     <Route path=path!("models") view=routes::Models />
                     <Route path=path!("combos") view=routes::Combos />
                     <Route path=path!("pricing") view=routes::Pricing />
+                    <Route path=path!("free-tiers") view=routes::FreeTiers />
                     <Route path=path!("keys") view=routes::Keys />
                     <Route path=path!("users") view=routes::Users />
                     <Route path=path!("sso") view=routes::Sso />

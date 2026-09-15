@@ -85,11 +85,11 @@ pub(crate) const DASHBOARD_MODELS: [DashboardModel; 6] = [
         caps: CAPS_DEFAULT,
     },
     DashboardModel {
-        id: "gemini/gemini-2.5-pro",
+        id: "gemini/gemini-3.8-flash",
         provider: "gemini",
-        model: "gemini-2.5-pro",
-        full_model: "gemini/gemini-2.5-pro",
-        alias: "gemini-2.5-pro",
+        model: "gemini-3.8-flash",
+        full_model: "gemini/gemini-3.8-flash",
+        alias: "gemini-3.8-flash",
         caps: CAPS_DEFAULT,
     },
     DashboardModel {
@@ -130,7 +130,7 @@ pub(crate) const OPENAI_MODELS: [OpenAiModel; 6] = [
         owned_by: "anthropic",
     },
     OpenAiModel {
-        id: "gemini/gemini-2.5-pro",
+        id: "gemini/gemini-3.8-flash",
         object: "model",
         owned_by: "gemini",
     },

@@ -170,13 +170,13 @@
    "format": null,
    "defaultModel": null
   },
-  "searchViaChat": {
-   "baseUrl": null,
-   "authType": null,
-   "authHeader": null,
-   "format": null,
-   "defaultModel": "gemini-2.5-flash"
-  }
+   "searchViaChat": {
+    "baseUrl": null,
+    "authType": null,
+    "authHeader": null,
+    "format": null,
+    "defaultModel": "gemini-3.8-flash"
+   }
  },
  "github": {
   "embeddingConfig": {

@@ -45,9 +45,9 @@ const DASHBOARD_MODELS_ARRAY: [DashboardModelEntry; 6] = [
     },
     DashboardModelEntry {
         provider: "gemini",
-        model: "gemini-2.5-pro",
-        full_model: "gemini/gemini-2.5-pro",
-        alias: "gemini-2.5-pro",
+        model: "gemini-3.8-flash",
+        full_model: "gemini/gemini-3.8-flash",
+        alias: "gemini-3.8-flash",
         caps: MODEL_CAPS_DEFAULT,
     },
     DashboardModelEntry {
