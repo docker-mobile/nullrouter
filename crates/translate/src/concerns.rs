@@ -537,3 +537,45 @@ mod tests {
         );
     }
 }
+
+/// Ensure all `tool_calls` have valid IDs and string arguments.
+///
+/// Some providers send tool calls without an `id`, or with non-string
+/// `arguments`. This normalizes them so downstream translators don't
+/// panic. Ports `open-sse/translator/concerns/toolCall.js:ensureToolCallIds`.
+pub fn ensure_tool_call_ids(body: &mut Value) {
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for (msg_idx, msg) in messages.iter_mut().enumerate() {
+        let Some(tool_calls) = msg.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for (tc_idx, call) in tool_calls.iter_mut().enumerate() {
+            let Some(call_obj) = call.as_object_mut() else {
+                continue;
+            };
+            // Ensure id exists and is a valid string.
+            let id_valid = call_obj
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| {
+                    !id.is_empty()
+                        && id
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                });
+            if !id_valid {
+                let fallback = format!("call_msg{msg_idx}_tc{tc_idx}");
+                call_obj.insert("id".to_owned(), Value::String(fallback));
+            }
+            // Ensure arguments is a string (some providers send objects).
+            if let Some(args) = call_obj.get_mut("arguments")
+                && !args.is_string()
+            {
+                let json_str = serde_json::to_string(args).unwrap_or_else(|_| "{}".to_owned());
+                *args = Value::String(json_str);
+            }
+        }
+    }
+}

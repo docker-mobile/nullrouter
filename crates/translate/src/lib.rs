@@ -28,6 +28,7 @@ use nullrouter_providers::Format;
 use serde_json::Value;
 
 pub use body::translate_body;
+pub use concerns::ensure_tool_call_ids;
 pub use concerns::{Usage, UsageKind};
 pub use state::{Clock, StreamState};
 
