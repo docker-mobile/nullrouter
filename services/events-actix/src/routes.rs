@@ -226,23 +226,21 @@ async fn mcp_sse(
                 Some((listener, String::new())),
             ));
         }
-        match listener.next_frame().await {
-            Some(frame) => {
-                let mut chunk = String::new();
-                push_sse_event(
-                    &mut chunk,
-                    "message",
-                    &serde_json::json!({ "frame": frame }),
-                )
-                .unwrap_or_default();
-                Some((Ok(web::Bytes::from(chunk)), Some((listener, String::new()))))
-            }
-            None => {
-                // Child's stdout closed. Detach explicitly rather than relying on drop order, so
-                // the reap happens before the response completes.
-                listener.detach().await;
-                None
-            }
+#[allow(clippy::single_match_else)]
+        if let Some(frame) = listener.next_frame().await {
+            let mut chunk = String::new();
+            push_sse_event(
+                &mut chunk,
+                "message",
+                &serde_json::json!({ "frame": frame }),
+            )
+            .unwrap_or_default();
+            Some((Ok(web::Bytes::from(chunk)), Some((listener, String::new()))))
+        } else {
+            // Child's stdout closed. Detach explicitly rather than relying on drop order, so
+            // the reap happens before the response completes.
+            listener.detach().await;
+            None
         }
     });
 

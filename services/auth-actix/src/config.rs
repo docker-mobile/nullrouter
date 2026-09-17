@@ -121,8 +121,7 @@ impl AuthConfig {
         // settings that are safe locally and indefensible in production, and it flips the cookie
         // default to secure. Local development keeps working untouched.
         let production = env::var("NULLROUTER_ENV")
-            .map(|value| value.trim().eq_ignore_ascii_case("production"))
-            .unwrap_or(false);
+            .is_ok_and(|value| value.trim().eq_ignore_ascii_case("production"));
 
         let session_secret = match env::var("NULLROUTER_AUTH_SESSION_SECRET") {
             Ok(secret) => secret.into_bytes(),

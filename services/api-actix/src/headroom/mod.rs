@@ -1104,6 +1104,7 @@ async fn uninstall_extras(body: web::Bytes) -> HttpResponse {
 }
 
 /// `POST /api/headroom/start` — bring the proxy up.
+#[allow(clippy::future_not_send)]
 async fn start() -> HttpResponse {
     let url = configured_headroom_url();
     match loopback_port(&url) {

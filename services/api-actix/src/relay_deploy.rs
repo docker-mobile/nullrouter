@@ -181,8 +181,10 @@ fn api_base(variable: &str, default: &str) -> String {
     std::env::var(variable)
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .map(|value| value.trim_end_matches('/').to_owned())
-        .unwrap_or_else(|| default.to_owned())
+        .map_or_else(
+            || default.to_owned(),
+            |value| value.trim_end_matches('/').to_owned(),
+        )
 }
 
 fn client() -> Result<reqwest::Client, String> {
@@ -250,6 +252,7 @@ fn project_name(supplied: Option<&str>) -> Result<String, String> {
 ///
 /// Written through the state service rather than held here, so the pool appears in the same list the
 /// dashboard's proxy-pool pane reads and the runtime selects from.
+#[allow(clippy::needless_pass_by_value)]
 async fn record_pool(
     state: &crate::StateClient,
     name: &str,
@@ -274,7 +277,7 @@ async fn record_pool(
         })
 }
 
-fn deployed(pool: Value, url: &str) -> HttpResponse {
+fn deployed(pool: &Value, url: &str) -> HttpResponse {
     responses::json(
         StatusCode::CREATED,
         &serde_json::json!({ "proxyPool": pool, "deployUrl": url }),
@@ -305,8 +308,7 @@ fn platform_error(body: &Value, fallback: &str) -> String {
                 .and_then(|error| error.get("message"))
                 .and_then(Value::as_str)
         })
-        .map(str::to_owned)
-        .unwrap_or_else(|| fallback.to_owned())
+        .map_or_else(|| fallback.to_owned(), str::to_owned)
 }
 
 /// A status a platform returned, mapped to one this route can send.
@@ -335,6 +337,7 @@ struct CloudflareRequest {
 /// Three calls, in this order because each depends on the last. The middle one is allowed to fail —
 /// upstream ignores it too — because the subdomain may already be enabled, and the third call is what
 /// actually establishes whether the relay is reachable.
+#[allow(clippy::too_many_lines)]
 async fn cloudflare(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpResponse {
     let request = match json_body::parse::<CloudflareRequest>(&body) {
         Ok(request) => request,
@@ -469,7 +472,7 @@ async fn cloudflare(state: web::Data<crate::StateClient>, body: web::Bytes) -> H
 
     let url = format!("https://{name}.{subdomain}.workers.dev");
     match record_pool(&state, &name, &url, "cloudflare").await {
-        Ok(pool) => deployed(pool, &url),
+        Ok(pool) => deployed(&pool, &url),
         Err(error) => refuse(StatusCode::BAD_GATEWAY, error),
     }
 }
@@ -490,6 +493,7 @@ const BUILD_POLL: std::time::Duration = std::time::Duration::from_secs(2);
 ///
 /// The app is deleted if the deploy or the build fails. That cleanup is upstream's and it matters:
 /// without it a failed attempt leaves an app in the user's account holding the name, so the obvious
+#[allow(clippy::too_many_lines)]
 /// next step — try again — fails with "already exists".
 async fn deno(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpResponse {
     let request = match json_body::parse::<DenoRequest>(&body) {
@@ -655,7 +659,7 @@ async fn deno(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpRes
     let org_slug = org.split('.').next().unwrap_or(org);
     let url = format!("https://{name}.{org_slug}.deno.net");
     match record_pool(&state, &name, &url, "deno").await {
-        Ok(pool) => deployed(pool, &url),
+        Ok(pool) => deployed(&pool, &url),
         Err(error) => refuse(StatusCode::BAD_GATEWAY, error),
     }
 }
@@ -683,6 +687,7 @@ const VERCEL_POLL: std::time::Duration = std::time::Duration::from_secs(3);
 /// Create the deployment, turn off deployment protection, wait for READY, then record the pool.
 ///
 /// The protection call is the step whose absence would be a silent failure: Vercel puts SSO in front
+#[allow(clippy::too_many_lines)]
 /// of new deployments by default, so a relay left protected answers every request with a login page
 /// and the pool looks configured but never works.
 async fn vercel(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpResponse {
@@ -832,7 +837,7 @@ async fn vercel(state: web::Data<crate::StateClient>, body: web::Bytes) -> HttpR
     }
     let url = format!("https://{ready_url}");
     match record_pool(&state, &name, &url, "vercel").await {
-        Ok(pool) => deployed(pool, &url),
+        Ok(pool) => deployed(&pool, &url),
         Err(error) => refuse(StatusCode::BAD_GATEWAY, error),
     }
 }

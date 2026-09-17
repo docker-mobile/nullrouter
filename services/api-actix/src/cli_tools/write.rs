@@ -233,9 +233,8 @@ pub(crate) fn remove_env(text: &str, key: &str) -> String {
     let kept: Vec<&str> = text
         .lines()
         .filter(|line| {
-            !line
-                .split_once('=')
-                .is_some_and(|(name, _)| name.trim() == key)
+            line
+                .split_once('=').is_none_or(|(name, _)| name.trim() != key)
         })
         .collect();
     let mut joined = kept.join("\n");

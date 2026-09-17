@@ -153,11 +153,11 @@ impl StateStore {
             if let Some(display_name) = update.display_name {
                 let trimmed = display_name.trim();
                 if !trimmed.is_empty() {
-                    user.display_name = trimmed.to_owned();
+                    user.display_name = trimmed.to_string();
                 }
             }
             if let Some(email) = update.email {
-                user.email = email.trim().to_owned();
+                user.email = email.trim().to_string();
             }
             if let Some(role) = update.role {
                 user.role = role;

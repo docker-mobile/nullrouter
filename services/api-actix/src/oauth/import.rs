@@ -41,9 +41,7 @@ const GITLAB_BASE_VAR: &str = "NULLROUTER_GITLAB_BASE";
 fn gitlab_default_base() -> String {
     std::env::var(GITLAB_BASE_VAR)
         .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.trim_end_matches('/').to_owned())
-        .unwrap_or_else(|| GITLAB_DEFAULT_BASE.to_owned())
+        .filter(|value| !value.trim().is_empty()).map_or_else(|| GITLAB_DEFAULT_BASE.to_owned(), |value| value.trim_end_matches('/').to_owned())
 }
 
 /// Overrides the Amazon Q host, so the verify-then-record sequence can be tested.
@@ -270,6 +268,7 @@ pub(super) async fn gitlab_pat(
         }))
         .await;
 
+#[allow(clippy::option_if_let_else)]
     match created {
         Some(_connection) => {
             // The token is deliberately not in this response. It is stored, and it went to GitLab;
@@ -297,6 +296,7 @@ const API_KEY_HORIZON_DAYS: i64 = 365;
 ///
 /// A headless Kiro credential: a long-lived bearer token with no refresh token. Verified against the
 /// same Amazon Q surface inference uses, then recorded — so a key that cannot list a single model is
+#[allow(clippy::too_many_lines)]
 /// rejected here rather than becoming a connection that fails on first use.
 pub(super) async fn kiro_api_key(
     state: web::Data<crate::StateClient>,
@@ -707,6 +707,7 @@ pub(super) async fn cursor_import(
 /// Kiro's own auth service. Sending one protocol's token to the other endpoint would burn it: a refused
 /// refresh is not always reversible, and a refresh token is the whole credential.
 ///
+#[allow(clippy::too_many_lines)]
 /// This is also the protocol `crates/execute`'s generic refresh deliberately excludes for `kiro`, which
 /// is why importing here does not imply anything later can renew it.
 pub(super) async fn kiro_import(
@@ -2086,9 +2087,7 @@ pub(super) async fn xiaomi_mimo_api_key(
         .base_url
         .as_deref()
         .map(str::trim)
-        .filter(|u| !u.is_empty())
-        .map(|u| u.trim_end_matches('/').to_owned())
-        .unwrap_or_else(|| "https://api.xiaomimimo.com/v1".to_owned());
+        .filter(|u| !u.is_empty()).map_or_else(|| "https://api.xiaomimimo.com/v1".to_owned(), |u| u.trim_end_matches('/').to_owned());
 
     let uid = request
         .uid
@@ -2096,9 +2095,7 @@ pub(super) async fn xiaomi_mimo_api_key(
         .map(str::trim)
         .filter(|u| !u.is_empty());
     let email = uid.map(|u| format!("{u}@xiaomi"));
-    let display_name = uid
-        .map(|u| format!("Xiaomi {u}"))
-        .unwrap_or_else(|| "Xiaomi MiMo".to_owned());
+    let display_name = uid.map_or_else(|| "Xiaomi MiMo".to_owned(), |u| format!("Xiaomi {u}"));
 
     let connection_payload = serde_json::json!({
         "provider": "xiaomi-mimo",

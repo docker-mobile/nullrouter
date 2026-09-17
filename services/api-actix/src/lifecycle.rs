@@ -256,6 +256,7 @@ async fn shutdown_reply(message: &str) -> HttpResponse {
     )
 }
 
+#[allow(clippy::future_not_send)]
 async fn shutdown(request: HttpRequest, handle: Option<web::Data<ShutdownHandle>>) -> HttpResponse {
     if let Err(refusal) = authorised(&request) {
         return refusal;

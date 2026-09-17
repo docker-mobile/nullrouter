@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 /// How a combo picks among its models.
 ///
-/// Own brand: NullRouter ships the Rust/Pingora equivalents of OmniRoute's
+/// Own brand: `NullRouter` ships the Rust/Pingora equivalents of `OmniRoute`'s
 /// `19` strategies and 9Router's `capacity` adapter, but in zero-copy style.
 /// Stub variants below are parseable now and execute as `Fallback` until their
 /// scorer lands — this keeps the API stable while the scorers land incrementally.
@@ -27,13 +27,13 @@ pub(crate) enum ComboStrategy {
     RoundRobin,
     /// Ask every model in parallel, then have a judge synthesize one answer.
     Fusion,
-    /// Weighted random by `weight` (port of OmniRoute `weighted`).
+    /// Weighted random by `weight` (port of `OmniRoute` `weighted`).
     Weighted,
-    /// Least-used / P2C power-of-two-choices (port of OmniRoute `p2c`/`least-used`).
+    /// Least-used / P2C power-of-two-choices (port of `OmniRoute` `p2c`/`least-used`).
     P2c,
-    /// Cost-optimized: cheapest healthy first (port of OmniRoute `cost-optimized`).
+    /// Cost-optimized: cheapest healthy first (port of `OmniRoute` `cost-optimized`).
     CostOptimized,
-    /// Quota-share DRR with per-connection semaphore (port of OmniRoute quota-share).
+    /// Quota-share DRR with per-connection semaphore (port of `OmniRoute` quota-share).
     QuotaShare,
     /// Auto: 16-factor scored (`health + quota + costInv + latencyP95 + taskFit`).
     Auto,
@@ -50,9 +50,9 @@ impl ComboStrategy {
             Some("round-robin") => Self::RoundRobin,
             Some("fusion") => Self::Fusion,
             Some("weighted") => Self::Weighted,
-            Some("p2c") | Some("least-used") => Self::P2c,
-            Some("cost-optimized") | Some("cost_optimized") | Some("cheap") => Self::CostOptimized,
-            Some("quota-share") | Some("quota_share") => Self::QuotaShare,
+            Some("p2c" | "least-used") => Self::P2c,
+            Some("cost-optimized" | "cost_optimized" | "cheap") => Self::CostOptimized,
+            Some("quota-share" | "quota_share") => Self::QuotaShare,
             Some("auto") => Self::Auto,
             Some("capacity") => Self::Capacity,
             _ => Self::Fallback,
@@ -60,7 +60,8 @@ impl ComboStrategy {
     }
 
     #[must_use]
-    pub(crate) fn as_str(self) -> &'static str {
+    #[allow(dead_code)]
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Fallback => "fallback",
             Self::RoundRobin => "round-robin",

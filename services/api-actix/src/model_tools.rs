@@ -106,6 +106,7 @@ pub(crate) fn current_iso8601() -> String {
         .map_or(0, |duration| duration.as_millis());
     let total_seconds = millis / 1000;
     let sub_milli = millis % 1000;
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let days = (total_seconds / 86_400).min(i64::MAX as u128) as i64;
     let seconds_today = (total_seconds % 86_400) as u32;
     let hour = seconds_today / 3600;
@@ -114,9 +115,10 @@ pub(crate) fn current_iso8601() -> String {
 
     let z = days.saturating_add(719_468);
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let doe = (z - era * 146_097) as u32;
     let yoe = (doe - doe / 1020 + doe / 1460 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
+    let y = i64::from(yoe) + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
@@ -126,8 +128,10 @@ pub(crate) fn current_iso8601() -> String {
     format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}.{sub_milli:03}Z")
 }
 
+#[allow(clippy::significant_drop_tightening)]
 async fn get_catalog_sync() -> HttpResponse {
     let (default_providers, default_models) = default_catalog_stats();
+#[allow(clippy::significant_drop_tightening)]
     let state = SYNC_STATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -192,6 +196,7 @@ async fn post_catalog_sync() -> HttpResponse {
         Ok(response) if response.status().is_success() => match response.text().await {
             Ok(text) => {
                 let bytes = text.len();
+#[allow(clippy::option_if_let_else)]
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
                     let provs = val
                         .as_object()

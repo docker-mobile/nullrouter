@@ -1,3 +1,4 @@
+#![allow(clippy::future_not_send)]
 mod clock;
 mod config;
 pub mod contracts;
@@ -10,7 +11,7 @@ pub mod routes;
 pub mod saml;
 pub mod session;
 pub mod settings_client;
-mod sso_routes;
+pub(crate) mod sso_routes;
 pub mod state_client;
 pub mod users_client;
 

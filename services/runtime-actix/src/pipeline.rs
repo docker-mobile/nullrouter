@@ -1311,6 +1311,7 @@ impl Runtime {
     }
 
     /// One account attempt.
+#[allow(clippy::too_many_lines)]
     async fn attempt(
         &self,
         context: &ChatContext<'_>,

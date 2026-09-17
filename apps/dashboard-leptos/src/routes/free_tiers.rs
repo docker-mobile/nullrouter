@@ -1,4 +1,4 @@
-//! Free-tier budget — NullRouter's own brand take on OmniRoute's free-tier math.
+//! Free-tier budget — `NullRouter`'s own brand take on `OmniRoute`'s free-tier math.
 //!
 //! Honest pool-deduped `~1.47B` tokens/mo, live at `/dashboard/free-tiers`.
 //! Source for the math: `https://models.dev/api.json` + catalog 352 providers,
@@ -9,9 +9,9 @@ use leptos::prelude::*;
 
 use crate::routes::PageHeader;
 
-/// Pool-deduped free-tier headline — matches OmniRoute's honest math
+/// Pool-deduped free-tier headline — matches `OmniRoute`'s honest math
 /// (34 recurring pool keys, 443 free-tier rows, 16 pools with published
-/// monthly budget + 5 Groq caps) but branded NullRouter.
+/// monthly budget + 5 Groq caps) but branded `NullRouter`.
 const HEADLINE_TOKENS_PER_MO: &str = "~1.47B";
 const FIRST_MONTH_TOKENS: &str = "~2.07B";
 const POOL_KEYS: usize = 34;

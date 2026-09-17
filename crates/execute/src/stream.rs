@@ -360,6 +360,7 @@ impl BinaryDecoder {
     }
 
     /// Read every complete frame at the front of `pending`, draining what was consumed.
+#[allow(clippy::too_many_lines)]
     fn consume(&mut self, pending: &mut Vec<u8>) -> BinaryStep {
         match self {
             Self::Cursor(stream) => {

@@ -46,6 +46,7 @@ pub(super) fn configure(config: &mut web::ServiceConfig) {
     );
 }
 
+#[allow(clippy::future_not_send)]
 async fn current(request: HttpRequest) -> HttpResponse {
     let Some(value) = request
         .cookie(LOCALE_COOKIE)

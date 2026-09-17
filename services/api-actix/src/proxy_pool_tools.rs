@@ -80,7 +80,8 @@ async fn test_pool(
         }
     };
 
-    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+#[allow(clippy::cast_possible_truncation)]
+    let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let tested_at = current_iso8601();
 
     let test_status = if ok { "active" } else { "error" };

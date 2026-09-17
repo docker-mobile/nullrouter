@@ -491,6 +491,7 @@ pub(crate) const TOOLS: &[Tool] = &[
                 .or_else(|| auth.get(PROVIDER))
                 .or_else(|| auth.get(LEGACY_PROVIDER));
             entry.is_some_and(|entry| {
+                #[allow(clippy::option_if_let_else)]
                 let url = match entry.get("baseUrl").and_then(Value::as_str) {
                     Some(url) => url.to_owned(),
                     None => string_at(entry, &["baseURL"]),

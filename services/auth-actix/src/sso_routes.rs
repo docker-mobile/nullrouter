@@ -26,7 +26,8 @@ use crate::{
 /// How long the browser may take to come back from the provider.
 const FLOW_COOKIE_TTL_SECONDS: i64 = 10 * 60;
 
-pub(crate) fn configure(config: &mut web::ServiceConfig) {
+#[allow(unknown_lints, unreachable_pub)]
+pub fn configure(config: &mut web::ServiceConfig) {
     config
         .service(web::resource("/api/auth/oidc/start").route(web::get().to(oidc_start)))
         .service(web::resource("/api/auth/oidc/callback").route(web::get().to(oidc_callback)))
@@ -154,6 +155,7 @@ async fn saml_config(service: &AuthService) -> Result<SamlConfig, SamlError> {
 /// Not in the task list, but the callback is unreachable without it — nothing
 /// else sets the `oidc_state` cookie the callback checks, and the login page
 /// already links here.
+#[allow(clippy::future_not_send)]
 async fn oidc_start(service: web::Data<AuthService>, request: HttpRequest) -> HttpResponse {
     let service = service.into_inner();
     let origin = origin_for(&service, &request);
@@ -468,6 +470,8 @@ struct OidcTestResponse {
 /// and inferring "secret is valid" from an error string is a guess this will not
 /// make. `readyForLogin` therefore means "discovery advertises the endpoints the
 /// flow needs", not "sign-in will succeed".
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::manual_let_else)]
 async fn oidc_test(
     service: web::Data<AuthService>,
     request: HttpRequest,
@@ -726,6 +730,7 @@ struct SamlTestResponse {
 /// Reports `assertionVerificationAvailable: false` rather than a cheerful "ok":
 /// an operator has to know that sign-in will not complete before they point an
 /// IdP at this router.
+#[allow(clippy::manual_let_else)]
 async fn saml_test(service: web::Data<AuthService>, request: HttpRequest) -> HttpResponse {
     let service = service.into_inner();
     if !is_authenticated(&service, &request) {
@@ -818,7 +823,7 @@ fn rfc3339(epoch_seconds: u64) -> String {
 }
 
 /// Days since the Unix epoch to a civil date (Howard Hinnant's algorithm).
-fn civil_from_days(days: u64) -> (u64, u64, u64) {
+const fn civil_from_days(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;
     let day_of_era = z % 146_097;

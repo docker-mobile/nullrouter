@@ -586,5 +586,6 @@
   "users.role_viewer": "Viewer — read only",
   "users.set_password": "Set password",
   "users.shared_password_notice": "No accounts exist yet, so the shared dashboard password is still the way in. Create an admin below and the shared password stops working.",
-  "users.username_placeholder": "letters, digits, dot, dash, underscore"
+  "users.username_placeholder": "letters, digits, dot, dash, underscore",
+  "chat.reasoning": "Reasoning"
 }

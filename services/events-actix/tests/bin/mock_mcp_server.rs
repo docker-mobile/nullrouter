@@ -77,6 +77,7 @@ fn main() {
                         // Repeated same-role siblings, which is what the filter collapses.
                         let mut text = String::new();
                         for index in 0..400 {
+#[allow(clippy::format_push_string)]
                             text.push_str(&format!("  - listitem \"row {index}\"\n"));
                         }
                         serde_json::json!({

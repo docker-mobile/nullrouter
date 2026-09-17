@@ -144,7 +144,9 @@ async fn registry(query: web::Query<RefreshQuery>) -> HttpResponse {
     }
 }
 
+#[allow(clippy::significant_drop_tightening)]
 fn cached_listing() -> Option<Value> {
+    #[allow(clippy::significant_drop_tightening)]
     let guard = CACHE.lock().ok()?;
     let (stored, body) = guard.as_ref()?;
     (stored.elapsed() < CACHE_TTL).then(|| body.clone())
@@ -219,8 +221,8 @@ async fn fetch_registry() -> Result<Vec<Value>, String> {
             .get("metadata")
             .and_then(|metadata| metadata.get("nextCursor"))
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
+            .map(str::to_string)
+            .unwrap_or_default();
         if cursor.is_empty() {
             break;
         }
@@ -256,8 +258,14 @@ fn registry_entry(item: &Value) -> Option<Value> {
     let name = server
         .get("name")
         .and_then(Value::as_str)
+        .map(str::to_string)
         .unwrap_or_default();
-    let text = |value: Option<&Value>| value.and_then(Value::as_str).unwrap_or_default().to_owned();
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_default()
+    };
     let tool_names = meta
         .get("toolNames")
         .and_then(Value::as_array)
@@ -266,11 +274,11 @@ fn registry_entry(item: &Value) -> Option<Value> {
 
     Some(serde_json::json!({
         "name": name,
-        "slug": first_non_empty(&[text(meta.get("slug")), name.to_owned()]),
+        "slug": first_non_empty(&[text(meta.get("slug")), name.clone()]),
         "title": first_non_empty(&[
             text(server.get("title")),
             text(meta.get("displayName")),
-            name.to_owned(),
+            name,
         ]),
         "description": first_non_empty(&[
             text(server.get("description")),
@@ -315,6 +323,7 @@ fn is_direct_connect(url: &str) -> bool {
         .unwrap_or_default()
         .split('@')
         .next_back()
+        .map(str::to_string)
         .unwrap_or_default();
     if host == "mcp.claude.com" || host.ends_with(".mcp.claude.com") {
         return false;
@@ -508,11 +517,13 @@ fn parse_sse_result(text: &str) -> Option<Value> {
 }
 
 /// Minimal percent-encoding for a cursor going into a query string.
+#[allow(clippy::format_push_string)]
 fn urlencoding(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                #[allow(clippy::format_push_string)]
                 out.push(char::from(byte));
             }
             _ => out.push_str(&format!("%{byte:02X}")),

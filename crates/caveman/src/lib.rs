@@ -1,4 +1,4 @@
-//! NullStack Caveman — terse *output* compression.
+//! `NullStack` Caveman — terse *output* compression.
 //!
 //! Own-brand port of OmniRoute/9Router's Caveman (⭐52K, 6 levels) but
 //! Rust-native, prompt-injection via `crates/translate` system injection,
@@ -21,7 +21,7 @@ pub enum Level {
 
 impl Level {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Off => "off",
             Self::Lite => "lite",
@@ -34,7 +34,7 @@ impl Level {
     }
 
     #[must_use]
-    pub fn savings_hint(self) -> &'static str {
+    pub const fn savings_hint(self) -> &'static str {
         match self {
             Self::Off => "0%",
             Self::Lite => "~30%",
@@ -48,8 +48,8 @@ impl Level {
 }
 
 /// System prompt injected for the level. Preserved verbatim from our
-/// brand voice — not a copy of OmniRoute's `cavemanPrompts.js`.
-pub fn system_prompt(level: Level) -> Option<&'static str> {
+/// brand voice — not a copy of `OmniRoute`'s `cavemanPrompts.js`.
+pub const fn system_prompt(level: Level) -> Option<&'static str> {
     match level {
         Level::Off => None,
         Level::Lite => Some(

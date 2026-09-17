@@ -1,3 +1,4 @@
+#![allow(clippy::future_not_send)]
 mod catalog;
 mod cli_tools;
 mod combos;

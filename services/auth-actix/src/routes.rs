@@ -112,6 +112,7 @@ async fn sso_availability(service: &AuthService) -> (bool, bool, String) {
     (oidc.is_some(), saml, label)
 }
 
+#[allow(clippy::future_not_send)]
 async fn status(service: web::Data<AuthService>, request: HttpRequest) -> HttpResponse {
     let service = service.into_inner();
     let identity = request
@@ -125,15 +126,14 @@ async fn status(service: web::Data<AuthService>, request: HttpRequest) -> HttpRe
     let role = identity
         .as_ref()
         .and_then(|identity| identity.role.as_deref())
-        .map(|role| match role {
+        .map_or("admin", |role| match role {
             "admin" => "admin",
             "operator" => "operator",
             // An unrecognised role in a signed token is not trusted upward: it reads as the least
             // privilege, so a token minted by a newer build naming a role this one does not know
             // cannot come back as full access.
             _ => "viewer",
-        })
-        .unwrap_or("admin");
+        });
     let display_name = identity
         .as_ref()
         .and_then(|identity| identity.display_name.clone())
@@ -175,6 +175,7 @@ async fn login(
     response
 }
 
+#[allow(clippy::too_many_lines)]
 async fn login_inner(
     service: &AuthService,
     request: &HttpRequest,

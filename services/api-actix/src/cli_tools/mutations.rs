@@ -156,7 +156,7 @@ pub(crate) enum OnEmpty {
     /// Leave `{}` on disk.
     Keep,
     /// Unlink it. Codex does this to `auth.json`, and it matters: an empty `auth.json` makes Codex
-    /// treat api-key mode as configured-but-blank rather than falling back to a ChatGPT login.
+    /// treat api-key mode as configured-but-blank rather than falling back to a `ChatGPT` login.
     Delete,
 }
 
@@ -325,7 +325,7 @@ fn codex_config_revoke(document: &mut Value) {
 
 /// Codex reads `auth.json` before the config, so the key goes here, not in `config.toml`.
 ///
-/// Existing tokens are left alone: upstream keeps them so a user can switch back to their ChatGPT
+/// Existing tokens are left alone: upstream keeps them so a user can switch back to their `ChatGPT`
 /// login without logging in again.
 fn codex_auth_apply(document: &mut Value, payload: &Payload) {
     write::set_path(
@@ -798,7 +798,8 @@ fn hermes_env_apply(document: &mut Value, payload: &Payload) {
 /// well be using for real OpenAI, and after a revoke the YAML block that referenced it is gone, so
 /// nothing here reads it. Removing a variable this port does not own is the worse of the two
 /// mistakes.
-fn hermes_env_revoke(_document: &mut Value) {}
+#[allow(clippy::missing_const_for_fn)]
+const fn hermes_env_revoke(_document: &mut Value) {}
 
 const HERMES_KEY_VAR: &str = "OPENAI_API_KEY";
 
@@ -808,7 +809,7 @@ const HERMES_KEY_VAR: &str = "OPENAI_API_KEY";
 
 /// Points the `openai` provider here and selects it.
 ///
-/// Note what is *not* written: the provider name appears nowhere in this file, because DeepSeek TUI
+/// Note what is *not* written: the provider name appears nowhere in this file, because `DeepSeek` TUI
 /// only speaks OpenAI. That is why [`super::spec`]'s deepseek marker tests `provider == "openai"`
 /// plus a local `base_url` instead of grepping for a name — a text search would report "not
 /// configured" straight after this succeeds.
@@ -837,7 +838,7 @@ fn deepseek_apply(document: &mut Value, payload: &Payload) {
     );
 }
 
-/// Restores DeepSeek's own default provider, and drops the `openai` section only while it still
+/// Restores `DeepSeek`'s own default provider, and drops the `openai` section only while it still
 /// points at a local router.
 ///
 /// The guard matters: a user who has since put their real OpenAI key in that section must keep it.
@@ -938,14 +939,14 @@ const LEGACY_JCODE_ENV_FILE: &str = "provider-9router.env";
 // OpenClaw — ~/.openclaw/openclaw.json, plus a models.json per agent directory
 // ---------------------------------------------------------------------------------------------
 
-/// OpenClaw's own placeholder, which matches droid's rather than [`PLACEHOLDER_KEY`].
+/// `OpenClaw`'s own placeholder, which matches droid's rather than [`PLACEHOLDER_KEY`].
 const OPENCLAW_PLACEHOLDER_KEY: &str = "your_api_key";
 
 /// The provider entry, the default model, and the allowlist that gates it.
 ///
 /// Three things have to agree or the model is written but unusable: `models.providers.<provider>`
 /// supplies the endpoint, `agents.defaults.model.primary` selects it, and
-/// `agents.defaults.models` is an allowlist that OpenClaw checks the selection against. Writing
+/// `agents.defaults.models` is an allowlist that `OpenClaw` checks the selection against. Writing
 /// the first two without the third leaves a config that looks right and refuses to run.
 fn openclaw_apply(document: &mut Value, payload: &Payload) {
     let base = payload.base_v1();
@@ -1094,7 +1095,7 @@ fn agent_points_at_us(agent: &Value) -> bool {
 /// DIVERGENCE: upstream creates `agentDir` if it does not exist. This port writes only to a
 /// directory that is already there. `agentDir` is a path out of a config file being used as a
 /// destination, so creating it means a settings file saying `../../.ssh` gets a directory tree; and
-/// an agent directory that does not exist yet belongs to an agent OpenClaw has not set up, which
+/// an agent directory that does not exist yet belongs to an agent `OpenClaw` has not set up, which
 /// has nothing to read the file anyway. Skipped directories are reported as warnings rather than
 /// swallowed.
 fn openclaw_agent_models(
@@ -1238,30 +1239,27 @@ fn grok_apply(document: &mut Value, payload: &Payload) {
                 .and_then(Value::as_str)
                 .filter(|model| !model.is_empty());
             let slot = grok_slot(kind);
-            match selected {
-                Some(model) => {
-                    text = grok_remember_subagent(&text, kind);
-                    let window = selections
-                        .get(*kind)
-                        .and_then(|entry| entry.get("contextWindow"))
-                        .cloned();
-                    text = toml_text::upsert_section(
-                        &text,
-                        &grok_section(&slot),
-                        &grok_section_fields(
-                            model,
-                            &base,
-                            &key,
-                            &format!("{DISPLAY} {kind}"),
-                            window.as_ref(),
-                        ),
-                    );
-                    text = toml_text::set_field(&text, GROK_SUBAGENT_SECTION, kind, &slot);
-                }
-                None => {
-                    text = grok_restore_subagent(&text, kind);
-                    text = toml_text::remove_section(&text, &grok_section(&slot));
-                }
+            if let Some(model) = selected {
+                text = grok_remember_subagent(&text, kind);
+                let window = selections
+                    .get(*kind)
+                    .and_then(|entry| entry.get("contextWindow"))
+                    .cloned();
+                text = toml_text::upsert_section(
+                    &text,
+                    &grok_section(&slot),
+                    &grok_section_fields(
+                        model,
+                        &base,
+                        &key,
+                        &format!("{DISPLAY} {kind}"),
+                        window.as_ref(),
+                    ),
+                );
+                text = toml_text::set_field(&text, GROK_SUBAGENT_SECTION, kind, &slot);
+            } else {
+                text = grok_restore_subagent(&text, kind);
+                text = toml_text::remove_section(&text, &grok_section(&slot));
             }
         }
     }
@@ -1324,6 +1322,7 @@ fn positive_whole_number(value: &Value) -> Option<u64> {
         return None;
     }
     // `as` on a float is a saturating cast in Rust, so an absurd value clamps rather than wrapping.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Some(number.floor() as u64)
 }
 
@@ -1553,6 +1552,7 @@ fn cowork_apply(document: &mut Value, payload: &Payload) {
 }
 
 /// The full server list: the chosen remote plugins, the bridged local ones, then custom URLs.
+#[allow(clippy::option_if_let_else)]
 fn cowork_servers(payload: &Payload) -> Vec<Value> {
     let mut servers = Vec::new();
     let mut seen: Vec<String> = Vec::new();
@@ -1754,10 +1754,10 @@ impl Target {
                             .indirect
                             .map(|indirection| indirection.meta_file)
                             .unwrap_or_default(),
-                        self.config
-                            .directory_for_report()
-                            .map(|path| path.display().to_string())
-                            .unwrap_or_else(|| "its config directory".to_owned()),
+                        self.config.directory_for_report().map_or_else(
+                            || "its config directory".to_owned(),
+                            |path| path.display().to_string()
+                        ),
                     ),
                 });
             }

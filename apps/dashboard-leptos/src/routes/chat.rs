@@ -17,6 +17,7 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub is_streaming: bool,
+    pub reasoning: Option<String>,
     pub error: Option<String>,
 }
 
@@ -35,11 +36,12 @@ struct WireMessage {
     content: String,
 }
 
-fn parse_chat_response(raw: &str) -> (String, Option<String>) {
+fn parse_chat_response(raw: &str) -> (String, Option<String>, Option<String>) {
     let text = raw.trim();
     if text.is_empty() {
         return (
             String::new(),
+            None,
             Some("Empty response received from router".to_owned()),
         );
     }
@@ -76,24 +78,19 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
                 }
             }
         }
-        let total = if !accumulated_reasoning.is_empty() {
-            if accumulated_content.is_empty() {
-                format!("<think>\n{}\n</think>", accumulated_reasoning.trim())
-            } else {
-                format!(
-                    "<think>\n{}\n</think>\n\n{}",
-                    accumulated_reasoning.trim(),
-                    accumulated_content
-                )
+        if accumulated_reasoning.is_empty() {
+            if !accumulated_content.is_empty() {
+                return (accumulated_content, None, err);
             }
         } else {
-            accumulated_content
-        };
-        if !total.is_empty() {
-            return (total, err);
+            let reasoning = accumulated_reasoning.trim().to_owned();
+            if accumulated_content.is_empty() {
+                return (String::new(), Some(reasoning), err);
+            }
+            return (accumulated_content, Some(reasoning), err);
         }
         if let Some(e) = err {
-            return (String::new(), Some(e));
+            return (String::new(), None, Some(e));
         }
     }
 
@@ -108,25 +105,24 @@ fn parse_chat_response(raw: &str) -> (String, Option<String>) {
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
         if !reasoning.is_empty() {
-            let combined = if content.is_empty() {
-                format!("<think>\n{}\n</think>", reasoning.trim())
-            } else {
-                format!("<think>\n{}\n</think>\n\n{content}", reasoning.trim())
-            };
-            return (combined, None);
+            let r = reasoning.trim().to_owned();
+            if content.is_empty() {
+                return (String::new(), Some(r), None);
+            }
+            return (content.to_owned(), Some(r), None);
         }
         if !content.is_empty() {
-            return (content.to_owned(), None);
+            return (content.to_owned(), None, None);
         }
         if let Some(msg) = val
             .pointer("/error/message")
             .and_then(serde_json::Value::as_str)
         {
-            return (String::new(), Some(msg.to_owned()));
+            return (String::new(), None, Some(msg.to_owned()));
         }
     }
 
-    (text.to_owned(), None)
+    (text.to_owned(), None, None)
 }
 
 fn append_turn(set_messages: WriteSignal<Vec<ChatMessage>>, user_content: String) -> String {
@@ -140,6 +136,7 @@ fn append_turn(set_messages: WriteSignal<Vec<ChatMessage>>, user_content: String
             role: "user".to_owned(),
             content: user_content,
             is_streaming: false,
+            reasoning: None,
             error: None,
         });
         msgs.push(ChatMessage {
@@ -147,6 +144,7 @@ fn append_turn(set_messages: WriteSignal<Vec<ChatMessage>>, user_content: String
             role: "assistant".to_owned(),
             content: String::new(),
             is_streaming: true,
+            reasoning: None,
             error: None,
         });
     });
@@ -386,13 +384,14 @@ async fn dispatch_chat_turn(
 
     match result {
         Ok(raw) => {
-            let (content, err) = parse_chat_response(&raw);
+            let (content, reasoning, err) = parse_chat_response(&raw);
             let words = content.split_whitespace().count();
             set_metrics.set(Some((elapsed_ms, words)));
 
             set_messages.update(|msgs| {
                 if let Some(target) = msgs.iter_mut().find(|m| m.id == assistant_msg_id) {
                     target.is_streaming = false;
+                    target.reasoning = reasoning;
                     if let Some(e) = err {
                         target.error = Some(e);
                     } else {
@@ -604,6 +603,12 @@ fn MessageList(messages: Vec<ChatMessage>) -> impl IntoView {
     let label_asst = locale.get("chat.assistant_label").to_owned();
     let label_copy = locale.get("chat.copy").to_owned();
     let label_streaming = locale.get("chat.streaming").to_owned();
+    let reasoning_label = locale.get("chat.reasoning");
+    let reasoning_label = if reasoning_label.is_empty() {
+        "Reasoning".to_owned()
+    } else {
+        reasoning_label.to_owned()
+    };
 
     view! {
         <div class="space-y-4">
@@ -655,8 +660,26 @@ fn MessageList(messages: Vec<ChatMessage>) -> impl IntoView {
                                 }.into_any()
                             } else {
                                 view! {
-                                    <div class="whitespace-pre-wrap leading-relaxed">
-                                        {content}
+                                    <div class="space-y-2">
+                                        {msg.reasoning.as_ref().filter(|r| !r.is_empty()).map(|r| {
+                                            let reasoning_text = r.clone();
+                                            view! {
+                                                <details class="group rounded-md bg-muted/50 border border-border/50 overflow-hidden">
+                                                    <summary class="cursor-pointer select-none px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1.5">
+                                                        <svg class="size-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                                        </svg>
+                                                        {reasoning_label.clone()}
+                                                    </summary>
+                                                    <div class="px-3 pb-2 pt-1 text-[11px] text-muted-foreground/80 whitespace-pre-wrap italic border-t border-border/30">
+                                                        {reasoning_text}
+                                                    </div>
+                                                </details>
+                                            }
+                                        })}
+                                        <div class="whitespace-pre-wrap leading-relaxed">
+                                            {content}
+                                        </div>
                                     </div>
                                 }.into_any()
                             }}
@@ -746,39 +769,44 @@ mod tests {
     #[test]
     fn parse_chat_response_handles_sse_stream() {
         let stream_data = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"world!\"}}]}\ndata: [DONE]\n";
-        let (content, err) = parse_chat_response(stream_data);
+        let (content, reasoning, err) = parse_chat_response(stream_data);
         assert_eq!(content, "Hello world!");
+        assert!(reasoning.is_none());
         assert!(err.is_none());
     }
 
     #[test]
     fn parse_chat_response_handles_json_completion() {
         let json_data = r#"{"id":"chatcmpl-1","choices":[{"message":{"role":"assistant","content":"Testing 123"}}]}"#;
-        let (content, err) = parse_chat_response(json_data);
+        let (content, reasoning, err) = parse_chat_response(json_data);
         assert_eq!(content, "Testing 123");
+        assert!(reasoning.is_none());
         assert!(err.is_none());
     }
 
     #[test]
     fn parse_chat_response_handles_error_envelope() {
         let err_data = r#"{"error":{"message":"Rate limit reached for provider"}}"#;
-        let (content, err) = parse_chat_response(err_data);
+        let (content, reasoning, err) = parse_chat_response(err_data);
         assert!(content.is_empty());
+        assert!(reasoning.is_none());
         assert_eq!(err.as_deref(), Some("Rate limit reached for provider"));
     }
 
     #[test]
     fn parse_chat_response_handles_empty_response() {
-        let (content, err) = parse_chat_response("   ");
+        let (content, reasoning, err) = parse_chat_response("   ");
         assert!(content.is_empty());
+        assert!(reasoning.is_none());
         assert!(err.is_some());
     }
 
     #[test]
     fn parse_chat_response_falls_back_to_raw_text() {
         let raw = "Just raw text response from backend";
-        let (content, err) = parse_chat_response(raw);
+        let (content, reasoning, err) = parse_chat_response(raw);
         assert_eq!(content, raw);
+        assert!(reasoning.is_none());
         assert!(err.is_none());
     }
 }

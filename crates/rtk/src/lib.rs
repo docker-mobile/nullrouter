@@ -1,10 +1,10 @@
-//! NullStack RTK — zero-copy tool-result compression.
+//! `NullStack` RTK — zero-copy tool-result compression.
 //!
 //! Own-brand port of the *good* parts of 9Router `open-sse/rtk/` and
-//! OmniRoute's RTK stack, re-implemented in Rust/Pingora style:
+//! `OmniRoute`'s RTK stack, re-implemented in Rust/Pingora style:
 //! zero-copy, fail-open, no Node.
 //!
-//! The 49 JSON filters in OmniRoute become Rust `Filter` impls here.
+//! The 49 JSON filters in `OmniRoute` become Rust `Filter` impls here.
 //! This stub ships the orchestration + 3 flagship filters; the rest
 //! land incrementally without changing the public API.
 
@@ -29,11 +29,12 @@ pub struct Summary {
 
 impl Summary {
     #[must_use]
-    pub fn saved(&self) -> usize {
+    pub const fn saved(&self) -> usize {
         self.bytes_before.saturating_sub(self.bytes_after)
     }
 
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn saved_pct(&self) -> f64 {
         if self.bytes_before == 0 {
             0.0

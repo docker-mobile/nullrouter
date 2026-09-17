@@ -115,6 +115,7 @@ async fn status(runtime: web::Data<RuntimeClient>, saver: web::Data<TokenSaver>)
 
 /// Installed → loads → transforms.
 async fn health(runtime: web::Data<RuntimeClient>, saver: web::Data<TokenSaver>) -> HttpResponse {
+#[allow(clippy::option_if_let_else)]
     match runtime.pxpipe_post("health", &[]).await {
         Some(forwarded) => forwarded.into_response(),
         None => responses::json(
@@ -182,6 +183,7 @@ async fn install(runtime: web::Data<RuntimeClient>, saver: web::Data<TokenSaver>
     };
 
     // A worker started before this install holds the previous version. Reloading is
+#[allow(clippy::option_if_let_else)]
     // what makes "Repair" mean anything without a service restart.
     let health = match runtime.pxpipe_post("restart", &[]).await {
         Some(forwarded) => forwarded.json().unwrap_or_else(
@@ -249,6 +251,7 @@ async fn forwarded_control(
 /// Reports the install state, which this service can see, and says plainly that the
 /// running state is unknown. `running: false` would be a claim about a process this
 /// service never contacted.
+#[allow(clippy::unused_async)]
 async fn runtime_unreachable(saver: &TokenSaver) -> HttpResponse {
     let install = saver.install_info();
     responses::json(

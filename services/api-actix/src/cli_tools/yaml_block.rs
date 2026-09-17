@@ -28,24 +28,21 @@ fn model_block(text: &str) -> Option<std::ops::Range<usize>> {
         offset += line.len();
 
         let bare = line.trim_end_matches(['\n', '\r']);
-        match start {
-            None => {
-                // The header must be exactly `model:` plus optional trailing tabs and spaces —
-                // upstream anchors with `^model:[ \t]*$`, so `model: gpt-4` is not a block.
-                if bare.strip_prefix("model:").is_some_and(|rest| {
-                    rest.chars()
-                        .all(|character| character == ' ' || character == '\t')
-                }) {
-                    start = Some(line_start);
-                }
+        if start.is_none() {
+            // The header must be exactly `model:` plus optional trailing tabs and spaces —
+            // upstream anchors with `^model:[ \t]*$`, so `model: gpt-4` is not a block.
+            if bare.strip_prefix("model:").is_some_and(|rest| {
+                rest.chars()
+                    .all(|character| character == ' ' || character == '\t')
+            }) {
+                start = Some(line_start);
             }
-            Some(_) => {
-                // The block continues through indented and blank lines.
-                let indented = bare.starts_with(' ') || bare.starts_with('\t');
-                let blank = bare.trim().is_empty();
-                if !indented && !blank {
-                    return start.map(|from| from..line_start);
-                }
+        } else {
+            // The block continues through indented and blank lines.
+            let indented = bare.starts_with(' ') || bare.starts_with('\t');
+            let blank = bare.trim().is_empty();
+            if !indented && !blank {
+                return start.map(|from| from..line_start);
             }
         }
     }
@@ -98,7 +95,7 @@ pub(crate) fn remove_model_block(text: &str) -> String {
 /// with optional quotes.
 pub(crate) fn parse_model_block(text: &str) -> Option<serde_json::Value> {
     let range = model_block(text)?;
-    let body = text.get(range.clone())?;
+    let body = text.get(range)?;
     let mut map = serde_json::Map::new();
     for key in ["default", "provider", "base_url", "api_key"] {
         if let Some(value) = field(body, key) {

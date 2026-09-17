@@ -158,6 +158,7 @@ impl Buffer {
             };
         };
         let oldest = inner.lines.front().map(|line| line.seq);
+#[allow(clippy::option_if_let_else)]
         let lines: Vec<Line> = match cursor {
             Some(cursor) => inner
                 .lines
