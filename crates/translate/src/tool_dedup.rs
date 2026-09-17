@@ -27,7 +27,6 @@ const RULES: &[DedupRule] = &[
     },
 ];
 
-/// Get the name field from a tool definition (OpenAI or function shape).
 fn tool_name(tool: &Value) -> &str {
     tool.get("function")
         .and_then(|f| f.get("name"))
@@ -72,7 +71,7 @@ pub fn dedupe_tools(tools: &[Value]) -> (Vec<Value>, Vec<String>) {
         .windows(2)
         .filter(|w| w[0] != w[1])
         .map(|w| w[0].clone())
-        .chain(to_strip.last().map(|s| s.to_string()))
+        .chain(to_strip.last().map(std::string::ToString::to_string))
         .collect();
 
     let filtered: Vec<Value> = tools

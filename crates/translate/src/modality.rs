@@ -8,7 +8,6 @@
 use nullrouter_providers::{Capabilities, Format};
 use serde_json::{Map, Value, json};
 
-/// Placeholder text for the current (last) user turn.
 fn placeholder_current(cap: &str) -> &'static str {
     match cap {
         "vision" => "[image omitted: model has no vision support]",
@@ -18,7 +17,6 @@ fn placeholder_current(cap: &str) -> &'static str {
     }
 }
 
-/// Placeholder text for earlier turns (neutral).
 fn placeholder_prev(cap: &str) -> &'static str {
     match cap {
         "vision" => "[Previous image omitted from context.]",
@@ -28,7 +26,6 @@ fn placeholder_prev(cap: &str) -> &'static str {
     }
 }
 
-/// Map a MIME type to the capability it requires.
 fn cap_for_mime(mime: &str) -> Option<&'static str> {
     if mime.starts_with("image/") {
         Some("vision")
@@ -41,7 +38,6 @@ fn cap_for_mime(mime: &str) -> Option<&'static str> {
     }
 }
 
-/// Determine the capability an OpenAI content block requires.
 fn cap_for_openai_block(block: &Value) -> Option<&'static str> {
     match block.get("type").and_then(Value::as_str) {
         Some("image_url" | "image") => Some("vision"),
@@ -51,7 +47,6 @@ fn cap_for_openai_block(block: &Value) -> Option<&'static str> {
     }
 }
 
-/// Determine the capability a Claude content block requires.
 fn cap_for_claude_block(block: &Value) -> Option<&'static str> {
     match block.get("type").and_then(Value::as_str) {
         Some("image") => Some("vision"),
@@ -60,7 +55,6 @@ fn cap_for_claude_block(block: &Value) -> Option<&'static str> {
     }
 }
 
-/// Check if the model lacks a capability.
 fn lacks(caps: &Capabilities, cap: &str) -> bool {
     match cap {
         "vision" => !caps.vision,
@@ -71,35 +65,16 @@ fn lacks(caps: &Capabilities, cap: &str) -> bool {
 }
 
 /// Filter OpenAI content blocks: drop unsupported media, inject placeholders.
-fn strip_openai_content(content: &[Value], caps: &Capabilities, is_last: bool) -> Vec<Value> {
+fn strip_content(
+    content: &[Value],
+    cap_of: fn(&Value) -> Option<&'static str>,
+    caps: &Capabilities,
+    is_last: bool,
+) -> Vec<Value> {
     let mut out = Vec::with_capacity(content.len());
     let mut removed: Vec<&str> = Vec::new();
     for block in content {
-        if let Some(cap) = cap_for_openai_block(block)
-            && lacks(caps, cap)
-        {
-            removed.push(cap);
-            continue;
-        }
-        out.push(block.clone());
-    }
-    for cap in &removed {
-        let ph = if is_last {
-            placeholder_current(cap)
-        } else {
-            placeholder_prev(cap)
-        };
-        out.push(json!({"type": "text", "text": ph}));
-    }
-    out
-}
-
-/// Filter Claude content blocks.
-fn strip_claude_content(content: &[Value], caps: &Capabilities, is_last: bool) -> Vec<Value> {
-    let mut out = Vec::with_capacity(content.len());
-    let mut removed: Vec<&str> = Vec::new();
-    for block in content {
-        if let Some(cap) = cap_for_claude_block(block)
+        if let Some(cap) = cap_of(block)
             && lacks(caps, cap)
         {
             removed.push(cap);
@@ -167,7 +142,7 @@ fn strip_openai_messages(obj: &mut Map<String, Value>, caps: &Capabilities) {
         if let Some(content) = msg_obj.get_mut("content")
             && let Some(arr) = content.as_array()
         {
-            let filtered = strip_openai_content(arr, caps, i == last);
+            let filtered = strip_content(arr, cap_for_openai_block, caps, i == last);
             *content = Value::Array(filtered);
         }
     }
@@ -185,7 +160,7 @@ fn strip_claude_messages(obj: &mut Map<String, Value>, caps: &Capabilities) {
         if let Some(content) = msg_obj.get_mut("content")
             && let Some(arr) = content.as_array()
         {
-            let filtered = strip_claude_content(arr, caps, i == last);
+            let filtered = strip_content(arr, cap_for_claude_block, caps, i == last);
             *content = Value::Array(filtered);
         }
     }
@@ -272,6 +247,8 @@ fn strip_gemini_contents(obj: &mut Map<String, Value>, caps: &Capabilities) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nullrouter_providers::Capabilities;
+    use serde_json::json;
 
     #[test]
     fn strips_image_from_non_vision_model() {
