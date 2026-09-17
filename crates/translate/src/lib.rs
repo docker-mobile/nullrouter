@@ -21,6 +21,7 @@ pub mod schema;
 pub mod sse;
 pub mod state;
 pub mod thinking;
+pub mod tool_dedup;
 
 use std::collections::BTreeMap;
 
