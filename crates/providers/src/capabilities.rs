@@ -778,3 +778,34 @@ mod tests {
         }
     }
 }
+
+/// Per-model pricing in $/1M tokens.
+/// Ports the pricing table from the competitor.
+/// Loaded lazily like the capabilities table.
+static PRICING_JSON: &str = include_str!("../data/pricing.json");
+
+/// One model's pricing rates, all in $/1M tokens.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[allow(dead_code)]
+pub struct ModelPricing {
+    #[serde(default)]
+    input: f64,
+    #[serde(default)]
+    output: f64,
+    #[serde(default)]
+    cached: f64,
+    #[serde(default)]
+    reasoning: f64,
+    #[serde(default)]
+    cache_creation: f64,
+}
+
+static PRICING_TABLE: LazyLock<BTreeMap<&'static str, ModelPricing>> =
+    LazyLock::new(|| serde_json::from_str(PRICING_JSON).unwrap_or_default());
+
+/// Look up per-model pricing in $/1M tokens. `None` when the model is not in
+/// the table (e.g. a newly released or local model).
+#[must_use]
+pub fn model_pricing(model: &str) -> Option<ModelPricing> {
+    PRICING_TABLE.get(model).copied()
+}
