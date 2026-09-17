@@ -13,6 +13,7 @@
 
 pub mod body;
 pub mod concerns;
+pub mod modality;
 pub mod param_rules;
 pub mod request;
 pub mod response;
@@ -194,6 +195,10 @@ pub fn translate_request(
         &mut translated.body,
         intent.as_ref(),
     );
+
+    // Strip multimodal content blocks the target model cannot read.
+    let caps = nullrouter_providers::capabilities_for_model(provider, model);
+    modality::strip_unsupported_modalities(&mut translated.body, target, &caps);
 
     // Strip params the target provider rejects upstream (prevents HTTP 400).
     param_rules::strip_unsupported_params(provider, upstream_model, &mut translated.body, ceiling);
