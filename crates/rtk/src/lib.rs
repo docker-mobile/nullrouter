@@ -1,4 +1,8 @@
-#![allow(clippy::format_push_string, clippy::or_then_unwrap)]
+#![allow(
+    clippy::format_push_string,
+    clippy::or_then_unwrap,
+    clippy::cast_precision_loss
+)]
 //! `NullStack` RTK — zero-copy tool-result compression.
 //!
 //! Own-brand port of the *good* parts of 9Router `open-sse/rtk/` and
@@ -175,6 +179,27 @@ fn run_filters(text: &str) -> (usize, Vec<Hit>) {
     if out.starts_with("Result of search") {
         let snapshot = out.clone();
         apply!("search-list", Some(compact_search_list(&snapshot)));
+    }
+
+    // 11. ls: compact directory listing.
+    if out
+        .lines()
+        .any(|l| l.starts_with("total ") || l.starts_with('-') && l.len() > 10)
+    {
+        let snapshot = out.clone();
+        apply!("ls", Some(compact_ls(&snapshot)));
+    }
+
+    // 12. build-output: compact build tool output.
+    if out.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("npm ")
+            || t.starts_with("yarn ")
+            || t.starts_with("Compiling")
+            || t.starts_with("[ERROR]")
+    }) {
+        let snapshot = out.clone();
+        apply!("build-output", Some(compact_build_output(&snapshot)));
     }
 
     (out.len(), hits)
@@ -468,6 +493,194 @@ fn dedup_consecutive_lines(text: &str) -> String {
 #[must_use]
 pub fn is_error_output(is_error: Option<bool>, status: Option<&str>) -> bool {
     is_error.unwrap_or(false) || status == Some("error")
+}
+
+/// Compact `ls -la` output: parse lines, group by type, show names + sizes.
+fn compact_ls(input: &str) -> String {
+    let mut dirs = Vec::new();
+    let mut files: Vec<(String, String)> = Vec::new();
+    for line in input.lines() {
+        if line.starts_with("total ") || line.is_empty() {
+            continue;
+        }
+        // Parse: perms ... size month day time name
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 9 {
+            continue;
+        }
+        let perms = parts[0];
+        let is_dir = perms.starts_with('d');
+        // Size is typically at index 4
+        let size: u64 = parts
+            .iter()
+            .rev()
+            .skip(1)
+            .find_map(|p| p.parse().ok())
+            .unwrap_or(0);
+        let name = parts[8..].join(" ");
+        if is_dir {
+            dirs.push(name);
+        } else {
+            let size_str = if size >= 1_048_576 {
+                format!("{:.1}M", size as f64 / 1_048_576.0)
+            } else if size >= 1024 {
+                format!("{:.1}K", size as f64 / 1024.0)
+            } else {
+                format!("{size}B")
+            };
+            files.push((name, size_str));
+        }
+    }
+    let mut out = String::new();
+    if !dirs.is_empty() {
+        out.push_str(&format!("Dirs ({}):\n", dirs.len()));
+        for d in dirs.iter().take(10) {
+            out.push_str("  ");
+            out.push_str(d);
+            out.push('\n');
+        }
+    }
+    if !files.is_empty() {
+        out.push_str(&format!("Files ({}):\n", files.len()));
+        for (name, size) in files.iter().take(20) {
+            out.push_str(&format!("  {name} ({size})\n"));
+        }
+        if files.len() > 20 {
+            out.push_str(&format!("  ... +{} more\n", files.len() - 20));
+        }
+    }
+    out
+}
+
+/// Compact build tool output (npm, cargo, pip, etc.).
+/// Keeps errors, warnings, final summary. Strips progress logs.
+fn compact_build_output(input: &str) -> String {
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut summary: Option<String> = None;
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("npm err")
+            || lower.starts_with("yarn error")
+            || lower.starts_with("error:")
+            || lower.starts_with("[error]")
+        {
+            errors.push(line.to_owned());
+        } else if lower.starts_with("npm warn")
+            || lower.starts_with("yarn warn")
+            || lower.starts_with("warning:")
+        {
+            if warnings.len() < 5 {
+                warnings.push(line.to_owned());
+            }
+        } else if lower.starts_with("finished")
+            || lower.starts_with("successfully")
+            || lower.starts_with("build ")
+            || lower.contains("compilation finished")
+        {
+            summary = Some(line.to_owned());
+        }
+    }
+    let mut out = String::new();
+    if !errors.is_empty() {
+        out.push_str(&format!("Errors ({}):\n", errors.len()));
+        for e in &errors {
+            out.push_str(e);
+            out.push('\n');
+        }
+    }
+    if !warnings.is_empty() {
+        out.push_str(&format!("Warnings ({}):\n", warnings.len()));
+        for w in &warnings {
+            out.push_str(w);
+            out.push('\n');
+        }
+    }
+    if let Some(s) = summary {
+        out.push_str(&s);
+        out.push('\n');
+    }
+    if out.is_empty() {
+        input.to_owned()
+    } else {
+        out
+    }
+}
+
+/// Detect which RTK filter to apply based on content heuristics.
+/// Returns the filter name, or None if no filter matches.
+#[must_use]
+pub fn auto_detect_filter(text: &str) -> Option<&'static str> {
+    let head = if text.len() > 1024 {
+        &text[..1024]
+    } else {
+        text
+    };
+
+    // git log: commit <sha> header
+    if head.lines().any(|l| {
+        l.starts_with("commit ") && l.len() >= 14 && l[7..].chars().all(|c| c.is_ascii_hexdigit())
+    }) {
+        return Some("git-log");
+    }
+    // git diff
+    if head.contains("diff --git") || head.contains("@@ ") {
+        return Some("git-diff");
+    }
+    // git status
+    if head.lines().any(|l| {
+        l.starts_with("On branch")
+            || l.starts_with("Changes")
+            || l.starts_with("Untracked")
+            || l.starts_with("nothing to commit")
+    }) {
+        return Some("git-status");
+    }
+    // build output
+    if head.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("npm ")
+            || t.starts_with("yarn ")
+            || t.starts_with("Compiling")
+            || t.starts_with("Downloading")
+            || t.starts_with("[ERROR]")
+            || t.contains("BUILD ")
+    }) {
+        return Some("build-output");
+    }
+    // tree
+    if head.contains("directories") && head.contains("files") {
+        return Some("tree");
+    }
+    // ls
+    if head.lines().any(|l| {
+        l.starts_with("total ")
+            || (l.starts_with('-')
+                && l.len() > 10
+                && l[1..].chars().take(9).all(|c| "rwx-".contains(c)))
+    }) {
+        return Some("ls");
+    }
+    // search list
+    if head.starts_with("Result of search") {
+        return Some("search-list");
+    }
+    // read numbered
+    if head.lines().take(5).all(|l| {
+        l.trim_start()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && l.contains('|')
+    }) {
+        return Some("read-numbered");
+    }
+    // dedup
+    None
 }
 
 #[cfg(test)]
