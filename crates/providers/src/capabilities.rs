@@ -341,6 +341,7 @@ static CANONICAL_BY_MODEL: LazyLock<BTreeMap<&'static str, Capabilities>> = Lazy
 /// model-name row ([`CANONICAL_BY_MODEL`]), then defaults. The middle step is
 /// what lets a dynamic compatible provider serving a known model keep that
 /// model's real capabilities.
+#[allow(clippy::too_many_lines)]
 pub fn for_model(provider: &str, model: &str) -> Capabilities {
     if model.is_empty() {
         return TABLE.default;
@@ -416,6 +417,43 @@ pub fn for_model(provider: &str, model: &str) -> Capabilities {
             resolved.thinking_format = Some(ThinkingFormat::OpenAi);
             resolved.thinking_can_disable = true;
             resolved.max_output = resolved.max_output.max(64000);
+        }
+    }
+
+    // Name-based vision detection — last resort when the capability table
+    // does not list the model. Vendors put the modality in the id
+    // ("qwen3-vl-plus", "glm-4.6v"), so a freshly released model still
+    // gets image input instead of silently dropping it.
+    // Only ever turns vision ON; never turns a declared capability off.
+    if !resolved.vision {
+        let lowered = base_model.to_ascii_lowercase();
+        let is_not_vision = lowered.contains("image")
+            || lowered.contains("img-")
+            || lowered.contains("stable-image")
+            || lowered.contains("dall")
+            || lowered.contains("sdxl")
+            || lowered.contains("diffusion")
+            || lowered.contains("flux")
+            || lowered.contains("t2v")
+            || lowered.contains("i2v")
+            || lowered.contains("embed")
+            || lowered.contains("rerank")
+            || lowered.contains("tts")
+            || lowered.contains("stt")
+            || lowered.contains("whisper")
+            || lowered.contains("voice")
+            || lowered.contains("speech")
+            || lowered.contains("audio");
+        let is_vision = lowered.contains("vision")
+            || lowered.contains("vl")
+            || lowered.contains("vlm")
+            || lowered.contains("multimodal")
+            || lowered.contains("omni")
+            || lowered.contains("visual")
+            || lowered.ends_with('v')
+            || lowered.contains("glm-") && lowered.contains('v');
+        if is_vision && !is_not_vision {
+            resolved.vision = true;
         }
     }
 
