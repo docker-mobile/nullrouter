@@ -754,6 +754,7 @@ fn web_time_millis() -> u64 {
     }
 }
 
+#[allow(clippy::missing_const_for_fn)]
 fn copy_to_clipboard(_text: &str) {
     #[cfg(target_arch = "wasm32")]
     if let Some(window) = web_sys::window() {

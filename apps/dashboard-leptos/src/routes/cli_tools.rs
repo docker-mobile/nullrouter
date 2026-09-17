@@ -94,6 +94,7 @@ impl ToolStatus {
 
     /// Whether the config file parsed. `None` covers both "no file" and "unreadable"; `config_error`
     /// separates them.
+    #[allow(clippy::missing_const_for_fn)]
     fn config_readable(&self) -> bool {
         self.settings.is_some()
     }
@@ -199,6 +200,7 @@ impl ApplyBody {
 /// Read from the address bar rather than from the server: the API has no endpoint that reports the
 /// URL a client reached it on, and the host a browser used is the host that browser's user can
 /// reach. Editable afterwards, because a tool on another machine needs the LAN address instead.
+#[allow(clippy::missing_const_for_fn)]
 fn router_origin() -> String {
     #[cfg(target_arch = "wasm32")]
     {
