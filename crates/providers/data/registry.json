@@ -8175,5 +8175,100 @@
   ],
   "serviceKinds": null,
   "thinkingConfig": null
+ },
+ {
+  "id": "devin-cli",
+  "alias": "dv",
+  "aliases": [
+   "devin"
+  ],
+  "priority": 10,
+  "category": "free",
+  "display": {
+   "name": "Devin CLI",
+   "icon": "smart_toy",
+   "color": "#6366F1",
+   "textIcon": "DV",
+   "website": "https://devin.ai",
+   "notice": {
+    "signupUrl": "https://cli.devin.ai",
+    "text": "Install: curl -fsSL https://cli.devin.ai/install.sh | bash"
+   }
+  },
+  "transport": {
+   "baseUrl": "http://localhost:20128/v1/chat/completions",
+   "headers": {},
+   "quirks": {}
+  },
+  "transports": null,
+  "oauth": null,
+  "models": [
+   {
+    "id": "devin-default",
+    "name": "Devin Default"
+   }
+  ],
+  "authType": "none",
+  "noAuth": true
+ },
+ {
+  "id": "ollama-search",
+  "alias": "ollama-search",
+  "aliases": [],
+  "priority": 10,
+  "category": "apikey",
+  "display": {
+   "name": "Ollama Search",
+   "icon": "cloud",
+   "color": "#ffffff",
+   "textIcon": "OL",
+   "website": "https://ollama.com",
+   "notice": {
+    "text": "Web search via Ollama Cloud subscription. Reuses the API key from the Ollama chat provider.",
+    "apiKeyUrl": "https://ollama.com/settings/keys"
+   }
+  },
+  "transport": {
+   "baseUrl": "https://ollama.com/api/search",
+   "headers": {},
+   "quirks": {}
+  },
+  "transports": null,
+  "oauth": null,
+  "models": [],
+  "authType": "apikey",
+  "serviceKinds": [
+   "webSearch"
+  ]
+ },
+ {
+  "id": "xquik",
+  "alias": "xquik",
+  "aliases": [],
+  "priority": 10,
+  "category": "apikey",
+  "display": {
+   "name": "Xquik",
+   "icon": "tag",
+   "color": "#5C3327",
+   "textIcon": "XQ",
+   "website": "https://docs.xquik.com/api-reference/x/search-tweets",
+   "notice": {
+    "apiKeyUrl": "https://xquik.com",
+    "text": "Searches public X posts. Billing uses 1 Xquik credit per returned post."
+   }
+  },
+  "transport": {
+   "baseUrl": "https://api.xquik.com/v1/search",
+   "headers": {},
+   "quirks": {}
+  },
+  "transports": null,
+  "oauth": null,
+  "models": [],
+  "authType": "apikey",
+  "serviceKinds": [
+   "webSearch"
+  ]
  }
 ]
