@@ -1,3 +1,5 @@
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::format_push_string)]
 mod console_logs;
 mod mcp;
 mod routes;

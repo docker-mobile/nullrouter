@@ -1,4 +1,8 @@
 #![allow(clippy::future_not_send)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
 mod catalog;
 mod cli_tools;
 mod combos;

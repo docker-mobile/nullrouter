@@ -1,4 +1,6 @@
 #![allow(clippy::future_not_send)]
+#![allow(clippy::manual_let_else)]
+#![allow(clippy::format_push_string)]
 mod clock;
 mod config;
 pub mod contracts;

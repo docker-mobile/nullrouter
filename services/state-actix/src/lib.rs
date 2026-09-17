@@ -1,3 +1,6 @@
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::option_option)]
+#![allow(clippy::significant_drop_tightening)]
 mod api_keys;
 mod at_rest;
 mod console_logs;

@@ -276,6 +276,7 @@ fn compact_git_status(input: &str) -> String {
     let mut shown = 0u32;
     for line in &lines {
         if line.starts_with("On branch") || line.starts_with("##") {
+            // Keep branch line
             result.push_str(line);
             result.push('\n');
         } else if line.starts_with("Changes to be committed") {
@@ -398,9 +399,10 @@ fn compact_read_numbered(input: &str) -> String {
     let head = 20;
     let tail = 20;
     let cut = lines.len() - head - tail;
-    let mut out = lines[..head].join("\n");
+    let mut out = lines.get(..head).unwrap_or(&lines).join("\n");
     out.push_str(&format!("\n... +{cut} lines truncated (file continues)\n"));
-    out.push_str(&lines[lines.len() - tail..].join("\n"));
+    let tail_start = lines.len().saturating_sub(tail);
+    out.push_str(&lines.get(tail_start..).unwrap_or(&lines).join("\n"));
     out
 }
 
@@ -412,7 +414,7 @@ fn compact_search_list(input: &str) -> String {
         return input.to_owned();
     }
     let mut paths: Vec<&str> = Vec::new();
-    for line in &lines[1..] {
+    for line in lines.get(1..).unwrap_or(&[]) {
         let t = line.trim();
         if let Some(p) = t.strip_prefix("- ") {
             paths.push(p);

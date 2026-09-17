@@ -599,7 +599,7 @@ fn apply_budget_thinking(
             json!({ "type": "enabled", "budget_tokens": auto_budget })
         }
         Some(budget) if budget > 0 => {
-            let budget_val = budget as u64;
+            let budget_val = u64::try_from(budget).unwrap_or(0);
             if let Some(current_max) = object.get("max_tokens").and_then(Value::as_u64)
                 && current_max <= budget_val
             {

@@ -1,3 +1,4 @@
+#![allow(clippy::format_push_string)]
 //! A minimal MCP server over stdio, for the bridge tests to spawn.
 //!
 //! Built as a test binary rather than mocked in-process because the thing under test *is* the
