@@ -531,13 +531,13 @@ fn ThemeToggle() -> impl IntoView {
     }
 }
 
-const fn viewport_is_narrow() -> bool {
+fn viewport_is_narrow() -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         web_sys::window()
             .and_then(|window| window.inner_width().ok())
             .and_then(|width| width.as_f64())
-            .is_some_and(|width| width < 768.0)
+            .map_or(false, |width| width < 768.0)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

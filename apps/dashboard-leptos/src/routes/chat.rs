@@ -754,7 +754,7 @@ fn web_time_millis() -> u64 {
     }
 }
 
-const fn copy_to_clipboard(_text: &str) {
+fn copy_to_clipboard(_text: &str) {
     #[cfg(target_arch = "wasm32")]
     if let Some(window) = web_sys::window() {
         let _ = window.navigator().clipboard().write_text(_text);

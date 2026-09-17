@@ -30,12 +30,12 @@ pub enum Connection {
 
 impl Connection {
     /// Whether events can be expected, now or after a retry.
-    pub const fn is_live(self) -> bool {
+    pub fn is_live(self) -> bool {
         matches!(self, Self::Connecting | Self::Open | Self::Reconnecting)
     }
 
     /// A short status for a stream indicator.
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Connecting => "Connecting…",
             Self::Open => "Live",
@@ -56,7 +56,7 @@ impl Stream {
     /// Close the stream and stop the browser's reconnect attempts.
     // Not `const`: on wasm32 this calls into JS. `clippy --fix` suggested const because the native
     // build's body is empty once the cfg'd line is stripped.
-    pub const fn close(&self) {
+    pub fn close(&self) {
         #[cfg(target_arch = "wasm32")]
         self.source.close();
     }
