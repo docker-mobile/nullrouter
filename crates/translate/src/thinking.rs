@@ -197,6 +197,7 @@ pub fn parse_suffix(model: &str) -> (&str, Option<ThinkingIntent>) {
 ///
 /// Providers must never see the suffix: it is nullrouter's own routing syntax and
 /// would be rejected as an unknown model id.
+#[inline]
 pub fn strip_thinking_suffix(model: &str) -> &str {
     parse_suffix(model).0
 }

@@ -47,6 +47,7 @@ impl TranslatedRequest {
 }
 
 /// `true` when the two formats differ (upstream `needsTranslation`).
+#[inline]
 pub const fn needs_translation(source: Format, target: Format) -> bool {
     !formats_equivalent(source, target)
 }
