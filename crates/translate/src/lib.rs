@@ -13,6 +13,7 @@
 
 pub mod body;
 pub mod concerns;
+pub mod param_rules;
 pub mod request;
 pub mod response;
 pub mod schema;
@@ -193,6 +194,10 @@ pub fn translate_request(
         &mut translated.body,
         intent.as_ref(),
     );
+
+    // Strip params the target provider rejects upstream (prevents HTTP 400).
+    param_rules::strip_unsupported_params(provider, upstream_model, &mut translated.body, ceiling);
+
     translated
 }
 
