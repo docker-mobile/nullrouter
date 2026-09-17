@@ -92,6 +92,7 @@ impl Throttle {
     ///
     /// `/api/auth/*` is included deliberately: the auth service has its own per-address lockout, but
     /// that counts failed passwords, so it does nothing about a flood of well-formed requests.
+    #[inline]
     pub fn governs(path: &str) -> bool {
         path.starts_with("/api/")
     }

@@ -1,5 +1,6 @@
 use crate::RouteKind;
 
+#[inline]
 pub(crate) fn route_for_path(path: &str) -> RouteKind {
     // Fast path: direct runtime inference routes represent the hot path
     if path.starts_with("/v1/")

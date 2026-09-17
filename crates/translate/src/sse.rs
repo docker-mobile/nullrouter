@@ -28,6 +28,7 @@ pub enum Encoding {
 ///
 /// Returns `None` for comments, blank lines, `event:` lines, and undecodable
 /// payloads — matching upstream's tolerant behavior.
+#[inline]
 pub fn parse_line(line: &str, encoding: Encoding) -> Option<Frame> {
     if line.is_empty() {
         return None;
@@ -76,7 +77,7 @@ impl LineBuffer {
         self.buffer.push_str(chunk);
 
         // Find the boundaries first, so the buffer is shifted exactly once rather than per line.
-        let mut lines = Vec::new();
+        let mut lines = Vec::with_capacity(chunk.bytes().filter(|&b| b == b'\n').count());
         let mut start = 0_usize;
         while let Some(offset) = self.buffer.get(start..).and_then(|rest| rest.find('\n')) {
             let end = start + offset;
@@ -94,6 +95,7 @@ impl LineBuffer {
     }
 
     /// Take whatever remains after the stream ends, if it is not blank.
+    #[inline]
     pub fn flush(&mut self) -> Option<String> {
         let remainder = std::mem::take(&mut self.buffer);
         let trimmed = remainder.trim();
@@ -105,12 +107,14 @@ impl LineBuffer {
     }
 
     /// `true` when nothing is buffered.
+    #[inline]
     pub const fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
 }
 
 /// Serialize a `data:` frame (upstream `sseChunk`) in a single allocation.
+#[inline]
 pub fn data_frame(payload: &Value) -> String {
     let mut out = Vec::with_capacity(128);
     out.extend_from_slice(b"data: ");
@@ -123,6 +127,7 @@ pub fn data_frame(payload: &Value) -> String {
 }
 
 /// Serialize a named-event frame in a single allocation.
+#[inline]
 pub fn event_frame(event: &str, payload: &Value) -> String {
     let mut out = Vec::with_capacity(128 + event.len());
     out.extend_from_slice(b"event: ");
@@ -138,6 +143,7 @@ pub fn event_frame(event: &str, payload: &Value) -> String {
 }
 
 /// The terminal frame.
+#[inline]
 pub fn done_frame() -> String {
     "data: [DONE]\n\n".to_owned()
 }
