@@ -281,7 +281,6 @@ impl AliasMap {
     }
 
     /// Every tool's mappings.
-#[allow(clippy::missing_const_for_fn)]
     pub(crate) const fn all(&self) -> &BTreeMap<String, BTreeMap<String, String>> {
         &self.entries
     }

@@ -216,7 +216,6 @@ pub fn create_request_id() -> String {
     let mut id = String::with_capacity(33);
     id.push('_');
     for byte in bytes {
-        #[allow(clippy::format_push_string)]
         id.push_str(&format!("{byte:02x}"));
     }
     id

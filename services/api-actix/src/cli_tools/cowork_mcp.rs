@@ -517,13 +517,11 @@ fn parse_sse_result(text: &str) -> Option<Value> {
 }
 
 /// Minimal percent-encoding for a cursor going into a query string.
-#[allow(clippy::format_push_string)]
 fn urlencoding(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                #[allow(clippy::format_push_string)]
                 out.push(char::from(byte));
             }
             _ => out.push_str(&format!("%{byte:02X}")),

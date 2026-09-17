@@ -15,7 +15,7 @@ pub mod suggested;
 
 pub use capabilities::{
     Capabilities, ThinkingFormat, ThinkingRange, for_model as capabilities_for_model, max_output,
-    thinking_levels, model_pricing,
+    model_pricing, thinking_levels,
 };
 pub use format::{
     ANTHROPIC_COMPAT_BASE, Format, OLLAMA_LOCAL_DEFAULT_HOST, OLLAMA_LOCAL_PROVIDER,

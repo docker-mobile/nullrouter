@@ -112,7 +112,6 @@ impl Listener {
     }
 
     /// Mutable access to the frame channel, for a caller polling it inside its own stream.
-#[allow(clippy::missing_const_for_fn)]
     #[allow(dead_code)]
     pub(crate) const fn frames_mut(&mut self) -> &mut mpsc::Receiver<String> {
         &mut self.frames
@@ -149,7 +148,7 @@ impl Bridge {
         self.sessions.lock().await.contains_key(plugin)
     }
 
-#[allow(clippy::significant_drop_tightening)]
+    #[allow(clippy::significant_drop_tightening)]
     /// Attach a listener, spawning the child if this is the first one.
     pub(crate) async fn attach(&self, plugin: &'static Plugin) -> Result<Listener, SpawnError> {
         let mut sessions = self.sessions.lock().await;
@@ -175,7 +174,7 @@ impl Bridge {
 
     /// Write one JSON-RPC frame to a child's stdin.
     ///
-#[allow(clippy::significant_drop_tightening)]
+    #[allow(clippy::significant_drop_tightening)]
     /// `Ok(false)` means no child is running. Reported rather than papered over by spawning: a
     /// message for a plugin nobody is listening to has no SSE session to carry the reply.
     pub(crate) async fn send(&self, plugin: &str, frame: &str) -> Result<bool, String> {

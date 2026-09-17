@@ -67,7 +67,6 @@ impl LogReader {
     /// buffer: a router whose log store is unreachable is not a quiet router, and the pane should
     /// not imply it is.
     pub(crate) async fn poll(&self, cursor: Option<u64>) -> Option<Page> {
-#[allow(clippy::option_if_let_else)]
         let url = match cursor {
             Some(cursor) => format!("{}?cursor={cursor}", self.endpoint),
             None => self.endpoint.clone(),

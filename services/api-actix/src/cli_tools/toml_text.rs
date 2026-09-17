@@ -55,7 +55,6 @@ fn section_range(text: &str, section: &str) -> Option<Range<usize>> {
 }
 
 /// A section's body — everything after its header line.
-#[allow(clippy::option_if_let_else)]
 fn body_of<'a>(text: &'a str, range: &Range<usize>) -> &'a str {
     let section = text.get(range.clone()).unwrap_or_default();
     match section.find('\n') {
@@ -91,7 +90,6 @@ fn field_lines<'a>(body: &'a str, key: &'a str) -> impl Iterator<Item = &'a str>
 }
 
 /// Set a quoted string field, creating the section if it is not there.
-#[allow(clippy::format_push_string)]
 pub(crate) fn set_field(text: &str, section: &str, key: &str, value: &str) -> String {
     let line = format!("{key} = {}", quoted(value));
     let Some(range) = section_range(text, section) else {
@@ -146,8 +144,6 @@ pub(crate) fn delete_field(text: &str, section: &str, key: &str) -> String {
 }
 
 /// Replace a whole section, or append it when absent.
-#[allow(clippy::option_if_let_else)]
-#[allow(clippy::option_if_let_else)]
 pub(crate) fn upsert_section(text: &str, section: &str, fields: &[String]) -> String {
     let mut rendered = format!("[{section}]\n");
     for field in fields {
@@ -165,7 +161,6 @@ pub(crate) fn upsert_section(text: &str, section: &str, fields: &[String]) -> St
 }
 
 /// Remove a section entirely.
-#[allow(clippy::option_if_let_else)]
 pub(crate) fn remove_section(text: &str, section: &str) -> String {
     match section_range(text, section) {
         Some(range) => collapse_blank_runs(&splice(text, &range, "")),
@@ -178,7 +173,6 @@ pub(crate) fn remove_section(text: &str, section: &str) -> String {
 /// The position matters only for legibility — the marker is read by prefix wherever it sits — but
 /// directly above the section it describes is where a user opening the file would expect to find a
 /// comment about that section.
-#[allow(clippy::option_if_let_else)]
 pub(crate) fn insert_marker(text: &str, anchor: &str, marker: &str) -> String {
     if let Some(range) = section_range(text, anchor) {
         let mut output = String::with_capacity(text.len() + marker.len());

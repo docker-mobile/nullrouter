@@ -798,7 +798,6 @@ fn hermes_env_apply(document: &mut Value, payload: &Payload) {
 /// well be using for real OpenAI, and after a revoke the YAML block that referenced it is gone, so
 /// nothing here reads it. Removing a variable this port does not own is the worse of the two
 /// mistakes.
-#[allow(clippy::missing_const_for_fn)]
 const fn hermes_env_revoke(_document: &mut Value) {}
 
 const HERMES_KEY_VAR: &str = "OPENAI_API_KEY";
@@ -1322,7 +1321,6 @@ fn positive_whole_number(value: &Value) -> Option<u64> {
         return None;
     }
     // `as` on a float is a saturating cast in Rust, so an absurd value clamps rather than wrapping.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Some(number.floor() as u64)
 }
 
@@ -1552,7 +1550,6 @@ fn cowork_apply(document: &mut Value, payload: &Payload) {
 }
 
 /// The full server list: the chosen remote plugins, the bridged local ones, then custom URLs.
-#[allow(clippy::option_if_let_else)]
 fn cowork_servers(payload: &Payload) -> Vec<Value> {
     let mut servers = Vec::new();
     let mut seen: Vec<String> = Vec::new();

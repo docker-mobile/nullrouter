@@ -531,8 +531,7 @@ fn ThemeToggle() -> impl IntoView {
     }
 }
 
-#[allow(clippy::missing_const_for_fn)]
-fn viewport_is_narrow() -> bool {
+const fn viewport_is_narrow() -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         web_sys::window()

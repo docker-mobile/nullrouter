@@ -135,7 +135,6 @@ impl Throttle {
         // would invite a retry that is still too early.
         let deficit = 1.0 - bucket.tokens;
         let wait = (deficit / self.config.per_second).ceil().max(1.0);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let wait_secs = wait as u64;
         Verdict::Throttle {
             retry_after: Duration::from_secs(wait_secs),

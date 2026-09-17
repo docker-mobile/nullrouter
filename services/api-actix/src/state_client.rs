@@ -590,7 +590,6 @@ impl StateClient {
     /// events service serves are the same buffer. Two local buffers would each hold one process's
     /// lines, and both routes would look like they worked while disagreeing.
     pub(crate) async fn console_logs(&self, cursor: Option<u64>) -> Option<Value> {
-#[allow(clippy::option_if_let_else)]
         let path = match cursor {
             Some(cursor) => format!(
                 "{}?cursor={cursor}",

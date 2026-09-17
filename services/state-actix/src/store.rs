@@ -1333,7 +1333,6 @@ impl StateStore {
                         .is_some_and(|connection| connection.id == wanted)
                 })
             });
-#[allow(clippy::option_if_let_else)]
             let chosen = if let Some(pinned) = pinned {
                 pinned
             } else if request.strategy == FallbackStrategy::RoundRobin {
@@ -1736,7 +1735,7 @@ impl StateStore {
     /// For anything a user initiated: they pressed save, so the write must survive a crash a
     /// moment later. Costs a 490KB serialise-and-write, which is why the hot paths use
     /// [`write_snapshot`](Self::write_snapshot) instead.
-#[allow(clippy::significant_drop_tightening)]
+    #[allow(clippy::significant_drop_tightening)]
     pub(crate) fn write_snapshot<T>(
         &self,
         mutate: impl FnOnce(&mut StateSnapshot) -> T,
@@ -1961,7 +1960,6 @@ pub(crate) struct ProxyPoolUpdate {
     pub strict_proxy: Option<bool>,
     pub test_status: Option<String>,
     pub last_tested_at: Option<String>,
-#[allow(clippy::option_option)]
     pub last_error: Option<Option<String>>,
 }
 

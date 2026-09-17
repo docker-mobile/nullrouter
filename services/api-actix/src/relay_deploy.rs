@@ -252,7 +252,6 @@ fn project_name(supplied: Option<&str>) -> Result<String, String> {
 ///
 /// Written through the state service rather than held here, so the pool appears in the same list the
 /// dashboard's proxy-pool pane reads and the runtime selects from.
-#[allow(clippy::needless_pass_by_value)]
 async fn record_pool(
     state: &crate::StateClient,
     name: &str,

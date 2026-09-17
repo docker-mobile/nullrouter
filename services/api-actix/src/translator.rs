@@ -261,7 +261,6 @@ async fn translate(body: web::Bytes, runtime: web::Data<crate::RuntimeClient>) -
 /// dashboard renders unchanged. The structured `lines` alongside it are this port's: with eight
 /// processes writing to one buffer, a bare string is not traceable to the service that logged it.
 async fn console_logs(state: web::Data<crate::StateClient>) -> HttpResponse {
-#[allow(clippy::option_if_let_else)]
     match state.console_logs(None).await {
         Some(page) => {
             let logs = page.get("logs").cloned().unwrap_or(serde_json::json!([]));

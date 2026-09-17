@@ -43,7 +43,6 @@ pub(crate) struct Status {
 
 impl Status {
     /// The answer for a tool we know nothing good about.
-#[allow(clippy::missing_const_for_fn)]
     const fn absent() -> Self {
         Self {
             installed: false,
@@ -156,7 +155,6 @@ pub(crate) fn status(tool: &Tool) -> Status {
     let binary = tool.binaries.iter().find_map(|name| on_path(name));
 
     let Some(config) = tool.config else {
-#[allow(clippy::option_if_let_else)]
         // Binary-only detection, as upstream does for devin.
         return match binary {
             Some(path) => Status {

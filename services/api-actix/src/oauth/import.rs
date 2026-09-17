@@ -41,7 +41,11 @@ const GITLAB_BASE_VAR: &str = "NULLROUTER_GITLAB_BASE";
 fn gitlab_default_base() -> String {
     std::env::var(GITLAB_BASE_VAR)
         .ok()
-        .filter(|value| !value.trim().is_empty()).map_or_else(|| GITLAB_DEFAULT_BASE.to_owned(), |value| value.trim_end_matches('/').to_owned())
+        .filter(|value| !value.trim().is_empty())
+        .map_or_else(
+            || GITLAB_DEFAULT_BASE.to_owned(),
+            |value| value.trim_end_matches('/').to_owned(),
+        )
 }
 
 /// Overrides the Amazon Q host, so the verify-then-record sequence can be tested.
@@ -268,7 +272,6 @@ pub(super) async fn gitlab_pat(
         }))
         .await;
 
-#[allow(clippy::option_if_let_else)]
     match created {
         Some(_connection) => {
             // The token is deliberately not in this response. It is stored, and it went to GitLab;
@@ -2087,7 +2090,11 @@ pub(super) async fn xiaomi_mimo_api_key(
         .base_url
         .as_deref()
         .map(str::trim)
-        .filter(|u| !u.is_empty()).map_or_else(|| "https://api.xiaomimimo.com/v1".to_owned(), |u| u.trim_end_matches('/').to_owned());
+        .filter(|u| !u.is_empty())
+        .map_or_else(
+            || "https://api.xiaomimimo.com/v1".to_owned(),
+            |u| u.trim_end_matches('/').to_owned(),
+        );
 
     let uid = request
         .uid

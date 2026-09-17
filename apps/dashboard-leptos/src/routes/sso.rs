@@ -152,8 +152,7 @@ fn public_origin() -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[allow(clippy::missing_const_for_fn)]
-fn public_origin() -> String {
+const fn public_origin() -> String {
     String::new()
 }
 

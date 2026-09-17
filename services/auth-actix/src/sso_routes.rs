@@ -471,7 +471,6 @@ struct OidcTestResponse {
 /// make. `readyForLogin` therefore means "discovery advertises the endpoints the
 /// flow needs", not "sign-in will succeed".
 #[allow(clippy::too_many_lines)]
-#[allow(clippy::manual_let_else)]
 async fn oidc_test(
     service: web::Data<AuthService>,
     request: HttpRequest,
@@ -730,7 +729,6 @@ struct SamlTestResponse {
 /// Reports `assertionVerificationAvailable: false` rather than a cheerful "ok":
 /// an operator has to know that sign-in will not complete before they point an
 /// IdP at this router.
-#[allow(clippy::manual_let_else)]
 async fn saml_test(service: web::Data<AuthService>, request: HttpRequest) -> HttpResponse {
     let service = service.into_inner();
     if !is_authenticated(&service, &request) {

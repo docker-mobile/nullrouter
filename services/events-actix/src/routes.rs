@@ -226,7 +226,6 @@ async fn mcp_sse(
                 Some((listener, String::new())),
             ));
         }
-#[allow(clippy::single_match_else)]
         if let Some(frame) = listener.next_frame().await {
             let mut chunk = String::new();
             push_sse_event(
