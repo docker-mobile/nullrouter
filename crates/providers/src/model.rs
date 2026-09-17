@@ -186,3 +186,93 @@ pub fn model_strip_list(provider_id: &str, model_id: &str) -> &'static [String] 
     let (base, _) = split_thinking_suffix(model_id);
     registry::find_model(key, base).map_or(&[], |model| model.strip.as_slice())
 }
+
+/// Derive a human-readable display name from a model id when the registry
+/// entry omits `name`. Ports `open-sse/providers/models/namePatterns.js`.
+///
+/// Example: `"gpt-4o-mini"` → `"GPT 4o Mini"`,
+/// `"claude-sonnet-4-6"` → `"Claude Sonnet 4 6"`.
+#[must_use]
+pub fn derive_model_name(id: &str) -> String {
+    if id.is_empty() {
+        return String::new();
+    }
+
+    // Kimi: kimi-k2.5 → "Kimi K2.5"
+    if let Some(rest) = id.strip_prefix("kimi-k") {
+        return format!("Kimi K{}", title_case(rest));
+    }
+    // GLM: glm-4.6v → "GLM 4.6 V (Vision)"
+    if let Some(rest) = id.strip_prefix("glm-") {
+        if let Some(base) = rest.strip_suffix('v') {
+            return format!("GLM {} V (Vision)", title_case(base));
+        }
+        return format!("GLM {}", title_case(rest));
+    }
+    // MiniMax: minimax-m3 → "MiniMax M3"
+    if let Some(rest) = id.strip_prefix("minimax-m") {
+        return format!("MiniMax M{}", title_case(rest));
+    }
+    // Generic prefixes with title case
+    let upper_prefixes = [
+        ("gpt-", "GPT"),
+        ("glm-", "GLM"),
+        ("grok-", "Grok"),
+        ("gemini-", "Gemini"),
+        ("deepseek-", "DeepSeek"),
+        ("claude-", "Claude"),
+        ("qwen", "Qwen"),
+    ];
+    for (prefix, display) in &upper_prefixes {
+        if let Some(rest) = id.strip_prefix(prefix) {
+            return format!("{} {}", display, title_case(rest));
+        }
+    }
+
+    // Fallback: just title-case the whole id.
+    title_case(id)
+}
+
+/// Capitalize each hyphen/underscore separated token.
+fn title_case(s: &str) -> String {
+    s.split(['-', '_', ' '])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            if w.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                w.to_owned()
+            } else {
+                let mut chars = w.chars();
+                chars.next().map_or_else(String::new, |first| {
+                    first.to_uppercase().collect::<String>() + chars.as_str()
+                })
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::derive_model_name;
+
+    #[test]
+    fn derives_gpt_name() {
+        assert_eq!(derive_model_name("gpt-4o-mini"), "GPT 4o Mini");
+    }
+    #[test]
+    fn derives_claude_name() {
+        assert_eq!(derive_model_name("claude-sonnet-4-6"), "Claude Sonnet 4 6");
+    }
+    #[test]
+    fn derives_kimi_name() {
+        assert_eq!(derive_model_name("kimi-k2.5"), "Kimi K2.5");
+    }
+    #[test]
+    fn derives_glm_vision_name() {
+        assert_eq!(derive_model_name("glm-4.6v"), "GLM 4.6 V (Vision)");
+    }
+    #[test]
+    fn derives_unknown_fallback() {
+        assert_eq!(derive_model_name("some-model"), "Some Model");
+    }
+}

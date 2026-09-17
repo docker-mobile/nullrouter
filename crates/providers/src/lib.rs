@@ -24,7 +24,7 @@ pub use format::{
     transport_formats,
 };
 pub use model::{
-    ModelTarget, ParsedModel, infer_provider_from_model_name, infer_target, model_strip_list,
+    ModelTarget, ParsedModel, infer_provider_from_model_name, infer_target, model_strip_list, derive_model_name,
     model_target_format, parse_model, resolve_model_alias, resolve_target, split_thinking_suffix,
     upstream_model_id,
 };
