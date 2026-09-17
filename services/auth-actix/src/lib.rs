@@ -38,6 +38,7 @@ pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 20135;
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct AuthService {
     inner: Arc<AuthServiceInner>,
 }

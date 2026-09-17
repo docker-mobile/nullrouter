@@ -15,6 +15,7 @@ const DEFAULT_STATE_USERS_VERIFY_URL: &str = "http://127.0.0.1:20134/internal/v1
 const DEFAULT_PUBLIC_ORIGIN: &str = "http://localhost:20128";
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub enum PasswordConfig {
     BcryptHash(String),
     Plaintext(String),
@@ -40,6 +41,7 @@ impl Default for LockoutConfig {
 }
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct AuthConfig {
     session_secret: Vec<u8>,
     password: PasswordConfig,

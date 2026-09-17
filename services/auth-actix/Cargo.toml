@@ -1,9 +1,9 @@
 [package]
 name = "nullrouter-auth"
-version = "0.5.20"
-edition = "2024"
-rust-version = "1.88"
-license = "EPL-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 description = "Actix authentication and authorization microservice for nullrouter"
 
 [lib]
@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 nullrouter-logship.workspace = true
-actix-web = "4.11"
+actix-web.workspace = true
 async-trait = "0.1"
 base64 = "0.22"
 bcrypt = "0.17"
@@ -29,11 +29,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # RS256 verification of an OIDC id_token against the provider's JWKS. Pure Rust,
 # so no system OpenSSL. Only public-key signature verification is used.
 rsa = { version = "0.9", default-features = false, features = ["sha2"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde.workspace = true
+serde_json.workspace = true
 sha2 = "0.10"
 subtle = "2.6"
-thiserror = "2"
+thiserror.workspace = true
 # Authentication outcomes are audit events, not debug output. An enterprise has to be able to
 # answer "who signed in, from where, and what failed" from the logs alone.
 tracing.workspace = true
@@ -44,30 +44,5 @@ actix-rt.workspace = true
 # that a `tracing!` line exists in the source.
 tracing-subscriber.workspace = true
 
-[lints.rust]
-unsafe_op_in_unsafe_fn = "deny"
-unreachable_pub = "warn"
-unused_must_use = "deny"
-elided_lifetimes_in_paths = "warn"
-non_ascii_idents = "deny"
-trivial_numeric_casts = "warn"
-unused_lifetimes = "warn"
-single_use_lifetimes = "warn"
-
-[lints.clippy]
-all = { level = "deny", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-todo = "deny"
-unimplemented = "deny"
-unreachable = "deny"
-indexing_slicing = "deny"
-dbg_macro = "warn"
-print_stdout = "warn"
-module_name_repetitions = "allow"
-must_use_candidate = "allow"
-missing_errors_doc = "allow"
-struct_excessive_bools = "allow"
+[lints]
+workspace = true
