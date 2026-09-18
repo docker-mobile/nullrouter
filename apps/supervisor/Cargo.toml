@@ -1,0 +1,19 @@
+[package]
+name = "nullrouter-supervisor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Single-binary supervisor that forks all nullrouter microservices"
+
+[[bin]]
+name = "nullrouter"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

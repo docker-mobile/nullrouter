@@ -3474,6 +3474,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nullrouter-supervisor"
+version = "0.5.20"
+dependencies = [
+ "clap",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "nullrouter-translate"
 version = "0.5.20"
 dependencies = [

@@ -96,6 +96,10 @@ cargo run --release
 ./run.sh
 ```
 
+**Using the Single Binary (recommended):**
+
+The supervisor forks all 7 microservices into child processes, using  as the runtime directory. All ports are derived from  (default: 20128).
+
 **Using Docker:**
 ```bash
 docker compose up -d
@@ -254,6 +258,8 @@ Explore our in-depth guides in the [NullRouter GitHub Wiki](wiki/Home.md):
 - 🔀 [Smart Routing & Combo Models](wiki/Smart-Routing-and-Failover.md)
 - 🖥️ [Playground & WebAssembly Dashboard](wiki/Playground-and-WebAssembly-Dashboard.md)
 - 📑 [Full REST & SSE API Reference](wiki/API-Reference.md)
+- 📊 [Benchmarks](docs/BENCHMARKS.md)
+- 🚀 [Single-Binary Mode](docs/Single-Binary.md)
 - 🔒 [Security & Local Credential Encryption](wiki/Security-and-Privacy.md)
 - 🩺 [Exhaustive Diagnostics & Troubleshooting Playbook](wiki/Diagnostics-and-Troubleshooting.md)
 - 🌏 Localized Diagnostics: [中文诊断手册](wiki/i18n-Diagnostics-Guide-zh.md) • [Guía de Diagnóstico en Español](wiki/i18n-Diagnostics-Guide-es.md) • [日本語診断ガイド](wiki/i18n-Diagnostics-Guide-ja.md) • [Guia de Diagnóstico em Português](wiki/i18n-Diagnostics-Guide-pt.md) • [Hướng dẫn chẩn đoán Tiếng Việt](wiki/i18n-Diagnostics-Guide-vi.md)

@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "apps/dashboard-leptos",
+    "apps/supervisor",
     "benches/hop-probe",
     "benches/mock-provider",
     "crates/caveman",
