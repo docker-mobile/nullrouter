@@ -1,10 +1,10 @@
-//! Service health, version, and the switches that decide how requests are handled.
+//! Dashboard overview: hero banner, live health, quick actions, and version info.
 
 use leptos::prelude::*;
 use nullrouter_contracts::VersionResponse;
 
 use crate::api::{Hydrate, load};
-use crate::routes::types::SettingsView;
+use crate::routes::types::{ModelsList, SettingsView, StateView};
 use crate::routes::{PageHeader, Panel};
 
 #[component]
@@ -12,16 +12,24 @@ pub fn Overview() -> impl IntoView {
     let locale = crate::i18n::use_locale();
     let (version, set_version) = signal(Hydrate::<VersionResponse>::Loading);
     let (settings, set_settings) = signal(Hydrate::<SettingsView>::Loading);
+    let (state, set_state) = signal(Hydrate::<StateView>::Loading);
+    let (models, set_models) = signal(Hydrate::<ModelsList>::Loading);
 
     let reload = move || {
         set_version.set(Hydrate::Loading);
         set_settings.set(Hydrate::Loading);
+        set_state.set(Hydrate::Loading);
+        set_models.set(Hydrate::Loading);
         load("/api/version", set_version);
         load("/api/settings", set_settings);
+        load("/api/state", set_state);
+        load("/api/models", set_models);
     };
     reload();
 
     view! {
+        <HeroBanner locale=locale.clone() version=version state=state models=models />
+
         <PageHeader
             title=locale.get("nav.dashboard").to_owned()
             description=locale.get("overview.description").to_owned()
@@ -43,6 +51,99 @@ pub fn Overview() -> impl IntoView {
                     children=|data: SettingsView| view! { <SettingsSummary data=data /> }
                 />
             </Card>
+        </div>
+    }
+}
+
+/// Full-width hero banner with gradient background, title, tagline, and live stats.
+#[component]
+fn HeroBanner(
+    locale: crate::i18n::Locale,
+    version: ReadSignal<Hydrate<VersionResponse>>,
+    state: ReadSignal<Hydrate<StateView>>,
+    models: ReadSignal<Hydrate<ModelsList>>,
+) -> impl IntoView {
+    view! {
+        <div class="relative overflow-hidden rounded-2xl border border-border mb-6
+                     bg-gradient-to-br from-primary/10 via-card to-card
+                     dark:from-primary/5 dark:via-card dark:to-card">
+            // Decorative gradient orbs
+            <div class="absolute -top-24 -right-24 size-64 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+            <div class="absolute -bottom-32 -left-12 size-48 rounded-full bg-blue-500/5 blur-3xl pointer-events-none" />
+
+            <div class="relative p-8 md:p-10 space-y-6">
+                // Title + tagline
+                <div class="space-y-2">
+                    <h1 class="text-3xl md:text-4xl font-bold tracking-tight">
+                        {locale.get("overview.hero_title").to_owned()}
+                    </h1>
+                    <p class="text-base md:text-lg text-muted-foreground max-w-2xl">
+                        {locale.get("overview.hero_subtitle").to_owned()}
+                    </p>
+                    <div class="flex flex-wrap gap-2 pt-1">
+                        {locale.get("overview.hero_tagline")
+                            .split(" · ")
+                            .map(|tag| {
+                                view! {
+                                    <span class="px-2.5 py-1 rounded-full text-xs font-medium
+                                                 bg-primary/10 text-primary border border-primary/20">
+                                        {tag.to_owned()}
+                                    </span>
+                                }
+                            })
+                            .collect::<Vec<_>>()}
+                    </div>
+                </div>
+
+                // Live stats row
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+                    <StatCard
+                        label=locale.get("overview.providers_connected").to_owned()
+                        value=move || match state.get() {
+                            Hydrate::Ready(s) => format!("{}", s.connections.len()),
+                            _ => "—".to_owned(),
+                        }
+
+                    />
+                    <StatCard
+                        label=locale.get("overview.active_combos").to_owned()
+                        value=move || match state.get() {
+                            Hydrate::Ready(s) => format!("{}", s.combos.len()),
+                            _ => "—".to_owned(),
+                        }
+
+                    />
+                    <StatCard
+                        label=locale.get("overview.models_available").to_owned()
+                        value=move || match models.get() {
+                            Hydrate::Ready(m) => format!("{}", m.models.len()),
+                            _ => "—".to_owned(),
+                        }
+
+                    />
+                    <StatCard
+                        label=locale.get("overview.version").to_owned()
+                        value=move || match version.get() {
+                            Hydrate::Ready(v) => v.current_version.as_str().to_owned(),
+                            _ => "—".to_owned(),
+                        }
+
+                    />
+                </div>
+            </div>
+        </div>
+    }
+}
+
+/// One stat in the hero banner.
+#[component]
+fn StatCard(label: String, value: impl Fn() -> String + 'static + Send) -> impl IntoView {
+    view! {
+        <div class="space-y-1">
+            <p class="text-xs text-muted-foreground truncate">{label}</p>
+            <p class="text-xl font-semibold font-mono tabular-nums">
+                {move || value()}
+            </p>
         </div>
     }
 }

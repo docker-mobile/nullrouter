@@ -435,6 +435,29 @@ pub(crate) fn build(body: &Value, context: &Context<'_>) -> Value {
     );
     state.insert("agentTaskType".to_owned(), json!("vibe"));
     state.insert("currentMessage".to_owned(), render(&current, context.model));
+
+    // Normalize tool definitions into Kiro tool specs.
+    let tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if !tools.is_empty() {
+        let (specs, _) = normalize_kiro_tool_specs(tools);
+        if !specs.is_empty() {
+            state.insert("currentMessage".to_owned(), {
+                let mut msg = render(&current, context.model);
+                if let Some(msg_obj) = msg.as_object_mut() {
+                    let ctx = msg_obj
+                        .entry("userInputMessage")
+                        .or_insert_with(|| json!({"userInputMessage": {"content": ""}}));
+                    if let Some(ctx_obj) = ctx.as_object_mut() {
+                        ctx_obj.insert("tools".to_owned(), Value::Array(specs));
+                    }
+                }
+                msg
+            });
+        }
+    }
     state.insert(
         "history".to_owned(),
         Value::Array(
@@ -891,5 +914,119 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+    }
+}
+
+/// Kiro tool spec limits (from kiroConstants.js).
+const KIRO_TOOL_NAME_MAX: usize = 64;
+const KIRO_TOOL_DESC_MAX: usize = 10237;
+
+/// Normalize OpenAI- or Claude-shaped tool definitions into Kiro tool specs.
+///
+/// Ports `normalizeKiroToolSpecs` from `kiroConversation.js`. Kiro expects tools
+/// in a `toolSpecification` shape with `inputSchema.json`, not the OpenAI
+/// `function.parameters` shape.
+pub(crate) fn normalize_kiro_tool_specs(
+    tools: &[Value],
+) -> (Vec<Value>, std::collections::HashMap<String, String>) {
+    let mut specs = Vec::new();
+    let mut name_map = std::collections::HashMap::new();
+    let mut used_names = std::collections::HashSet::new();
+
+    for (index, tool) in tools.iter().enumerate() {
+        let raw_name = tool
+            .pointer("/function/name")
+            .or_else(|| tool.get("name"))
+            .and_then(Value::as_str);
+        let Some(raw_name) = raw_name else { continue };
+        if raw_name.trim().is_empty() {
+            continue;
+        }
+        if name_map.contains_key(raw_name) {
+            continue;
+        }
+
+        let cleaned = raw_name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        let base = if cleaned.is_empty() {
+            format!("tool_{}", index + 1)
+        } else {
+            cleaned.chars().take(KIRO_TOOL_NAME_MAX).collect()
+        };
+
+        let mut name = base.clone();
+        let mut suffix = 2;
+        while used_names.contains(&name) {
+            let tail = format!("_{}", suffix);
+            let max_base = KIRO_TOOL_NAME_MAX.saturating_sub(tail.len());
+            name = format!("{}{}", &base[..base.len().min(max_base)], tail);
+            suffix += 1;
+        }
+        used_names.insert(name.clone());
+        name_map.insert(raw_name.to_owned(), name.clone());
+
+        let raw_desc = tool
+            .pointer("/function/description")
+            .or_else(|| tool.get("description"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let desc = if raw_desc.is_empty() {
+            format!("Tool: {raw_name}")
+        } else {
+            raw_desc
+                .chars()
+                .take(KIRO_TOOL_DESC_MAX)
+                .collect::<String>()
+        };
+
+        let schema = tool
+            .pointer("/function/parameters")
+            .or_else(|| tool.get("parameters"))
+            .or_else(|| tool.get("input_schema"))
+            .cloned()
+            .unwrap_or(json!({}));
+
+        specs.push(json!({
+            "toolSpecification": {
+                "name": name,
+                "description": desc,
+                "inputSchema": { "json": normalize_schema(&schema) }
+            }
+        }));
+    }
+
+    (specs, name_map)
+}
+
+/// Clean a JSON schema for Kiro: remove `additionalProperties` and empty `required`.
+fn normalize_schema(value: &Value) -> Value {
+    match value {
+        Value::Array(arr) => Value::Array(arr.iter().map(normalize_schema).collect()),
+        Value::Object(obj) => {
+            let mut cleaned = serde_json::Map::new();
+            for (key, child) in obj {
+                if key == "additionalProperties" {
+                    continue;
+                }
+                if key == "required" {
+                    if let Some(req_arr) = child.as_array() {
+                        if req_arr.is_empty() {
+                            continue;
+                        }
+                    }
+                }
+                cleaned.insert(key.clone(), normalize_schema(child));
+            }
+            Value::Object(cleaned)
+        }
+        other => other.clone(),
     }
 }

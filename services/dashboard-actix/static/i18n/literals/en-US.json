@@ -587,5 +587,19 @@
   "users.set_password": "Set password",
   "users.shared_password_notice": "No accounts exist yet, so the shared dashboard password is still the way in. Create an admin below and the shared password stops working.",
   "users.username_placeholder": "letters, digits, dot, dash, underscore",
-  "chat.reasoning": "Reasoning"
+  "chat.reasoning": "Reasoning",
+  "overview.hero_title": "NullRouter",
+  "overview.hero_subtitle": "Ultra-high-performance AI router & token optimizer",
+  "overview.hero_tagline": "Sub-50µs dispatch · Zero-copy SSE · 40+ providers",
+  "overview.quick_actions": "Quick Actions",
+  "overview.action_chat": "Open Chat",
+  "overview.action_providers": "Add Provider",
+  "overview.action_models": "Browse Models",
+  "overview.action_settings": "Settings",
+  "overview.health": "System Health",
+  "overview.health_healthy": "All systems operational",
+  "overview.providers_connected": "Providers Connected",
+  "overview.active_combos": "Active Combos",
+  "overview.models_available": "Models Available",
+  "overview.token_savings": "Token Savings (RTK)"
 }

@@ -342,6 +342,16 @@ pub struct ModelTestBody<'a> {
     pub kind: &'a str,
 }
 
+/// The shape of GET /api/state: connections and combos.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateView {
+    #[serde(default)]
+    pub connections: Vec<ProviderRow>,
+    #[serde(default)]
+    pub combos: Vec<ComboRow>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComboRow {
