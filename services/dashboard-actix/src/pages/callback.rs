@@ -8,7 +8,7 @@ pub(crate) const CALLBACK_HTML: &str = r#"<!doctype html>
   <title>nullrouter OAuth Callback</title>
   <meta name="description" content="Complete OAuth authorization for nullrouter">
   <meta name="color-scheme" content="light dark">
-  <link rel="stylesheet" href="/assets/dashboard.css">
+  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/dashboard/app.css">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="modulepreload" href="/pkg/dashboard_leptos.js">

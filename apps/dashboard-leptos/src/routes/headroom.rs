@@ -23,8 +23,14 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Hydrate, Method, encode, load};
-use crate::routes::controls::{Action, Caution, Field, Flag, Outcome, OutcomeLine, Section, Tone};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::controls::{
+    Action, Caution, Field, Outcome, OutcomeLine, Section, StateBadge, Tone,
+};
+use crate::routes::{
+    Alert, AlertDescription, AlertVariant, BadgeVariant, Card, CardContent, CardHeader, CardTitle,
+    Checkbox, EmptyState, ErrorNote, IconName, Mono, PageBody, PageHeader, Panel,
+};
+use crate::t;
 
 /// `GET /api/headroom/status`.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -112,7 +118,6 @@ struct ExtrasBody {
 
 #[component]
 pub fn Headroom() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (status, set_status) = signal(Hydrate::<HeadroomStatus>::Loading);
     let (extras, set_extras) = signal(Hydrate::<HeadroomExtras>::Loading);
     let (log, set_log) = signal(Hydrate::<HeadroomLog>::Loading);
@@ -152,52 +157,65 @@ pub fn Headroom() -> impl IntoView {
     });
 
     view! {
-        <PageHeader
-            title=locale.get("nav.headroom").to_owned()
-            description=locale.get("headroom.description").to_owned()
-        />
-        <div class="space-y-6">
+        <PageHeader title=t!("nav.headroom") description=t!("headroom.description") />
+
+        <PageBody>
+            // Supervisor state and the host's Python environment, side by side. They are separate
+            // reads because they can disagree: a proxy can run with no extras installed, and extras
+            // can be installed with nothing running.
             <div class="grid gap-4 md:grid-cols-2">
-                <Section title=locale.get("headroom.proxy").to_owned()>
-                    <Panel
-                        state=status
-                        on_retry=Callback::new(move |()| reload())
-                        children=|data: HeadroomStatus| view! { <StatusBody data=data /> }
-                    />
-                </Section>
-                <Section title=locale.get("headroom.environment").to_owned()>
-                    <Panel
-                        state=extras
-                        on_retry=Callback::new(move |()| reload())
-                        children=|data: HeadroomExtras| view! { <EnvironmentBody data=data /> }
-                    />
-                </Section>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("headroom.proxy")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=status
+                            on_retry=Callback::new(move |()| reload())
+                            children=|data: HeadroomStatus| view! { <StatusBody data=data /> }
+                        />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("headroom.environment")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=extras
+                            on_retry=Callback::new(move |()| reload())
+                            children=|data: HeadroomExtras| view! { <EnvironmentBody data=data /> }
+                        />
+                    </CardContent>
+                </Card>
             </div>
 
-            <ControlPanel
-                extras=extras
-                held=control_held
-                outcome=outcome
-                on_done=done
-            />
+            <ControlPanel extras=extras held=control_held outcome=outcome on_done=done />
 
             <ExtrasForm extras=extras on_change=refetch />
 
-            <Section title=locale.get("headroom.install_log").to_owned()>
-                <Panel
-                    state=log
-                    on_retry=Callback::new(move |()| reload())
-                    children=|data: HeadroomLog| view! { <LogBody data=data /> }
-                />
-            </Section>
-        </div>
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("headroom.install_log")}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <Panel
+                        state=log
+                        on_retry=Callback::new(move |()| reload())
+                        children=|data: HeadroomLog| view! { <LogBody data=data /> }
+                    />
+                </CardContent>
+            </Card>
+        </PageBody>
     }
 }
 
 /// Start, stop and restart the supervised daemon.
 ///
 /// Its own component because [`Section`]'s children are a `FnOnce`, which takes the caller's
-/// `Locale` with them; a second section needing a label would then have none.
+/// `Locale` with them; a second section needing a label would then have none. `t!` re-reads the
+/// locale per use, so there is no locale to lose here.
 #[component]
 fn ControlPanel(
     extras: ReadSignal<Hydrate<HeadroomExtras>>,
@@ -205,158 +223,157 @@ fn ControlPanel(
     outcome: ReadSignal<Option<Outcome>>,
     on_done: Callback<Outcome>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     view! {
-        <Section title=locale.get("headroom.controls").to_owned()>
-            <div class="flex flex-wrap gap-2">
-                <Action
-                    label=locale.get("headroom.start").to_owned()
-                    path="/api/headroom/start".to_owned()
-                    tone=Tone::Primary
-                    disabled=held
-                    done_label=locale.get("headroom.started").to_owned()
-                    on_done=on_done
-                />
-                // Not held by `restart_supported`: stop is idempotent and answers 200 even with
-                // nothing running, so there is no build where it refuses.
-                <Action
-                    label=locale.get("headroom.stop").to_owned()
-                    path="/api/headroom/stop".to_owned()
-                    done_label=locale.get("headroom.stopped").to_owned()
-                    on_done=on_done
-                />
-                <Action
-                    label=locale.get("headroom.restart").to_owned()
-                    path="/api/headroom/restart".to_owned()
-                    disabled=held
-                    done_label=locale.get("headroom.restarted").to_owned()
-                    on_done=on_done
-                />
+        <Section title=t!("headroom.controls")>
+            <div class="space-y-3">
+                <div class="flex flex-wrap gap-2">
+                    <Action
+                        label=t!("headroom.start")
+                        path="/api/headroom/start".to_owned()
+                        tone=Tone::Primary
+                        disabled=held
+                        done_label=t!("headroom.started")
+                        on_done=on_done
+                    />
+                    // Not held by `restart_supported`: stop is idempotent and answers 200 even with
+                    // nothing running, so there is no build where it refuses.
+                    <Action
+                        label=t!("headroom.stop")
+                        path="/api/headroom/stop".to_owned()
+                        done_label=t!("headroom.stopped")
+                        on_done=on_done
+                    />
+                    <Action
+                        label=t!("headroom.restart")
+                        path="/api/headroom/restart".to_owned()
+                        disabled=held
+                        done_label=t!("headroom.restarted")
+                        on_done=on_done
+                    />
+                </div>
+                // The server's own sentence about what these buttons do in this build.
+                {move || {
+                    extras
+                        .get()
+                        .ready()
+                        .and_then(|report| report.restart_message.clone())
+                        .filter(|message| !message.is_empty())
+                        .map(|message| {
+                            view! {
+                                <p class="text-xs text-muted-foreground break-words">{message}</p>
+                            }
+                        })
+                }}
+                <OutcomeLine outcome=outcome />
             </div>
-            // The server's own sentence about what these buttons do in this build.
-            {move || {
-                extras
-                    .get()
-                    .ready()
-                    .and_then(|report| report.restart_message.clone())
-                    .filter(|message| !message.is_empty())
-                    .map(|message| {
-                        view! { <p class="text-xs text-muted-foreground">{message}</p> }
-                    })
-            }}
-            <OutcomeLine outcome=outcome />
         </Section>
     }
 }
 
 #[component]
 fn StatusBody(data: HeadroomStatus) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let last_error = data.last_error.unwrap_or_default();
     let restarts = data.restarts;
 
     view! {
-        <dl class="space-y-2.5 text-sm">
-            <Flag label=locale.get("headroom.running").to_owned() on=data.running />
-            <Flag label=locale.get("headroom.healthy").to_owned() on=data.healthy />
-            <Field
-                label=locale.get("headroom.state").to_owned()
-                value=data.state.unwrap_or_default()
-            />
-            <Field
-                label=locale.get("headroom.pid").to_owned()
-                value=data.managed_pid.map(|pid| pid.to_string()).unwrap_or_default()
-            />
-            <Field label=locale.get("headroom.url").to_owned() value=data.url.unwrap_or_default() />
-            <Field
-                label=locale.get("headroom.restarts").to_owned()
-                value=restarts.to_string()
-            />
-            <Field
-                label=locale.get("headroom.message").to_owned()
-                value=data.message.unwrap_or_default()
-            />
-        </dl>
-        {(!last_error.is_empty())
-            .then(|| {
-                view! {
-                    <p class="text-sm text-destructive break-words" role="alert">
-                        {last_error.clone()}
-                    </p>
-                }
-            })}
-        {(restarts > 0)
-            .then(|| {
-                view! {
-                    <p class="text-xs text-muted-foreground">
-                        {locale.get("headroom.flapping").to_owned()}
-                    </p>
-                }
-            })}
+        <div class="space-y-3">
+            // The two claims the supervisor makes, kept apart on purpose and shown as two badges: a
+            // process this service owns is not the same thing as a proxy that answers. "Not
+            // answering" is a warning rather than neutral, because the proxy is supposed to be up.
+            <div class="flex flex-wrap items-center gap-1.5">
+                <StateBadge label=t!("headroom.running") on=data.running />
+                <StateBadge
+                    label=t!("headroom.healthy")
+                    on=data.healthy
+                    off_variant=BadgeVariant::Warning
+                />
+            </div>
+            <dl class="divide-y divide-border/70 text-sm">
+                <Field label=t!("headroom.state") value=data.state.unwrap_or_default() />
+                <Field
+                    label=t!("headroom.pid")
+                    value=data.managed_pid.map(|pid| pid.to_string()).unwrap_or_default()
+                />
+                <Field label=t!("headroom.url") value=data.url.unwrap_or_default() />
+                <Field label=t!("headroom.restarts") value=restarts.to_string() />
+                <Field label=t!("headroom.message") value=data.message.unwrap_or_default() />
+            </dl>
+            // The supervisor's own sentence about why the last attempt ended badly. Shown as a
+            // failure, not as a muted line: it is the only explanation of a proxy that is not up.
+            {(!last_error.is_empty())
+                .then(|| view! { <ErrorNote message=last_error.clone() /> })}
+            {(restarts > 0)
+                .then(|| {
+                    view! {
+                        <Alert variant=AlertVariant::Warning>
+                            <AlertDescription>{t!("headroom.flapping")}</AlertDescription>
+                        </Alert>
+                    }
+                })}
+        </div>
     }
 }
 
 #[component]
 fn EnvironmentBody(data: HeadroomExtras) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let python = data.python.unwrap_or_default();
     let found = !python.is_empty();
     let extras = data.extras;
     let available = data.available;
 
     view! {
-        <dl class="space-y-2.5 text-sm">
-            <Flag label=locale.get("headroom.package").to_owned() on=data.installed />
-            <Field
-                label=locale.get("headroom.version").to_owned()
-                value=data.version.unwrap_or_default()
-            />
-            <Field label=locale.get("headroom.python").to_owned() value=python />
-            <Field
-                label=locale.get("headroom.python_version").to_owned()
-                value=data.python_version.unwrap_or_default()
-            />
-            <Field
-                label=locale.get("headroom.python_min").to_owned()
-                value=data.python_min_version.unwrap_or_default()
-            />
-        </dl>
-        {(!found)
-            .then(|| {
-                view! {
-                    <p class="text-sm text-warning break-words">
-                        {locale.get("headroom.no_python").to_owned()}
-                    </p>
-                }
-            })}
-        <div class="space-y-2">
-            <h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                {locale.get("headroom.extras").to_owned()}
-            </h3>
-            {if available.is_empty() {
-                view! {
-                    <p class="text-sm text-muted-foreground">
-                        {locale.get("headroom.no_extras").to_owned()}
-                    </p>
-                }
-                    .into_any()
-            } else {
-                view! {
-                    <dl class="space-y-2 text-sm">
-                        {available
-                            .into_iter()
-                            .map(|name| {
-                                // Presence comes from the map the server sent, not from the
-                                // available list: an extra the build recognises but has not
-                                // installed must not read as installed.
-                                let on = extras.get(&name).copied().unwrap_or(false);
-                                view! { <Flag label=name on=on /> }
-                            })
-                            .collect_view()}
-                    </dl>
-                }
-                    .into_any()
-            }}
+        <div class="space-y-3">
+            <StateBadge label=t!("headroom.package") on=data.installed />
+            <dl class="divide-y divide-border/70 text-sm">
+                <Field label=t!("headroom.version") value=data.version.unwrap_or_default() />
+                <Field label=t!("headroom.python") value=python />
+                <Field
+                    label=t!("headroom.python_version")
+                    value=data.python_version.unwrap_or_default()
+                />
+                <Field
+                    label=t!("headroom.python_min")
+                    value=data.python_min_version.unwrap_or_default()
+                />
+            </dl>
+            // Without an interpreter nothing on this page can be installed, so the absence is a
+            // warning rather than a blank row.
+            {(!found)
+                .then(|| {
+                    view! {
+                        <Alert variant=AlertVariant::Warning>
+                            <AlertDescription>{t!("headroom.no_python")}</AlertDescription>
+                        </Alert>
+                    }
+                })}
+            <div class="space-y-1.5">
+                <h3 class="text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase">
+                    {t!("headroom.extras")}
+                </h3>
+                {if available.is_empty() {
+                    view! { <p class="text-sm text-muted-foreground">{t!("headroom.no_extras")}</p> }
+                        .into_any()
+                } else {
+                    view! {
+                        <div class="flex flex-wrap gap-1.5">
+                            {available
+                                .into_iter()
+                                .map(|name| {
+                                    // Presence comes from the map the server sent, not from the
+                                    // available list: an extra the build recognises but has not
+                                    // installed must not read as installed.
+                                    let on = extras.get(&name).copied().unwrap_or(false);
+                                    let label = name;
+                                    view! {
+                                        <StateBadge label=label on=on />
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    }
+                        .into_any()
+                }}
+            </div>
         </div>
     }
 }
@@ -371,7 +388,6 @@ fn ExtrasForm(
     /// Refetch, run only after pip actually changed something.
     on_change: Callback<()>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (chosen, set_chosen) = signal(Vec::<String>::new());
     let (outcome, set_outcome) = signal(None::<Outcome>);
 
@@ -410,112 +426,113 @@ fn ExtrasForm(
     });
 
     view! {
-        <Section title=locale.get("headroom.manage_extras").to_owned()>
-            <p class="text-sm text-muted-foreground">
-                {locale.get("headroom.manage_hint").to_owned()}
-            </p>
-            {move || {
-                // Re-acquired: capturing the outer `Locale` would move it out of the rest of the
-                // form, and it is not `Copy`.
-                let locale = crate::i18n::use_locale();
-                let names = available.get();
-                if names.is_empty() {
-                    return view! {
-                        <p class="text-sm text-muted-foreground">
-                            {locale.get("headroom.no_extras").to_owned()}
-                        </p>
+        <Section title=t!("headroom.manage_extras")>
+            <div class="space-y-3">
+                <p class="text-sm text-muted-foreground">{t!("headroom.manage_hint")}</p>
+                {move || {
+                    let names = available.get();
+                    if names.is_empty() {
+                        return view! {
+                            <p class="text-sm text-muted-foreground">{t!("headroom.no_extras")}</p>
+                        }
+                            .into_any();
                     }
-                        .into_any();
-                }
-                view! {
-                    <div class="flex flex-wrap gap-4">
-                        {names
-                            .into_iter()
-                            .map(|name| {
-                                let value = name.clone();
-                                view! {
-                                    <label class="flex items-center gap-2 text-sm">
-                                        <input
-                                            type="checkbox"
-                                            class="size-4"
-                                            prop:checked=move || chosen.get().contains(&value)
-                                            on:change={
-                                                let value = name.clone();
-                                                move |ev| {
-                                                    let on = event_target_checked(&ev);
-                                                    let value = value.clone();
-                                                    set_chosen
-                                                        .update(|names| {
-                                                            if on {
-                                                                if !names.contains(&value) {
-                                                                    names.push(value);
-                                                                }
-                                                            } else {
-                                                                names.retain(|held| *held != value);
+                    view! {
+                        <div class="flex flex-wrap gap-x-4 gap-y-2">
+                            {names
+                                .into_iter()
+                                .map(|name| {
+                                    // The `Checkbox` is controlled, so the checked state is derived
+                                    // from `chosen` rather than mirrored into the input. Two
+                                    // bindings for `name`: one is the toggle's label, the other is
+                                    // captured by the change handler.
+                                    let checked_name = name.clone();
+                                    let toggled = name.clone();
+                                    let label = name;
+                                    view! {
+                                        <Checkbox
+                                            checked=Signal::derive(move || {
+                                                chosen.get().contains(&checked_name)
+                                            })
+                                            on_change=Callback::new(move |on| {
+                                                let value = toggled.clone();
+                                                set_chosen
+                                                    .update(|names| {
+                                                        if on {
+                                                            if !names.contains(&value) {
+                                                                names.push(value);
                                                             }
-                                                        });
-                                                }
-                                            }
+                                                        } else {
+                                                            names.retain(|held| *held != value);
+                                                        }
+                                                    });
+                                            })
+                                            label=label
                                         />
-                                        <span>{name}</span>
-                                    </label>
-                                }
-                            })
-                            .collect_view()}
-                    </div>
-                }
-                    .into_any()
-            }}
-            {move || {
-                extras
-                    .get()
-                    .ready()
-                    .and_then(|report| report.install_message.clone())
-                    .filter(|message| !message.is_empty())
-                    .map(|message| {
-                        view! { <p class="text-xs text-muted-foreground">{message}</p> }
-                    })
-            }}
-            <Caution text=locale.get("headroom.install_caution").to_owned() />
-            <div class="flex flex-wrap gap-2">
-                <Action
-                    label=locale.get("headroom.install_extras").to_owned()
-                    path="/api/headroom/extras".to_owned()
-                    method=Method::Post
-                    tone=Tone::Destructive
-                    disabled=held
-                    done_label=locale.get("headroom.extras_installed").to_owned()
-                    body=build_body
-                    on_done=report
-                />
-                <Action
-                    label=locale.get("headroom.remove_extras").to_owned()
-                    path="/api/headroom/extras".to_owned()
-                    method=Method::Delete
-                    tone=Tone::Destructive
-                    disabled=held
-                    done_label=locale.get("headroom.extras_removed").to_owned()
-                    body=build_body
-                    on_done=report
-                />
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    }
+                        .into_any()
+                }}
+                {move || {
+                    extras
+                        .get()
+                        .ready()
+                        .and_then(|report| report.install_message.clone())
+                        .filter(|message| !message.is_empty())
+                        .map(|message| {
+                            view! {
+                                <p class="text-xs text-muted-foreground break-words">{message}</p>
+                            }
+                        })
+                }}
+                <Caution text=t!("headroom.install_caution") />
+                <div class="flex flex-wrap gap-2">
+                    <Action
+                        label=t!("headroom.install_extras")
+                        path="/api/headroom/extras".to_owned()
+                        method=Method::Post
+                        tone=Tone::Destructive
+                        disabled=held
+                        done_label=t!("headroom.extras_installed")
+                        body=build_body
+                        on_done=report
+                    />
+                    <Action
+                        label=t!("headroom.remove_extras")
+                        path="/api/headroom/extras".to_owned()
+                        method=Method::Delete
+                        tone=Tone::Destructive
+                        disabled=held
+                        done_label=t!("headroom.extras_removed")
+                        body=build_body
+                        on_done=report
+                    />
+                </div>
+                <OutcomeLine outcome=outcome />
             </div>
-            <OutcomeLine outcome=outcome />
         </Section>
     }
 }
 
 #[component]
 fn LogBody(data: HeadroomLog) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let path = data.log_path.unwrap_or_default();
 
     view! {
         <div class="space-y-2">
             {if data.log.trim().is_empty() {
+                // An `EmptyState` rather than a muted sentence: this is "there is nothing here",
+                // not "this failed". Its description carries the reason -- this service never
+                // writes a log, so an empty one needs the explanation rather than a blank box.
                 view! {
-                    <p class="text-sm text-muted-foreground italic">
-                        {locale.get("headroom.no_log").to_owned()}
-                    </p>
+                    <EmptyState
+                        title=t!("headroom.no_log")
+                        description=t!("headroom.no_log_path")
+                        icon=IconName::ScrollText
+                    />
                 }
                     .into_any()
             } else {
@@ -527,13 +544,16 @@ fn LogBody(data: HeadroomLog) -> impl IntoView {
                 }
                     .into_any()
             }}
-            <p class="text-xs text-muted-foreground break-all">
-                {if path.is_empty() {
-                    locale.get("headroom.no_log_path").to_owned()
-                } else {
-                    path
-                }}
-            </p>
+            // Where the tail was read from. Omitted when there is no file, because the empty state
+            // above already says so -- printing the same sentence twice reads as two problems.
+            {(!path.is_empty())
+                .then(|| {
+                    view! {
+                        <p class="text-xs text-muted-foreground break-all">
+                            <Mono value=path.clone() />
+                        </p>
+                    }
+                })}
         </div>
     }
 }

@@ -2,37 +2,60 @@
  * Source for the dashboard stylesheet.
  *
  * The build output is committed at services/dashboard-actix/static/assets/dashboard/app.css, so
- * neither running nor building nullrouter needs Node. Regenerating is only necessary after a
- * class name changes in Rust source:
+ * neither running nor building nullrouter needs Node. Regenerating is only necessary after a class
+ * name changes in Rust source:
  *
  *   cd apps/dashboard-leptos && npm install && npm run css
  *
  * Tailwind 4 is configured in CSS rather than a JS config file, which is why there is no
- * tailwind.config.js. @source is what makes it scan .rs files -- Tailwind has no built-in
- * extractor for Rust, but its scanner is content-agnostic, so class names inside view! macros and
- * in `const FOO: &str = "..."` are both found.
+ * tailwind.config.js. `@source` is what makes it scan .rs files -- Tailwind has no built-in extractor
+ * for Rust, but its scanner is content-agnostic, so class names inside view! macros and in
+ * `const FOO: &str = "..."` are both found.
+ *
+ * There is deliberately no `@source` pointing into the Cargo registry. The component layer is
+ * `src/ui/*.rs`, which is repository source, so the glob below already covers it. The previous version
+ * reached five directories up into `~/.cargo/registry` for a component crate's classes; that relative
+ * path stopped resolving, and the failure mode was a stylesheet that built successfully and silently
+ * dropped every component utility. Utilities a stylesheet cannot find are a build error nobody sees.
  */
 
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* The component crates also carry class names, and they are the ones defining most of the visual
- * surface. Without this line their utilities are absent from the output and every shadcn component
- * renders unstyled. The glob covers the registry cache path for any version of any component
- * crate. */
 @source "../src/**/*.rs";
-@source "../../../../.cargo/registry/src/*/leptos-shadcn-*/src/**/*.rs";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * The shadcn token contract. Component crates emit utilities like `bg-primary` and
- * `ring-offset-background` that resolve through these, so the names are fixed by the library, not
- * chosen here.
+ * Inter, as a variable font, from the copy this repository ships.
  *
- * @theme inline (rather than plain @theme) is what lets the values be var() references: the light
- * and dark blocks below reassign the underlying variables, and every utility follows without
- * Tailwind emitting a second copy of each rule.
+ * `@font-face` rather than a Google Fonts link: the dashboard is served from a host that may have no route
+ * to the public internet, and a font that fails to load is a flash of fallback metrics on every cold start.
+ * `font-display: swap` so text is readable immediately in the fallback and reflows once, instead of being
+ * invisible while a 48 KB file arrives.
+ *
+ * The `latin` subset is the one committed. It covers the ASCII and Latin-1 blocks, which is what the
+ * interface is written in; a locale whose translations are outside it falls through to the system stack
+ * below, which is why that stack still lists the CJK families explicitly.
+ */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * The shadcn token contract.
+ *
+ * Component classes resolve through these names (`bg-primary`, `text-muted-foreground`,
+ * `ring-ring/50`), so the set is fixed by the components rather than chosen here. `@theme inline`
+ * (rather than plain `@theme`) is what lets the values be `var()` references: the light and dark blocks
+ * below reassign the underlying variables and every utility follows without Tailwind emitting a second
+ * copy of each rule.
  */
 @theme inline {
   --color-background: var(--background);
@@ -51,10 +74,17 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  /*
+   * `-emphasis` variants, not extra hues. A status badge needs text that is legible on a tint of its
+   * own colour: `text-success` on `bg-success/12` is a wash in light mode and disappears in dark, so
+   * the badge uses the darker of the pair for its text and keeps the bright one for the dot.
+   */
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-success-emphasis: var(--success-emphasis);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-warning-emphasis: var(--warning-emphasis);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -75,84 +105,105 @@
 }
 
 :root {
-  --radius: 0.65rem;
+  /*
+   * 0.625rem, not the shadcn default 0.5rem or the previous 0.65rem. A dashboard is mostly 12-13px
+   * text inside bordered boxes; at 8px radius the corner curve is smaller than the 6px of padding
+   * inside it and reads as a clipped corner rather than a rounded one.
+   */
+  --radius: 0.625rem;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  /* Inter first, then the platform stack for anything its subset does not cover. */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
+    monospace;
 
-  /* Neutral greys with a faint cool cast, so large surfaces do not read as beige next to the
-   * saturated status colours. */
+  /*
+   * Near-neutral greys with a faint cool cast, so large surfaces do not read as beige next to the
+   * saturated status colours. `background` is pure white here on purpose: the page is the brightest
+   * thing, and cards sit *on* it rather than beside it.
+   */
   --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.145 0.004 285.823);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.145 0.004 285.823);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.145 0.004 285.823);
+  --primary: oklch(0.205 0.006 285.885);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.968 0.001 286.375);
+  --secondary-foreground: oklch(0.205 0.006 285.885);
+  --muted: oklch(0.968 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.014 285.938);
+  --accent: oklch(0.968 0.001 286.375);
+  --accent-foreground: oklch(0.205 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --success: oklch(0.596 0.145 163.225);
   --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.769 0.188 70.08);
+  --success-emphasis: oklch(0.508 0.13 163.225);
+  --warning: oklch(0.769 0.171 70.08);
   --warning-foreground: oklch(0.216 0.006 56.043);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  --warning-emphasis: oklch(0.556 0.145 62);
+  /* The default `<input>` border and every card edge. One value, so a form row and the box around it
+   * are the same weight. */
+  --border: oklch(0.922 0.004 286.32);
+  --input: oklch(0.922 0.004 286.32);
+  --ring: oklch(0.705 0.013 286.067);
 
+  /* The rail is a shade off the page rather than a borderless extension of it, which is what keeps a
+   * 15rem column from reading as part of the content at a glance. */
   --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-foreground: oklch(0.145 0.004 285.823);
+  --sidebar-accent: oklch(0.961 0.002 286.375);
+  --sidebar-accent-foreground: oklch(0.205 0.006 285.885);
+  --sidebar-border: oklch(0.922 0.004 286.32);
 }
 
 /*
- * Dark mode is a class, not a media query, because the user's choice has to be able to disagree
- * with the OS. theme.rs owns the class; the bootstrap script in index.html sets it before the
- * first paint.
+ * Dark mode is a class, not a media query, because the user's choice has to be able to disagree with
+ * the OS. theme.rs owns the class; the bootstrap script in index.html sets it before the first paint.
+ *
+ * The surfaces are ordered background < card < popover so a dialog reads as sitting above a card
+ * sitting above the page, which is the depth order the shadows are drawn for.
  */
 .dark {
-  --background: oklch(0.141 0.005 285.823);
+  --background: oklch(0.145 0.004 285.823);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
+  --card: oklch(0.187 0.005 285.885);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
+  --primary: oklch(0.922 0.004 286.32);
+  --primary-foreground: oklch(0.205 0.006 285.885);
+  --secondary: oklch(0.269 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
+  --muted: oklch(0.269 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.013 286.067);
+  --accent: oklch(0.269 0.006 286.033);
   --accent-foreground: oklch(0.985 0 0);
   /* Lifted and desaturated from the light value: the light red vibrates against a dark ground. */
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --success: oklch(0.696 0.17 162.48);
-  --success-foreground: oklch(0.141 0.005 285.823);
+  --success-foreground: oklch(0.145 0.004 285.823);
+  /* Inverted relative to light mode: on a dark ground the *brighter* green is the legible one. */
+  --success-emphasis: oklch(0.765 0.155 162.48);
   --warning: oklch(0.828 0.189 84.429);
   --warning-foreground: oklch(0.216 0.006 56.043);
-  /* Borders carry an alpha in dark mode so they read as an edge on both card and background
-   * without needing a second token for each. */
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 18%);
-  --ring: oklch(0.552 0.016 285.938);
+  --warning-emphasis: oklch(0.855 0.165 84.429);
+  /* Borders carry an alpha in dark mode so they read as an edge on both a card and the page without
+   * needing a second token for each. */
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.556 0.012 285.938);
 
-  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar: oklch(0.169 0.004 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent: oklch(0.269 0.006 286.033);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-border: oklch(1 0 0 / 10%);
 }
 
 @layer base {
@@ -161,11 +212,40 @@
     overflow-wrap: break-word;
   }
 
+  html {
+    /* The rail is `position: fixed`, so an in-page anchor would land under the header without this.
+     * The header is 3.5rem. */
+    scroll-padding-top: 4.5rem;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    /* The theme swap would otherwise be an instant hard cut across the whole page. Short enough
-     * not to feel like lag, and colour-only so it cannot cause layout work. */
-    transition: background-color 150ms ease, color 150ms ease;
+    /* Tabular figures globally. Every number on this dashboard is in a table or a stat row, and
+     * proportional digits make a column of counts ragged. */
+    font-variant-numeric: tabular-nums;
+    /* The theme swap would otherwise be an instant hard cut across the whole page. Short enough not
+     * to feel like lag, and colour-only so it cannot cause layout work. */
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+
+  /*
+   * Headings carry their own size and weight at every use site, so they must not inherit a browser
+   * default of a bigger bold font: a card title would otherwise be 1.5em and out-shout the page
+   * heading twice its size.
+   */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-balance font-semibold tracking-tight;
+  }
+
+  /* A `<dialog>` that is not open must not occupy space. The browser does this by default; this
+   * restates it because `display: flex` on the element would otherwise override it. */
+  dialog:not([open]) {
+    display: none;
   }
 
   /* Respect the OS accessibility setting. Anyone who has asked for less motion gets no transitions
@@ -181,9 +261,20 @@
     }
   }
 
-  /* Keyboard focus should be obvious; pointer focus should not draw a ring on every click. */
+  /*
+   * Keyboard focus should be obvious; pointer focus should not draw a ring on every click.
+   *
+   * `outline-style: solid` is written out rather than left to `outline-2`. Tailwind's `outline-<width>`
+   * sets the width but leaves the style at its initial `none`, so this rule used to compute to
+   * `outline: 2px none` -- a focus indicator that is invisible on every link and button in the
+   * dashboard. It looked correct in the source and in the generated CSS.
+   */
   :focus-visible {
-    @apply outline-ring outline-2 outline-offset-2;
+    /* Longhands only, and no `outline-<width>`/`outline-<color>` utility: those emit
+     * `outline-style: var(--tw-outline-style)`, whose initial value is `none`, so pairing them with a
+     * later `outline-style: solid` still computes to `none` because the utility wins on order. */
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   ::selection {

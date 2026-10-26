@@ -7,9 +7,14 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Hydrate, Method, load};
-use crate::routes::PageHeader;
 use crate::routes::types::ModelsList;
 use crate::routes::write_reporting;
+use crate::t;
+use crate::ui::{
+    Alert, AlertDescription, AlertVariant, Button, ButtonSize, ButtonVariant, Card, CardContent,
+    CardHeader, CardTitle, Checkbox, ErrorNote, Field, Icon, IconName, Input, PageBody, PageHeader,
+    Spinner, Textarea,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -194,18 +199,22 @@ fn ConversationBox(
     on_send: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <div class="rounded-lg border border-border bg-card min-h-[420px] max-h-[640px] flex flex-col justify-between overflow-hidden shadow-sm">
-            <div class="p-4 space-y-4 overflow-y-auto flex-1">
+        // A chat is the one place on this dashboard where a tall fixed pane is right: the transcript has
+        // to scroll independently of the composer, and the composer has to stay at the bottom where the
+        // eye expects it.
+        <div class="flex h-[calc(100dvh-16rem)] min-h-[26rem] flex-col overflow-hidden rounded-xl border \
+                    border-border bg-card shadow-xs">
+            <div class="flex-1 space-y-4 overflow-y-auto p-4">
                 {move || {
                     let msgs = messages.get();
                     if msgs.is_empty() {
-                        view! { <EmptyState on_select=on_send_suggestion /> }.into_any()
+                        view! { <ChatEmpty on_select=on_send_suggestion /> }.into_any()
                     } else {
                         view! { <MessageList messages=msgs /> }.into_any()
                     }
                 }}
             </div>
-            <ChatInput
+            <ChatComposer
                 input_text=input_text
                 set_input_text=set_input_text
                 is_generating=is_generating
@@ -215,48 +224,12 @@ fn ConversationBox(
     }
 }
 
-#[component]
-fn ChatHeader(
-    label_title: String,
-    label_desc: String,
-    label_params: String,
-    label_clear: String,
-    set_show_params: WriteSignal<bool>,
-    on_clear: Callback<()>,
-) -> impl IntoView {
-    view! {
-        <PageHeader
-            title=label_title
-            description=label_desc
-        >
-            <div class="flex items-center gap-2">
-                <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-accent transition-colors cursor-pointer"
-                    on:click=move |_| set_show_params.update(|v| *v = !*v)
-                >
-                    {label_params}
-                </button>
-                <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-md border border-border text-xs font-medium hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
-                    on:click=move |_| on_clear.run(())
-                >
-                    {label_clear}
-                </button>
-            </div>
-        </PageHeader>
-    }
-}
-
+#[allow(
+    clippy::too_many_lines,
+    reason = "the page wires seven signals into six panels and reads better in one place"
+)]
 #[component]
 pub fn Chat() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label_title = locale.get("chat.title").to_owned();
-    let label_desc = locale.get("chat.description").to_owned();
-    let label_params = locale.get("chat.parameters").to_owned();
-    let label_clear = locale.get("chat.clear").to_owned();
-
     let (catalogue, set_catalogue) = signal(Hydrate::<ModelsList>::Loading);
     load("/api/models", set_catalogue);
 
@@ -317,26 +290,38 @@ pub fn Chat() -> impl IntoView {
     };
 
     view! {
-        <div class="max-w-5xl mx-auto space-y-4">
-            <ChatHeader
-                label_title=label_title
-                label_desc=label_desc
-                label_params=label_params
-                label_clear=label_clear
-                set_show_params=set_show_params
-                on_clear=Callback::new(move |()| clear_conversation())
+        <PageHeader title=t!("chat.title") description=t!("chat.description")>
+            <Button
+                label=t!("chat.parameters")
+                variant=ButtonVariant::Outline
+                size=ButtonSize::Sm
+                on_click=Callback::new(move |()| set_show_params.update(|value| *value = !*value))
             />
+            <Button
+                label=t!("chat.clear")
+                variant=ButtonVariant::Ghost
+                size=ButtonSize::Sm
+                on_click=Callback::new(move |()| clear_conversation())
+            />
+        </PageHeader>
 
-            {move || show_params.get().then(|| view! {
-                <ParametersDrawer
-                    system_prompt=system_prompt
-                    set_system_prompt=set_system_prompt
-                    temperature=temperature
-                    set_temperature=set_temperature
-                    stream_enabled=stream_enabled
-                    set_stream_enabled=set_stream_enabled
-                />
-            })}
+        <PageBody>
+            {move || {
+                show_params
+                    .get()
+                    .then(|| {
+                        view! {
+                            <ParametersPanel
+                                system_prompt=system_prompt
+                                set_system_prompt=set_system_prompt
+                                temperature=temperature
+                                set_temperature=set_temperature
+                                stream_enabled=stream_enabled
+                                set_stream_enabled=set_stream_enabled
+                            />
+                        }
+                    })
+            }}
 
             <ModelBar
                 catalogue=catalogue
@@ -345,11 +330,19 @@ pub fn Chat() -> impl IntoView {
                 metrics=metrics
             />
 
-            {move || error_banner.get().map(|err| view! {
-                <div class="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium">
-                    {err}
-                </div>
-            })}
+            {move || {
+                error_banner
+                    .get()
+                    .map(|message| {
+                        view! {
+                            <Alert variant=AlertVariant::Destructive>
+                                <AlertDescription>
+                                    <p class="whitespace-pre-wrap break-words">{message}</p>
+                                </AlertDescription>
+                            </Alert>
+                        }
+                    })
+            }}
 
             <ConversationBox
                 messages=messages
@@ -359,7 +352,7 @@ pub fn Chat() -> impl IntoView {
                 is_generating=is_generating
                 on_send=on_submit_input
             />
-        </div>
+        </PageBody>
     }
 }
 
@@ -417,8 +410,12 @@ async fn dispatch_chat_turn(
     }
 }
 
+/// The system prompt, temperature and streaming switch.
+///
+/// Collapsed by default and toggled from the header: these are set once for a session of testing, and
+/// leaving them open costs the transcript height every time.
 #[component]
-fn ParametersDrawer(
+fn ParametersPanel(
     system_prompt: ReadSignal<String>,
     set_system_prompt: WriteSignal<String>,
     temperature: ReadSignal<String>,
@@ -426,57 +423,55 @@ fn ParametersDrawer(
     stream_enabled: ReadSignal<bool>,
     set_stream_enabled: WriteSignal<bool>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label_title = locale.get("chat.parameters").to_owned();
-    let label_prompt = locale.get("chat.system_prompt").to_owned();
-    let placeholder_prompt = locale.get("chat.system_placeholder").to_owned();
-    let label_temp = locale.get("chat.temperature").to_owned();
-    let label_stream = locale.get("chat.stream").to_owned();
-
     view! {
-        <section class="rounded-lg border border-border bg-card p-4 space-y-3">
-            <h2 class="text-sm font-semibold">{label_title}</h2>
-            <div class="grid gap-3 sm:grid-cols-2">
-                <label class="space-y-1 text-xs">
-                    <span class="text-muted-foreground font-medium">{label_prompt}</span>
-                    <textarea
-                        class="w-full rounded-md border border-input bg-background p-2 text-xs h-20 resize-none font-mono"
-                        prop:value=move || system_prompt.get()
-                        on:input=move |ev| set_system_prompt.set(event_target_value(&ev))
-                        placeholder=placeholder_prompt
-                    />
-                </label>
-                <div class="space-y-3">
-                    <label class="space-y-1 text-xs block">
-                        <div class="flex justify-between">
-                            <span class="text-muted-foreground font-medium">{label_temp}</span>
-                            <span class="font-mono">{move || temperature.get()}</span>
-                        </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="2"
-                            step="0.1"
-                            class="w-full"
-                            prop:value=move || temperature.get()
-                            on:input=move |ev| set_temperature.set(event_target_value(&ev))
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("chat.parameters")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <Field label=t!("chat.system_prompt")>
+                        <Textarea
+                            value=Signal::derive(move || system_prompt.get())
+                            on_input=Callback::new(move |value| set_system_prompt.set(value))
+                            placeholder=t!("chat.system_placeholder")
+                            rows=3
+                            class="font-mono text-xs"
                         />
-                    </label>
-                    <label class="flex items-center gap-2 text-xs cursor-pointer select-none">
-                        <input
-                            type="checkbox"
-                            class="rounded border-input text-primary"
-                            prop:checked=move || stream_enabled.get()
-                            on:change=move |ev| set_stream_enabled.set(event_target_checked(&ev))
+                    </Field>
+                    <div class="space-y-3">
+                        <Field label=t!("chat.temperature")>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="2"
+                                    step="0.1"
+                                    class="h-1.5 w-full cursor-pointer appearance-none rounded-full \
+                                           bg-muted accent-primary"
+                                    prop:value=move || temperature.get()
+                                    on:input=move |event| {
+                                        set_temperature.set(event_target_value(&event));
+                                    }
+                                />
+                                <span class="w-10 shrink-0 text-right font-mono text-xs tabular-nums">
+                                    {move || temperature.get()}
+                                </span>
+                            </div>
+                        </Field>
+                        <Checkbox
+                            checked=Signal::derive(move || stream_enabled.get())
+                            on_change=Callback::new(move |next| set_stream_enabled.set(next))
+                            label=t!("chat.stream")
                         />
-                        <span>{label_stream}</span>
-                    </label>
+                    </div>
                 </div>
-            </div>
-        </section>
+            </CardContent>
+        </Card>
     }
 }
 
+/// The model picker, and the last turn's latency.
 #[component]
 fn ModelBar(
     catalogue: ReadSignal<Hydrate<ModelsList>>,
@@ -484,113 +479,123 @@ fn ModelBar(
     set_selected_model: WriteSignal<String>,
     metrics: ReadSignal<Option<(u64, usize)>>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label_model = locale.get("chat.model").to_owned();
-    let label_latency = locale.get("chat.latency").to_owned();
-    let label_tokens = locale.get("chat.tokens").to_owned();
-
     view! {
-        <div class="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-border bg-card/60">
-            <div class="flex items-center gap-2 min-w-0 flex-1">
-                <span class="text-xs font-semibold text-muted-foreground shrink-0">{label_model}:</span>
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border \
+                    bg-card px-3 py-2 shadow-xs">
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+                <Icon name=IconName::Box class="size-3.5 shrink-0 text-muted-foreground" />
+                <span class="shrink-0 text-xs font-medium text-muted-foreground">
+                    {t!("chat.model")}
+                </span>
                 {move || match catalogue.get() {
                     Hydrate::Ready(data) if !data.models.is_empty() => {
-                        let models = data.models;
+                        // The catalogue's own `full_model` when it has one, otherwise `provider/model`.
+                        // The option's label and value are the same string, so it is built once.
+                        let models = data
+                            .models
+                            .into_iter()
+                            .map(|model| {
+                                if model.full_model.is_empty() {
+                                    format!("{}/{}", model.provider, model.model)
+                                } else {
+                                    model.full_model
+                                }
+                            })
+                            .collect::<Vec<String>>();
                         view! {
                             <select
-                                class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono max-w-sm truncate"
+                                class="h-8 min-w-0 max-w-sm flex-1 rounded-md border border-input \
+                                       bg-transparent px-2 font-mono text-xs outline-none \
+                                       focus-visible:border-ring focus-visible:ring-[3px] \
+                                       focus-visible:ring-ring/40 dark:bg-input/20"
                                 prop:value=move || selected_model.get()
-                                on:change=move |ev| set_selected_model.set(event_target_value(&ev))
+                                on:change=move |event| {
+                                    set_selected_model.set(event_target_value(&event));
+                                }
                             >
-                                {models.into_iter().map(|m| {
-                                    let name = if m.full_model.is_empty() {
-                                        format!("{}/{}", m.provider, m.model)
-                                    } else {
-                                        m.full_model
-                                    };
-                                    let val = name.clone();
-                                    view! { <option value=val>{name}</option> }
-                                }).collect::<Vec<_>>()}
+                                {models
+                                    .into_iter()
+                                    .map(|name| {
+                                        let value = name.clone();
+                                        view! { <option value=value>{name}</option> }
+                                    })
+                                    .collect_view()}
                             </select>
-                        }.into_any()
+                        }
+                            .into_any()
                     }
-                    _ => view! {
-                        <input
-                            type="text"
-                            class="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-mono w-64"
-                            prop:value=move || selected_model.get()
-                            on:input=move |ev| set_selected_model.set(event_target_value(&ev))
-                            placeholder="provider/model"
-                        />
-                    }.into_any()
+                    _ => {
+                        // Falls back to a free-text field: the catalogue can be empty on a fresh install,
+                        // and refusing to send a request without one would leave nothing to test against.
+                        view! {
+                            <Input
+                                value=Signal::derive(move || selected_model.get())
+                                on_input=Callback::new(move |value| set_selected_model.set(value))
+                                placeholder="provider/model"
+                                class="h-8 max-w-sm font-mono text-xs"
+                                aria_label=t!("chat.model")
+                            />
+                        }
+                            .into_any()
+                    }
                 }}
             </div>
 
-            {move || metrics.get().map(|(ms, words)| {
-                view! {
-                    <div class="flex items-center gap-3 text-xs text-muted-foreground font-mono">
-                        <span>{label_latency.clone()}: {ms}ms</span>
-                        <span>{label_tokens.clone()}: ~{words}</span>
-                    </div>
-                }
-            })}
+            {move || {
+                metrics
+                    .get()
+                    .map(|(ms, words)| {
+                        view! {
+                            <div class="flex shrink-0 items-center gap-3 font-mono text-xs text-muted-foreground">
+                                <span>{t!("chat.latency")} " " {format!("{ms}ms")}</span>
+                                <span>{t!("chat.tokens")} " ~" {words.to_string()}</span>
+                            </div>
+                        }
+                    })
+            }}
         </div>
     }
 }
 
+/// What the transcript shows before the first turn.
 #[component]
-fn EmptyState(on_select: Callback<String>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let title = locale.get("chat.empty_title").to_owned();
-    let hint = locale.get("chat.empty_hint").to_owned();
-    let sug1 = locale.get("chat.suggestion_1").to_owned();
-    let sug2 = locale.get("chat.suggestion_2").to_owned();
-    let sug3 = locale.get("chat.suggestion_3").to_owned();
-
-    let s1_click = {
-        let text = sug1.clone();
-        move |_| on_select.run(text.clone())
-    };
-    let s2_click = {
-        let text = sug2.clone();
-        move |_| on_select.run(text.clone())
-    };
-    let s3_click = {
-        let text = sug3.clone();
-        move |_| on_select.run(text.clone())
-    };
+fn ChatEmpty(on_select: Callback<String>) -> impl IntoView {
+    let suggestions = [
+        t!("chat.suggestion_1"),
+        t!("chat.suggestion_2"),
+        t!("chat.suggestion_3"),
+    ];
 
     view! {
-        <div class="py-16 text-center space-y-3">
-            <div class="size-12 rounded-full bg-primary/10 text-primary mx-auto flex items-center justify-center">
-                <svg class="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
+        <div class="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
+            <div class="grid size-10 place-items-center rounded-full border border-border bg-muted/50 \
+                        text-muted-foreground">
+                <Icon name=IconName::MessageSquare class="size-5" />
             </div>
-            <h3 class="font-semibold text-sm">{title}</h3>
-            <p class="text-xs text-muted-foreground max-w-sm mx-auto">{hint}</p>
-            <div class="pt-4 flex flex-wrap justify-center gap-2 max-w-xl mx-auto">
-                <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
-                    on:click=s1_click
-                >
-                    {sug1}
-                </button>
-                <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
-                    on:click=s2_click
-                >
-                    {sug2}
-                </button>
-                <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-full border border-border bg-background text-xs hover:border-primary transition-colors text-left cursor-pointer"
-                    on:click=s3_click
-                >
-                    {sug3}
-                </button>
+            <div class="space-y-1">
+                <p class="text-sm font-medium">{t!("chat.empty_title")}</p>
+                <p class="mx-auto max-w-sm text-xs leading-relaxed text-muted-foreground">
+                    {t!("chat.empty_hint")}
+                </p>
+            </div>
+            <div class="mt-2 flex max-w-xl flex-wrap justify-center gap-2">
+                {suggestions
+                    .into_iter()
+                    .map(|suggestion| {
+                        let text = suggestion.clone();
+                        view! {
+                            <button
+                                type="button"
+                                class="max-w-xs rounded-full border border-border bg-background px-3 \
+                                       py-1.5 text-left text-xs transition-colors hover:bg-accent \
+                                       focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none"
+                                on:click=move |_| on_select.run(text.clone())
+                            >
+                                {suggestion}
+                            </button>
+                        }
+                    })
+                    .collect_view()}
             </div>
         </div>
     }
@@ -598,130 +603,147 @@ fn EmptyState(on_select: Callback<String>) -> impl IntoView {
 
 #[component]
 fn MessageList(messages: Vec<ChatMessage>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label_user = locale.get("chat.user_label").to_owned();
-    let label_asst = locale.get("chat.assistant_label").to_owned();
-    let label_copy = locale.get("chat.copy").to_owned();
-    let label_streaming = locale.get("chat.streaming").to_owned();
-    let reasoning_label = locale.get("chat.reasoning");
-    let reasoning_label = if reasoning_label.is_empty() {
-        "Reasoning".to_owned()
-    } else {
-        reasoning_label.to_owned()
-    };
-
     view! {
         <div class="space-y-4">
-            {messages.into_iter().map(|msg| {
-                let is_user = msg.role == "user";
-                let role_label = if is_user { label_user.clone() } else { label_asst.clone() };
-                let copy_label = label_copy.clone();
-                let streaming_label = label_streaming.clone();
-                let content = msg.content;
+            {messages
+                .into_iter()
+                .map(|message| view! { <Message message=message /> })
+                .collect_view()}
+        </div>
+    }
+}
 
-                view! {
-                    <div class=format!("flex gap-3 {}", if is_user { "justify-end" } else { "justify-start" })>
-                        <div class=format!(
-                            "max-w-[80%] rounded-lg p-3.5 text-sm {}",
-                            if is_user {
-                                "bg-primary text-primary-foreground"
-                            } else {
-                                "bg-muted border border-border text-foreground"
+/// One turn.
+///
+/// The two roles are distinguished by alignment and surface rather than only by colour: a user turn is a
+/// filled bubble on the right, an assistant turn is a plain block on the left. A dashboard that painted
+/// both roles in colour-coded bubbles makes a long transcript read as a wall of paint.
+#[component]
+fn Message(message: ChatMessage) -> impl IntoView {
+    let is_user = message.role == "user";
+    let content = message.content;
+    let reasoning = message.reasoning.filter(|text| !text.trim().is_empty());
+    let error = message.error;
+    let streaming = message.is_streaming;
+
+    let role_label = if is_user {
+        t!("chat.user_label")
+    } else {
+        t!("chat.assistant_label")
+    };
+    let copy_text = content.clone();
+
+    view! {
+        <div class=if is_user {
+            "flex justify-end"
+        } else {
+            "flex justify-start"
+        }>
+            <div class=if is_user {
+                "max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3.5 py-2.5 text-sm \
+                 text-primary-foreground"
+            } else {
+                "max-w-[85%] space-y-2 rounded-2xl rounded-bl-sm border border-border bg-muted/40 \
+                 px-3.5 py-2.5 text-sm"
+            }>
+                <div class="mb-1 flex items-center justify-between gap-3 opacity-70">
+                    <span class="text-[0.6875rem] font-medium uppercase tracking-wide">
+                        {role_label}
+                    </span>
+                    {(!is_user && !content.is_empty())
+                        .then(|| {
+                            let copy_text = copy_text.clone();
+                            view! {
+                                <button
+                                    type="button"
+                                    class="text-[0.6875rem] underline-offset-4 outline-none \
+                                           hover:underline focus-visible:ring-[3px] \
+                                           focus-visible:ring-ring/50"
+                                    on:click=move |_| copy_to_clipboard(&copy_text)
+                                >
+                                    {t!("chat.copy")}
+                                </button>
                             }
-                        )>
-                            <div class="flex items-center justify-between gap-2 mb-1 opacity-80 text-[11px]">
-                                <span class="font-semibold">{role_label}</span>
-                                {(!is_user && !content.is_empty()).then(|| {
-                                    let copy_text = content.clone();
+                        })}
+                </div>
+
+                {if streaming {
+                    view! {
+                        <div class="flex items-center gap-2 py-1 text-xs">
+                            <Spinner label=t!("chat.streaming") />
+                        </div>
+                    }
+                        .into_any()
+                } else if let Some(error) = error {
+                    view! { <ErrorNote message=error /> }.into_any()
+                } else {
+                    view! {
+                        <div class="space-y-2">
+                            {reasoning
+                                .map(|text| {
                                     view! {
-                                        <button
-                                            type="button"
-                                            class="hover:underline cursor-pointer opacity-75 hover:opacity-100"
-                                            on:click=move |_| copy_to_clipboard(&copy_text)
-                                        >
-                                            {copy_label}
-                                        </button>
+                                        <details class="group overflow-hidden rounded-md border \
+                                                        border-border/60 bg-background/50">
+                                            <summary class="flex cursor-pointer select-none items-center \
+                                                            gap-1.5 px-2.5 py-1.5 text-[0.6875rem] \
+                                                            font-medium uppercase tracking-wide \
+                                                            text-muted-foreground">
+                                                <Icon
+                                                    name=IconName::ChevronRight
+                                                    class="size-3 transition-transform group-open:rotate-90"
+                                                />
+                                                {t!("chat.reasoning")}
+                                            </summary>
+                                            <div class="whitespace-pre-wrap border-t border-border/60 \
+                                                        px-2.5 py-2 text-xs italic leading-relaxed \
+                                                        text-muted-foreground">
+                                                {text}
+                                            </div>
+                                        </details>
                                     }
                                 })}
-                            </div>
-
-                            {if msg.is_streaming {
-                                view! {
-                                    <div class="flex items-center gap-2 py-1 text-muted-foreground text-xs italic">
-                                        <span class="size-2 rounded-full bg-primary animate-ping" />
-                                        <span>{streaming_label}</span>
-                                    </div>
-                                }.into_any()
-                            } else if let Some(err) = msg.error {
-                                view! {
-                                    <div class="text-destructive font-mono text-xs whitespace-pre-wrap">
-                                        {err}
-                                    </div>
-                                }.into_any()
-                            } else {
-                                view! {
-                                    <div class="space-y-2">
-                                        {msg.reasoning.as_ref().filter(|r| !r.is_empty()).map(|r| {
-                                            let reasoning_text = r.clone();
-                                            view! {
-                                                <details class="group rounded-md bg-muted/50 border border-border/50 overflow-hidden">
-                                                    <summary class="cursor-pointer select-none px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1.5">
-                                                        <svg class="size-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                                                        </svg>
-                                                        {reasoning_label.clone()}
-                                                    </summary>
-                                                    <div class="px-3 pb-2 pt-1 text-[11px] text-muted-foreground/80 whitespace-pre-wrap italic border-t border-border/30">
-                                                        {reasoning_text}
-                                                    </div>
-                                                </details>
-                                            }
-                                        })}
-                                        <div class="whitespace-pre-wrap leading-relaxed">
-                                            {content}
-                                        </div>
-                                    </div>
-                                }.into_any()
-                            }}
+                            <div class="whitespace-pre-wrap leading-relaxed">{content}</div>
                         </div>
-                    </div>
-                }
-            }).collect::<Vec<_>>()}
+                    }
+                        .into_any()
+                }}
+            </div>
         </div>
     }
 }
 
 #[component]
-fn ChatInput(
+fn ChatComposer(
     input_text: ReadSignal<String>,
     set_input_text: WriteSignal<String>,
     is_generating: ReadSignal<bool>,
     on_send: Callback<()>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let placeholder = locale.get("chat.input_placeholder").to_owned();
-    let label_send = locale.get("chat.send").to_owned();
-
     let on_submit = move || on_send.run(());
 
     view! {
-        <div class="p-3 border-t border-border bg-card/80">
+        <div class="border-t border-border bg-muted/20 p-3">
             <form
-                class="flex gap-2 items-end"
-                on:submit=move |ev| {
-                    ev.prevent_default();
+                class="flex items-end gap-2"
+                on:submit=move |event| {
+                    event.prevent_default();
                     on_submit();
                 }
             >
                 <textarea
-                    class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[44px] max-h-32 leading-tight"
+                    class="min-h-10 max-h-32 flex-1 resize-none rounded-md border border-input \
+                           bg-transparent px-2.5 py-2 text-sm leading-relaxed outline-none \
+                           placeholder:text-muted-foreground focus-visible:border-ring \
+                           focus-visible:ring-[3px] focus-visible:ring-ring/40 dark:bg-input/20"
                     rows="1"
-                    placeholder=placeholder
+                    placeholder=t!("chat.input_placeholder")
                     prop:value=move || input_text.get()
-                    on:input=move |ev| set_input_text.set(event_target_value(&ev))
-                    on:keydown=move |ev| {
-                        if ev.key() == "Enter" && !ev.shift_key() {
-                            ev.prevent_default();
+                    on:input=move |event| set_input_text.set(event_target_value(&event))
+                    // Enter sends; Shift+Enter is a newline. The reverse makes a multi-line prompt
+                    // impossible to type, and a chat box that cannot hold a newline is not a chat box.
+                    on:keydown=move |event| {
+                        if event.key() == "Enter" && !event.shift_key() {
+                            event.prevent_default();
                             on_submit();
                         }
                     }
@@ -729,14 +751,17 @@ fn ChatInput(
                 <button
                     type="submit"
                     disabled=move || input_text.get().trim().is_empty() || is_generating.get()
-                    class="px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
+                    class=crate::ui::button_class(ButtonVariant::Default, ButtonSize::Icon)
+                    aria-label=t!("chat.send")
                 >
-                    <span>{label_send}</span>
-                    <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
+                    <Icon name=IconName::Play class="size-4" />
                 </button>
             </form>
+            <p class="mt-1.5 text-[0.6875rem] text-muted-foreground">
+                <crate::ui::Kbd key="Enter".to_owned() />
+                " "
+                {t!("chat.send_hint")}
+            </p>
         </div>
     }
 }

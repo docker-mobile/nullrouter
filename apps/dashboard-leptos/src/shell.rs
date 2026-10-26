@@ -1,148 +1,224 @@
 //! The application frame: sidebar, header, and the outlet routes render into.
 //!
-//! The old dashboard's shell was the clearest symptom of what went wrong with it. Navigation,
-//! layout, and per-panel styling were each maintained in a different place, so adding a section
-//! meant touching three files that had drifted apart, and the account menu ended up shipping a
-//! Theme entry wired to nothing. This version keeps the whole frame in one place and derives
-//! navigation from a single list, so a new section is one entry rather than three edits.
+//! # What this replaces
+//!
+//! The previous shell was a flat list of twenty-two links in one column, a header with a toggle button
+//! and two unstyled controls, and no way to tell where you were except by which link was tinted. Adding
+//! a section meant editing the list and hoping the label fitted.
+//!
+//! This version derives everything from one table. [`NAV_GROUPS`] is the single source of navigation
+//! truth: the sidebar renders it, the breadcrumb resolves a path back through it to produce a section
+//! name, and the page title comes from the same entry. A new section is one entry, not three edits that
+//! can drift apart.
+//!
+//! # Layout
+//!
+//! Three breakpoints, each a different shape rather than the same shape at three widths:
+//!
+//! - **Under `md`**: the sidebar is a drawer over the content, opened from the header, closed by
+//!   choosing a destination or pressing the scrim.
+//! - **`md` to `xl`**: a fixed 15rem rail that collapses to icons, with the label carried by a tooltip.
+//! - **`xl` and up**: the rail's labels are always visible, because there is room for them and an
+//!   operator on a wide screen is looking at a great deal of tabular data and needs the map.
 
 use leptos::prelude::*;
 use leptos_router::components::{A, Outlet};
 use leptos_router::hooks::use_location;
 
+use crate::api::Hydrate;
 use crate::theme::{Selection, use_theme};
+use crate::ui::{Icon, IconName, Menu, MenuItem, MenuSeparator, MenuTriggerVariant};
 
 /// One destination in the sidebar.
-///
-/// `icon` is an inline SVG path, not an icon-font ligature. The old shell pulled a Material Icons
-/// webfont for this, which cost a render-blocking request and a flash of unstyled glyphs on every
-/// cold load, to draw about fifteen shapes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NavItem {
     /// Message key for the label.
     pub key: &'static str,
     /// Route path.
     pub path: &'static str,
-    /// SVG path data, drawn in a 24x24 viewBox.
-    pub icon: &'static str,
+    /// The glyph drawn beside the label.
+    pub icon: IconName,
 }
 
-/// Every sidebar destination, in order.
+/// A named cluster of destinations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NavGroup {
+    /// Message key for the group's heading.
+    pub key: &'static str,
+    /// Its destinations, in order.
+    pub items: &'static [NavItem],
+}
+
+/// Every sidebar destination, grouped by what it is for.
 ///
-/// The single source of navigation truth. The sidebar renders it, and adding a section here is all
-/// that is needed for it to appear.
-pub const NAV_ITEMS: &[NavItem] = &[
-    NavItem {
-        key: "nav.dashboard",
-        path: "/dashboard",
-        icon: "M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z",
+/// The grouping is deliberate rather than alphabetical: someone opening this dashboard is usually
+/// answering one of five questions -- is it healthy, what is it routing, who can use it, what is it
+/// costing, what is exposed -- and the groups are those questions.
+pub const NAV_GROUPS: &[NavGroup] = &[
+    NavGroup {
+        key: "nav.group_overview",
+        items: &[
+            NavItem {
+                key: "nav.dashboard",
+                path: "/dashboard",
+                icon: IconName::LayoutDashboard,
+            },
+            NavItem {
+                key: "nav.chat",
+                path: "/dashboard/chat",
+                icon: IconName::MessageSquare,
+            },
+            NavItem {
+                key: "nav.usage",
+                path: "/dashboard/usage",
+                icon: IconName::ChartColumn,
+            },
+            NavItem {
+                key: "nav.logs",
+                path: "/dashboard/logs",
+                icon: IconName::ScrollText,
+            },
+        ],
     },
-    NavItem {
-        key: "nav.chat",
-        path: "/dashboard/chat",
-        icon: "M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z",
+    NavGroup {
+        key: "nav.group_routing",
+        items: &[
+            NavItem {
+                key: "nav.providers",
+                path: "/dashboard/providers",
+                icon: IconName::Plug,
+            },
+            NavItem {
+                key: "nav.models",
+                path: "/dashboard/models",
+                icon: IconName::Box,
+            },
+            NavItem {
+                key: "nav.combos",
+                path: "/dashboard/combos",
+                icon: IconName::Combine,
+            },
+            NavItem {
+                key: "nav.nodes",
+                path: "/dashboard/nodes",
+                icon: IconName::Network,
+            },
+            NavItem {
+                key: "nav.catalog",
+                path: "/dashboard/catalog",
+                icon: IconName::Route,
+            },
+            NavItem {
+                key: "nav.import",
+                path: "/dashboard/import",
+                icon: IconName::Download,
+            },
+        ],
     },
-    NavItem {
-        key: "nav.providers",
-        path: "/dashboard/providers",
-        icon: "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z",
+    NavGroup {
+        key: "nav.group_access",
+        items: &[
+            NavItem {
+                key: "nav.keys",
+                path: "/dashboard/keys",
+                icon: IconName::Key,
+            },
+            NavItem {
+                key: "nav.users",
+                path: "/dashboard/users",
+                icon: IconName::Users,
+            },
+            NavItem {
+                key: "nav.sso",
+                path: "/dashboard/sso",
+                icon: IconName::ShieldCheck,
+            },
+        ],
     },
-    NavItem {
-        key: "nav.models",
-        path: "/dashboard/models",
-        icon: "M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z",
+    NavGroup {
+        key: "nav.group_operations",
+        items: &[
+            NavItem {
+                key: "nav.tunnel",
+                path: "/dashboard/tunnel",
+                icon: IconName::Globe,
+            },
+            NavItem {
+                key: "nav.proxy_pools",
+                path: "/dashboard/proxy-pools",
+                icon: IconName::Layers,
+            },
+            NavItem {
+                key: "nav.pxpipe",
+                path: "/dashboard/pxpipe",
+                icon: IconName::Droplet,
+            },
+            NavItem {
+                key: "nav.headroom",
+                path: "/dashboard/headroom",
+                icon: IconName::Gauge,
+            },
+            NavItem {
+                key: "nav.cli_tools",
+                path: "/dashboard/cli-tools",
+                icon: IconName::Terminal,
+            },
+            NavItem {
+                key: "nav.translator",
+                path: "/dashboard/translator",
+                icon: IconName::Sliders,
+            },
+        ],
     },
-    NavItem {
-        key: "nav.combos",
-        path: "/dashboard/combos",
-        icon: "M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z",
-    },
-    NavItem {
-        key: "nav.pricing",
-        path: "/dashboard/pricing",
-        icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z",
-    },
-    NavItem {
-        key: "nav.free_tiers",
-        path: "/dashboard/free-tiers",
-        icon: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
-    },
-    NavItem {
-        key: "nav.keys",
-        path: "/dashboard/keys",
-        icon: "M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z",
-    },
-    NavItem {
-        key: "nav.users",
-        path: "/dashboard/users",
-        icon: "M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z",
-    },
-    NavItem {
-        key: "nav.usage",
-        path: "/dashboard/usage",
-        icon: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z",
-    },
-    NavItem {
-        key: "nav.logs",
-        path: "/dashboard/logs",
-        icon: "M20 2H4c-1.1 0-2 .9-2 2v16l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z",
-    },
-    NavItem {
-        key: "nav.cli_tools",
-        path: "/dashboard/cli-tools",
-        icon: "M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zM6.5 9.5 5 11l2.5 2.5L5 16l1.5 1.5L10.5 13 6.5 9.5zM12 16h6v-1.5h-6V16z",
-    },
-    NavItem {
-        key: "nav.pxpipe",
-        path: "/dashboard/pxpipe",
-        icon: "M17 4h-3V2h-4v2H7v6l3 3v5h4v-5l3-3V4zm-2 5.2-3 3-3-3V6h6v3.2zM11 20h2v2h-2v-2z",
-    },
-    NavItem {
-        key: "nav.headroom",
-        path: "/dashboard/headroom",
-        icon: "M12 2 4 6v6c0 4.4 3.4 8.5 8 10 4.6-1.5 8-5.6 8-10V6l-8-4zm0 2.2 6 3v4.8c0 3.4-2.5 6.6-6 7.9-3.5-1.3-6-4.5-6-7.9V7.2l6-3zM9 11h6v2H9v-2zm0-3h6v2H9V8z",
-    },
-    NavItem {
-        key: "nav.tunnel",
-        path: "/dashboard/tunnel",
-        icon: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z",
-    },
-    NavItem {
-        key: "nav.proxy_pools",
-        path: "/dashboard/proxy-pools",
-        icon: "M4 4h4v4H4V4zm6 0h4v4h-4V4zm6 0h4v4h-4V4zM4 10h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4zM4 16h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z",
-    },
-    NavItem {
-        key: "nav.nodes",
-        path: "/dashboard/nodes",
-        icon: "M12 2l4 4-4 4-4-4 4-4zm-8 8l4 4-4 4-4-4 4-4zm16 0l4 4-4 4-4-4 4-4zm-8 8l4 4-4 4-4-4 4-4z",
-    },
-    NavItem {
-        key: "nav.import",
-        path: "/dashboard/import",
-        icon: "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z",
-    },
-    NavItem {
-        key: "nav.translator",
-        path: "/dashboard/translator",
-        icon: "M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z",
-    },
-    NavItem {
-        key: "nav.catalog",
-        path: "/dashboard/catalog",
-        icon: "M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z",
-    },
-    NavItem {
-        key: "nav.sso",
-        path: "/dashboard/sso",
-        icon: "M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z",
-    },
-    NavItem {
-        key: "nav.settings",
-        path: "/dashboard/settings",
-        icon: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.42h-3.84c-.24 0-.44.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.25.41.49.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z",
+    NavGroup {
+        key: "nav.group_billing",
+        items: &[
+            NavItem {
+                key: "nav.pricing",
+                path: "/dashboard/pricing",
+                icon: IconName::Tag,
+            },
+            NavItem {
+                key: "nav.free_tiers",
+                path: "/dashboard/free-tiers",
+                icon: IconName::Sparkles,
+            },
+            NavItem {
+                key: "nav.settings",
+                path: "/dashboard/settings",
+                icon: IconName::Settings,
+            },
+        ],
     },
 ];
+
+/// Every destination, flattened. Kept in step with [`NAV_GROUPS`] by construction rather than by hand.
+pub fn all_nav_items() -> impl Iterator<Item = (Option<&'static NavGroup>, NavItem)> {
+    NAV_GROUPS
+        .iter()
+        .flat_map(|group| group.items.iter().map(move |item| (Some(group), *item)))
+}
+
+/// The item whose path is the longest prefix of `path`, ignoring the query and trailing slash.
+///
+/// Longest rather than first: `/dashboard/providers` and `/dashboard/providers/openai` are both valid,
+/// and the more specific one is what the breadcrumb should name. The root is special-cased because it
+/// is a prefix of every other path and would otherwise always win.
+pub fn item_for_path(path: &str) -> Option<(Option<&'static NavGroup>, NavItem)> {
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    let path = path.trim_end_matches('/');
+    let path = if path.is_empty() { "/" } else { path };
+
+    all_nav_items()
+        .filter(|(_, item)| {
+            if item.path == "/dashboard" {
+                path == "/dashboard"
+            } else {
+                path == item.path || path.starts_with(&format!("{}/", item.path))
+            }
+        })
+        .max_by_key(|(_, item)| item.path.len())
+}
 
 /// The frame nested dashboard routes render inside.
 #[component]
@@ -154,35 +230,71 @@ pub fn DashboardFrame() -> impl IntoView {
     }
 }
 
+/// Whether the sidebar is collapsed to icons.
+///
+/// Module state rather than a signal owned by `Shell`, because the header's toggle and the rail's own
+/// tooltips both need it and threading a `WriteSignal` through four components to reach a tooltip is
+/// worse than one `RwSignal` provided at the frame.
+#[derive(Clone, Copy, Debug)]
+struct Sidebar {
+    collapsed: RwSignal<bool>,
+    /// Whether the narrow-viewport drawer is open. Independent of `collapsed`: a drawer is never
+    /// collapsed, and a rail is never a drawer.
+    drawer_open: RwSignal<bool>,
+}
+
 /// The frame every route renders inside.
 #[component]
 pub fn Shell(children: Children) -> impl IntoView {
-    // Collapse state is local rather than persisted: the sidebar is a per-session affordance, and
-    // restoring a collapsed sidebar on a fresh visit hides navigation from someone who has no
-    // reason to expect it.
-    let (collapsed, set_collapsed) = signal(viewport_is_narrow());
+    let sidebar = Sidebar {
+        collapsed: RwSignal::new(false),
+        // Starts closed even on a narrow viewport: a drawer that opens itself covers the page the user
+        // just asked for.
+        drawer_open: RwSignal::new(false),
+    };
+    provide_context(sidebar);
+    let location = use_location();
+
+    // A destination change closes the drawer. Without this the drawer stays over the page the user
+    // navigated to, which reads as a navigation that did not happen.
+    Effect::new(move |_| {
+        let _ = location.pathname.get();
+        sidebar.drawer_open.set(false);
+    });
 
     view! {
-        <div class="min-h-dvh bg-background text-foreground flex">
+        <div class="min-h-dvh bg-background text-foreground">
             {move || {
-                (!collapsed.get())
+                sidebar
+                    .drawer_open
+                    .get()
                     .then(|| {
                         view! {
                             <button
                                 type="button"
-                                class="fixed inset-0 z-20 bg-black/40 md:hidden"
+                                class="fixed inset-0 z-30 bg-black/50 backdrop-blur-[1px] \
+                                       animate-in fade-in duration-150 md:hidden"
                                 aria-label="Close navigation"
-                                on:click=move |_| set_collapsed.set(true)
+                                on:click=move |_| sidebar.drawer_open.set(false)
                             />
                         }
                     })
             }}
-            <Sidebar collapsed=collapsed />
-            <div class="flex-1 flex flex-col min-w-0">
-                <Header collapsed=collapsed set_collapsed=set_collapsed />
-                // min-w-0 on both this and the wrapper above: without it a wide table inside a flex
-                // child refuses to shrink and pushes the whole layout sideways instead of scrolling.
-                <main class="flex-1 min-w-0 p-6 animate-in fade-in duration-200">
+
+            <SidebarRail />
+
+            // The content column's inset tracks the rail's width, and both come from the same signal.
+            // The rail is `fixed` rather than a flex sibling because a full-height sticky column
+            // cannot be expressed as a flex item without the content column also becoming sticky.
+            <div
+                class="flex min-h-dvh flex-col transition-[padding] duration-200 ease-out md:pl-14"
+                class=("md:pl-60", move || !sidebar.collapsed.get())
+            >
+                <Topbar />
+                // min-w-0 on this element: without it a wide table inside a flex child refuses to
+                // shrink and pushes the whole layout sideways instead of scrolling in its own box.
+                <main class="mx-auto w-full min-w-0 max-w-[100rem] flex-1 px-4 pb-20 pt-5 \
+                             sm:px-6 lg:px-8">
                     {children()}
                 </main>
             </div>
@@ -190,44 +302,189 @@ pub fn Shell(children: Children) -> impl IntoView {
     }
 }
 
-/// Primary navigation.
+/// The persistent navigation rail.
 #[component]
-fn Sidebar(collapsed: ReadSignal<bool>) -> impl IntoView {
+fn SidebarRail() -> impl IntoView {
+    let sidebar = expect_context::<Sidebar>();
     let location = use_location();
+    let locale = crate::i18n::use_locale();
+
+    let collapsed = move || sidebar.collapsed.get();
 
     view! {
-        <aside class=move || {
-            let collapsed = collapsed.get();
-            let width = if collapsed { "w-16" } else { "w-60" };
-            let hidden = if collapsed { "max-md:hidden" } else { "" };
-            format!(
-                "{width} shrink-0 border-r border-sidebar-border bg-sidebar \
-                 transition-[width] duration-200 ease-out flex flex-col \
-                 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-30 \
-                 {hidden}",
-            )
-        }>
-            <div class="h-14 flex items-center gap-2.5 px-4 shrink-0">
-                <Logo />
-                <span class=move || {
-                    // Fade the wordmark rather than removing it, so the collapse reads as one motion
-                    // instead of text vanishing a frame before the panel finishes narrowing.
-                    let hidden = if collapsed.get() { "opacity-0 w-0" } else { "opacity-100" };
-                    format!("{hidden} font-semibold tracking-tight overflow-hidden whitespace-nowrap transition-opacity duration-150")
-                }>
-                    "nullrouter"
-                </span>
+        <aside
+            class="fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-sidebar-border \
+                   bg-sidebar text-sidebar-foreground \
+                   transition-[width,transform] duration-200 ease-out \
+                   max-md:-translate-x-full max-md:shadow-2xl \
+                   md:z-40 md:translate-x-0"
+            class=("max-md:translate-x-0", move || sidebar.drawer_open.get())
+            class=("md:w-14", move || collapsed())
+        >
+            <div class="flex h-14 shrink-0 items-center gap-2.5 px-3">
+                <A
+                    href="/dashboard"
+                    attr:class="flex min-w-0 items-center gap-2.5 rounded-md outline-none \
+                                focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                    <Logo />
+                    <span
+                        class="truncate text-[0.9375rem] font-semibold tracking-tight \
+                               transition-opacity duration-150"
+                        class=("md:opacity-0", move || collapsed())
+                    >
+                        "nullrouter"
+                    </span>
+                </A>
             </div>
 
-            <nav class="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
-                {NAV_ITEMS
+            <nav
+                class="flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-2 pb-4 pt-1"
+                aria-label=locale.get("nav.label").to_owned()
+            >
+                {NAV_GROUPS
                     .iter()
-                    .map(|item| {
-                        view! { <NavLink item=*item collapsed=collapsed location=location.pathname /> }
+                    .map(|group| {
+                        view! {
+                            <NavSection
+                                group=*group
+                                collapsed=collapsed
+                                location=location.pathname
+                            />
+                        }
                     })
                     .collect_view()}
             </nav>
+
+            <SidebarFooter collapsed=collapsed />
         </aside>
+    }
+}
+
+/// One group of links, with its heading.
+#[component]
+fn NavSection(
+    group: NavGroup,
+    collapsed: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    location: Memo<String>,
+) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let heading = locale.get(group.key).to_owned();
+
+    view! {
+        <div class="space-y-0.5">
+            // The heading is hidden rather than removed when collapsed: its vertical space is what
+            // separates the groups, and losing that turns the rail into one undifferentiated column.
+            <p
+                class="px-2.5 pb-1 text-[0.6875rem] font-medium uppercase tracking-wider \
+                       text-muted-foreground/80 transition-opacity duration-150"
+                class=("opacity-0", move || collapsed())
+                aria-hidden=move || collapsed().to_string()
+            >
+                {heading}
+            </p>
+            {group
+                .items
+                .iter()
+                .map(|item| {
+                    view! {
+                        <NavLink item=*item collapsed=collapsed location=location />
+                    }
+                })
+                .collect_view()}
+        </div>
+    }
+}
+
+/// One sidebar link.
+#[component]
+fn NavLink(
+    item: NavItem,
+    collapsed: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    location: Memo<String>,
+) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let label = locale.get(item.key).to_owned();
+    let title = label.clone();
+
+    // The dashboard root would otherwise match every child route as a prefix and light up alongside
+    // whichever section is actually open.
+    let active = Memo::new(move |_| {
+        let path = location.get();
+        let path = path.trim_end_matches('/');
+        let path = if path.is_empty() { "/" } else { path };
+        if item.path == "/dashboard" {
+            path == "/dashboard"
+        } else {
+            path == item.path || path.starts_with(&format!("{}/", item.path))
+        }
+    });
+
+    view! {
+        <A
+            href=item.path
+            attr:class=move || {
+                let base = "group relative flex h-8 items-center gap-2.5 rounded-md px-2.5 \
+                            text-[0.8125rem] font-medium outline-none transition-colors \
+                            focus-visible:ring-[3px] focus-visible:ring-ring/50";
+                let state = if active.get() {
+                    "bg-sidebar-accent text-sidebar-accent-foreground"
+                } else {
+                    "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 \
+                     hover:text-sidebar-accent-foreground"
+                };
+                format!("{base} {state}")
+            }
+            attr:title=title
+            attr:aria-current=move || active.get().then_some("page")
+        >
+            // The active marker is a bar on the leading edge rather than a background alone: a tinted
+            // row in a list of tinted hovers is easy to lose, and a 2px bar reads at a glance.
+            <span
+                class="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary transition-opacity \
+                       duration-150"
+                class=("opacity-0", move || !active.get())
+                aria-hidden="true"
+            />
+            <Icon name=item.icon class="size-4 shrink-0" />
+            <span
+                class="truncate transition-opacity duration-150"
+                class=("opacity-0", move || collapsed())
+            >
+                {label.clone()}
+            </span>
+        </A>
+    }
+}
+
+/// What sits under the navigation: the version, and a link to the docs.
+#[component]
+fn SidebarFooter(collapsed: impl Fn() -> bool + Copy + Send + Sync + 'static) -> impl IntoView {
+    let locale = crate::i18n::use_locale();
+    let (version, set_version) = signal(Hydrate::<nullrouter_contracts::VersionResponse>::Loading);
+    crate::api::load("/api/version", set_version);
+
+    let current = move || match version.get() {
+        Hydrate::Ready(data) => data.current_version,
+        Hydrate::Loading | Hydrate::Failed(_) => String::new(),
+    };
+
+    view! {
+        <div class="shrink-0 border-t border-sidebar-border px-3 py-2.5">
+            <div class="flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
+                <span class="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
+                <span class="truncate transition-opacity duration-150" class=("opacity-0", move || collapsed())>
+                    {move || {
+                        let version = current();
+                        if version.is_empty() {
+                            locale.get("nav.version_unknown").to_owned()
+                        } else {
+                            format!("v{version}")
+                        }
+                    }}
+                </span>
+            </div>
+        </div>
     }
 }
 
@@ -236,24 +493,17 @@ fn Sidebar(collapsed: ReadSignal<bool>) -> impl IntoView {
 /// The same geometry as `assets/favicon.svg`, so the tab icon and the sidebar agree. Drawn inline
 /// rather than loaded as an `<img>` because it has to take the theme's colours -- the plate is
 /// `bg-primary` and the lanes are `primary-foreground`, which no external SVG can read.
-///
-/// This replaces a plate with the letters "nr" in it. That version resolved a different sans-serif on
-/// every platform and, at the 28px it is drawn here, the two glyphs merged into a smudge.
 #[component]
-fn Logo() -> impl IntoView {
+pub fn Logo() -> impl IntoView {
     view! {
-        <div class="size-7 rounded-md bg-primary grid place-items-center shrink-0">
+        <div class="grid size-7 shrink-0 place-items-center rounded-md bg-primary">
             <svg
-                class="size-5 text-primary-foreground"
+                class="size-[18px] text-primary-foreground"
                 viewBox="0 0 32 32"
                 fill="none"
                 aria-hidden="true"
             >
-                <g
-                    stroke="currentColor"
-                    stroke-width="2.4"
-                    stroke-linecap="round"
-                >
+                <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
                     <path d="M5 9h6l4 4" />
                     <path d="M5 16h6" />
                     <path d="M5 23h6l4-4" />
@@ -261,9 +511,9 @@ fn Logo() -> impl IntoView {
                 </g>
                 <circle cx="16" cy="16" r="3.4" fill="currentColor" />
                 <path
-                    d="M12.2 19.8 19.8 12.2"
+                    d="M12.4 19.6 19.6 12.4"
                     stroke="var(--color-primary, currentColor)"
-                    stroke-width="2.4"
+                    stroke-width="2.6"
                     stroke-linecap="round"
                     class="text-primary"
                 />
@@ -272,192 +522,207 @@ fn Logo() -> impl IntoView {
     }
 }
 
-/// One sidebar link.
+/// The top bar: the drawer toggle, a breadcrumb, and the account controls.
 #[component]
-fn NavLink(item: NavItem, collapsed: ReadSignal<bool>, location: Memo<String>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label = locale.get(item.key).to_owned();
-    // The tooltip is what carries the label when the sidebar is collapsed, so it needs its own copy.
-    let title = label.clone();
+fn Topbar() -> impl IntoView {
+    let sidebar = expect_context::<Sidebar>();
 
-    // The dashboard root would otherwise match every child route as a prefix and light up alongside
-    // whichever section is actually open.
-    let active = Memo::new(move |_| {
-        let path = location.get();
-        if item.path == "/dashboard" {
-            path == "/dashboard" || path == "/dashboard/"
-        } else {
-            path.starts_with(item.path)
-        }
-    });
-
-    view! {
-        <A
-            href=item.path
-            attr:class=move || {
-                let state = if active.get() {
-                    "bg-sidebar-accent text-sidebar-accent-foreground"
-                } else {
-                    "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                };
-                format!(
-                    "{state} group relative flex items-center gap-3 rounded-md px-3 py-2 \
-                     text-sm font-medium transition-colors duration-150"
-                )
-            }
-            attr:title=title
-        >
-            <svg
-                class="size-5 shrink-0"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-            >
-                <path d=item.icon />
-            </svg>
-            <span class=move || {
-                let hidden = if collapsed.get() { "opacity-0 w-0" } else { "opacity-100" };
-                format!("{hidden} overflow-hidden whitespace-nowrap transition-opacity duration-150")
-            }>
-                {label.clone()}
-            </span>
-        </A>
-    }
-}
-
-/// Top bar: sidebar toggle and theme control.
-#[component]
-fn Header(collapsed: ReadSignal<bool>, set_collapsed: WriteSignal<bool>) -> impl IntoView {
     view! {
         // sticky rather than fixed so it does not need the content below to carry a matching top
-        // offset, and backdrop-blur so content scrolling under it stays legible.
-        <header class="h-14 shrink-0 sticky top-0 z-30 flex items-center gap-2 px-4 \
-                       border-b border-border bg-background/80 backdrop-blur-sm">
+        // offset, and translucent so content scrolling under it stays legible.
+        <header class="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b \
+                       border-border bg-background/85 px-3 backdrop-blur-md sm:px-4">
             <button
                 type="button"
-                class="grid size-9 place-items-center rounded-md text-muted-foreground \
-                       transition-colors hover:bg-accent hover:text-accent-foreground"
-                on:click=move |_| set_collapsed.update(|value| *value = !*value)
+                class="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground \
+                       outline-none transition-colors hover:bg-accent hover:text-accent-foreground \
+                       focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                on:click=move |_| {
+                    // One control, two behaviours: under `md` it is a drawer, above it a collapse.
+                    if viewport_is_narrow() {
+                        sidebar.drawer_open.update(|open| *open = !*open);
+                    } else {
+                        sidebar.collapsed.update(|collapsed| *collapsed = !*collapsed);
+                    }
+                }
                 aria-label="Toggle navigation"
-                aria-expanded=move || (!collapsed.get()).to_string()
             >
-                <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
-                </svg>
+                <Icon name=IconName::PanelLeft class="size-4" />
             </button>
+
+            <Breadcrumb />
 
             <div class="flex-1" />
 
-            <AccountBadge />
-            <LanguagePicker />
-            <ThemeToggle />
+            <div class="flex shrink-0 items-center gap-1">
+                <ThemeMenu />
+                <LanguageMenu />
+                <AccountMenu />
+            </div>
         </header>
     }
 }
 
-/// Who is signed in, and what they may do.
-///
-/// The role is shown rather than only used, because it is the answer to "why is that button refusing
-/// me". A viewer who can see `Viewer` next to their name has an explanation; one who only sees a 403
-/// has a bug report.
-///
-/// Renders nothing until the status arrives. A placeholder name would be a guess, and this is the one
-/// label on screen that must not be one.
+/// Where the current page sits, resolved from the navigation table.
 #[component]
-fn AccountBadge() -> impl IntoView {
-    use crate::api::{Hydrate, load};
-    use crate::routes::types::AuthStatus;
-
+fn Breadcrumb() -> impl IntoView {
+    let location = use_location();
     let locale = crate::i18n::use_locale();
-    let (status, set_status) = signal(Hydrate::<AuthStatus>::Loading);
-    load("/api/auth/status", set_status);
+    let home = locale.get("nav.dashboard").to_owned();
+
+    // `(section, page)`, both already-localised. The page is `None` on the root, whose name is
+    // already the first crumb.
+    let trail = Memo::new(move |_| -> (Option<String>, Option<String>) {
+        let path = location.pathname.get();
+        let Some((group, item)) = item_for_path(&path) else {
+            // A route the navigation does not list: the provider detail page, or the status fallback.
+            return (None, None);
+        };
+        let section = group.map(|group| locale.get(group.key).to_owned());
+        let page = (item.path != "/dashboard").then(|| locale.get(item.key).to_owned());
+        (section, page)
+    });
 
     view! {
-        {move || {
-            let Hydrate::Ready(status) = status.get() else {
-                return None;
-            };
-            if !status.authenticated {
-                return None;
-            }
-            let name = if status.display_name.is_empty() {
-                locale.get("users.never").to_owned()
-            } else {
-                status.display_name.clone()
-            };
-            // Literal keys, because `i18n-gen` finds keys by scanning for `get("`.
-            let role = match status.role.as_str() {
-                "admin" => locale.get("users.role_admin").to_owned(),
-                "operator" => locale.get("users.role_operator").to_owned(),
-                _ => locale.get("users.role_viewer").to_owned(),
-            };
-            // The long form names what the role means; the badge shows only the word, since the row is
-            // narrow and the full sentence belongs in a tooltip.
-            let short = status.role;
-            Some(view! {
-                <div class="hidden sm:flex flex-col items-end leading-tight" title=role>
-                    <span class="text-xs font-medium">{name}</span>
-                    <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        {short}
-                    </span>
-                </div>
-            })
-        }}
+        <nav aria-label="Breadcrumb" class="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
+            <A
+                href="/dashboard"
+                // `-mx-1.5 px-1.5 py-1` widens the hit area to a 28px row without moving the text: a
+                // 20px-tall link is below the 24px minimum a touch target should have.
+                attr:class="inline-flex h-7 shrink-0 items-center rounded px-1.5 \
+                            text-muted-foreground transition-colors hover:bg-accent \
+                            hover:text-foreground outline-none \
+                            focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+                {home}
+            </A>
+            {move || {
+                let (group, item) = trail.get();
+                let section = group.map(|group| {
+                    view! {
+                        <>
+                            <Icon name=IconName::ChevronRight class="size-3.5 shrink-0 text-muted-foreground/50" />
+                            <span class="truncate text-muted-foreground">{group}</span>
+                        </>
+                    }
+                });
+                let leaf = item.map(|item| {
+                    view! {
+                        <>
+                            <Icon name=IconName::ChevronRight class="size-3.5 shrink-0 text-muted-foreground/50" />
+                            <span class="truncate font-medium text-foreground">{item}</span>
+                        </>
+                    }
+                });
+                view! { {section} {leaf} }
+            }}
+        </nav>
     }
 }
 
-/// Picks the interface language.
+/// The theme control: a menu, not a cycle button.
+///
+/// The previous version cycled System -> Light -> Dark on every press with the current state only in a
+/// tooltip. Choosing from three named options is a decision the user makes once; a cycle button makes
+/// them press it up to three times and remember where it started.
+#[component]
+fn ThemeMenu() -> impl IntoView {
+    let theme = use_theme();
+    let locale = crate::i18n::use_locale();
+
+    let options = [
+        (Selection::System, IconName::Monitor, "theme.system"),
+        (Selection::Light, IconName::Sun, "theme.light"),
+        (Selection::Dark, IconName::Moon, "theme.dark"),
+    ];
+
+    let current_icon = move || match theme.selection.get() {
+        Selection::System => IconName::Monitor,
+        Selection::Light => IconName::Sun,
+        Selection::Dark => IconName::Moon,
+    };
+    let label = locale.get("theme.label").to_owned();
+
+    view! {
+        <Menu aria_label=label icon=current_icon() trigger_variant=MenuTriggerVariant::Ghost align_end=true width="w-40">
+            {options
+                .into_iter()
+                .map(|(choice, icon, key)| {
+                    let text = locale.get(key).to_owned();
+                    view! {
+                        <MenuItem
+                            label=text
+                            icon=icon
+                            on_select=Callback::new(move |()| theme.set(choice))
+                        />
+                    }
+                })
+                .collect_view()}
+        </Menu>
+    }
+}
+
+/// The interface language.
 ///
 /// Writes the preference through `POST /api/locale`, which sets the `locale` cookie, and then reloads.
 /// The reload is the point rather than a shortcut: [`crate::i18n`] resolves the locale once at startup
 /// and holds it for the session on purpose, because a language that changes under a half-finished form
-/// moves every label and button the operator was looking at. Reloading makes the swap a deliberate,
-/// visible transition instead of a surprise.
-///
-/// A native `<select>` rather than a custom menu: it gets keyboard behaviour, scrolling for 35 items,
-/// and the platform's own type-ahead for free, and this list is long enough that type-ahead matters.
+/// moves every label and button the operator was looking at. A reload makes the swap deliberate.
 #[component]
-fn LanguagePicker() -> impl IntoView {
+fn LanguageMenu() -> impl IntoView {
     let locale = crate::i18n::use_locale();
     let current = locale.tag.clone();
-    let label = locale.get("language.change").to_owned();
+    let label = locale.get("language.label").to_owned();
+    // The list is 35 entries; a menu is scrollable and the search-free scroll is acceptable because
+    // the entries are ordered by their own name.
+    let names = crate::i18n::LANGUAGE_NAMES;
 
     view! {
-        <label class="relative">
-            <span class="sr-only">{locale.get("language.label").to_owned()}</span>
-            <select
-                class="h-9 rounded-md border border-input bg-background px-2 text-sm \
-                       text-muted-foreground transition-colors hover:text-foreground"
-                title=label.clone()
-                aria-label=label
-                prop:value=current.clone()
-                on:change=move |ev| {
-                    let tag = event_target_value(&ev);
-                    if tag.is_empty() {
-                        return;
-                    }
-                    leptos::task::spawn_local(async move { apply_language(&tag).await });
-                }
-            >
-                {crate::i18n::LANGUAGE_NAMES
+        <Menu
+            aria_label=label
+            icon=IconName::Globe
+            trigger_variant=MenuTriggerVariant::Ghost
+            align_end=true
+            width="w-56"
+        >
+            <div class="max-h-80 overflow-y-auto">
+                {names
                     .iter()
                     .map(|(tag, name)| {
-                        let selected = *tag == current;
+                        let tag = *tag;
+                        let selected = tag == current;
                         view! {
-                            <option value=*tag selected=selected>
-                                {*name}
-                            </option>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                class="flex w-full items-center justify-between gap-2 rounded-md px-2 \
+                                       py-1.5 text-left text-[0.8125rem] text-foreground outline-none \
+                                       transition-colors hover:bg-accent hover:text-accent-foreground \
+                                       focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                                aria-current=selected.then_some("true")
+                                on:click=move |_| {
+                                    leptos::task::spawn_local(async move {
+                                        apply_language(tag).await;
+                                    });
+                                }
+                            >
+                                <span class="truncate">{*name}</span>
+                                {selected
+                                    .then(|| {
+                                        view! { <Icon name=IconName::Check class="size-3.5 shrink-0" /> }
+                                    })}
+                            </button>
                         }
                     })
                     .collect_view()}
-            </select>
-        </label>
+            </div>
+        </Menu>
     }
 }
 
 /// Store the choice, then reload so the new catalogue is the one the session starts with.
 ///
-/// The reload happens even when the write failed. The alternative is worse: the select already shows
+/// The reload happens even when the write failed. The alternative is worse: the control already shows
 /// the new language, so leaving the page on the old one puts the control and the interface into
 /// disagreement with no way for the operator to tell which is real. A reload re-reads the cookie, so
 /// whatever actually persisted is what appears.
@@ -473,64 +738,103 @@ async fn apply_language(tag: &str) {
 
 /// Native builds have no document to reload.
 #[cfg(not(target_arch = "wasm32"))]
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, reason = "mirrors the wasm signature")]
 async fn apply_language(_tag: &str) {}
 
-/// Cycles System → Light → Dark.
+/// The signed-in account, and what may be done with it.
 ///
-/// The control the old dashboard shipped as `enabled: false`. Showing the *resolved* icon rather
-/// than the selection means System is not a third mystery glyph: it shows whichever scheme it
-/// currently resolves to, and the tooltip names the selection.
+/// The role is shown rather than only enforced, because it is the answer to "why is that button
+/// refusing me". A viewer who can see `Viewer` next to their name has an explanation; one who only
+/// sees a 403 has a bug report.
+///
+/// Renders nothing until the status arrives. A placeholder name would be a guess, and this is the one
+/// label on screen that must not be one.
 #[component]
-fn ThemeToggle() -> impl IntoView {
-    let theme = use_theme();
+fn AccountMenu() -> impl IntoView {
     let locale = crate::i18n::use_locale();
+    let (status, set_status) = signal(Hydrate::<crate::routes::types::AuthStatus>::Loading);
+    crate::api::load("/api/auth/status", set_status);
 
-    let title = {
-        let system = locale.get("theme.system").to_owned();
-        let light = locale.get("theme.light").to_owned();
-        let dark = locale.get("theme.dark").to_owned();
-        move || match theme.selection.get() {
-            Selection::System => system.clone(),
-            Selection::Light => light.clone(),
-            Selection::Dark => dark.clone(),
-        }
-    };
+    // Built once, not inside the render closure below: `Menu`'s children is a `ChildrenFn`, so its
+    // body runs again every time the menu opens, and a callback allocated per render would be a new
+    // identity each time for no gain.
+    let sign_out = Callback::new(move |()| {
+        leptos::task::spawn_local(async move {
+            // The session is a cookie, so the only thing that reliably ends it on this side is the
+            // route that clears it. A client-side route change would leave the shell mounted with a
+            // `/api/auth/status` that still says `authenticated: true`.
+            let _ = crate::api::post("/api/auth/logout", "{}").await;
+            if let Some(window) = web_sys::window() {
+                let _ = window.location().set_href("/login");
+            }
+        });
+    });
 
     view! {
-        <button
-            type="button"
-            class="grid size-9 place-items-center rounded-md text-muted-foreground \
-                   transition-colors hover:bg-accent hover:text-accent-foreground"
-            on:click=move |_| theme.cycle()
-            title=title
-            aria-label="Change theme"
-        >
-            <svg
-                class="size-5 transition-transform duration-300"
-                class:rotate-180=move || theme.resolved.get().is_dark()
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-            >
-                {move || {
-                    if theme.resolved.get().is_dark() {
-                        view! {
-                            <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" />
-                        }
-                            .into_any()
-                    } else {
-                        view! {
-                            <path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58a.996.996 0 0 0-1.41 0 .996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37a.996.996 0 0 0-1.41 0 .996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0a.996.996 0 0 0 0-1.41l-1.06-1.06zm1.06-10.96a.996.996 0 0 0 0-1.41.996.996 0 0 0-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36a.996.996 0 0 0 0-1.41.996.996 0 0 0-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z" />
-                        }
-                            .into_any()
-                    }
-                }}
-            </svg>
-        </button>
+        {move || {
+            let Hydrate::Ready(status) = status.get() else {
+                return None;
+            };
+            if !status.authenticated {
+                // Signed out is not an error to report here; the router sends the visitor to
+                // `/login` on the first request that refuses them.
+                return None;
+            }
+            let display = if status.display_name.trim().is_empty() {
+                locale.get("users.role_session").to_owned()
+            } else {
+                status.display_name.clone()
+            };
+            let role = match status.role.as_str() {
+                "admin" => locale.get("users.role_admin_short").to_owned(),
+                "operator" => locale.get("users.role_operator_short").to_owned(),
+                _ => locale.get("users.role_viewer_short").to_owned(),
+            };
+            let initial = display
+                .chars()
+                .next().map_or_else(|| "?".to_owned(), |first| first.to_uppercase().to_string());
+            let sign_out_label = locale.get("nav.sign_out").to_owned();
+            let account_label = locale.get("nav.account").to_owned();
+
+            Some(view! {
+                <Menu
+                    align_end=true
+                    width="w-60"
+                    trigger_variant=MenuTriggerVariant::Ghost
+                    aria_label=account_label
+                >
+                    <div class="flex items-center gap-2.5 px-2 py-2">
+                        <span class="grid size-8 shrink-0 place-items-center rounded-full bg-muted \
+                                     text-xs font-semibold text-foreground">
+                            {initial.clone()}
+                        </span>
+                        <span class="min-w-0">
+                            <span class="block truncate text-[0.8125rem] font-medium text-foreground">
+                                {display.clone()}
+                            </span>
+                            <span class="block truncate text-xs text-muted-foreground">
+                                {role.clone()}
+                            </span>
+                        </span>
+                    </div>
+                    <MenuSeparator />
+                    <MenuItem
+                        label=sign_out_label.clone()
+                        icon=IconName::LogOut
+                        destructive=true
+                        on_select=sign_out
+                    />
+                </Menu>
+            })
+        }}
     }
 }
 
+/// Whether the viewport is narrow enough that the rail becomes a drawer.
+///
+/// Read once at mount rather than subscribed to: the value is used to pick an initial state, and
+/// re-reading it on every resize would fight the user's own collapse choice. The CSS breakpoints do the
+/// responsive work; this only decides where things start.
 #[allow(clippy::missing_const_for_fn)]
 fn viewport_is_narrow() -> bool {
     #[cfg(target_arch = "wasm32")]
@@ -538,7 +842,7 @@ fn viewport_is_narrow() -> bool {
         web_sys::window()
             .and_then(|window| window.inner_width().ok())
             .and_then(|width| width.as_f64())
-            .map_or(false, |width| width < 768.0)
+            .is_some_and(|width| width < 768.0)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -548,17 +852,16 @@ fn viewport_is_narrow() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::NAV_ITEMS;
+    use super::{NAV_GROUPS, all_nav_items, item_for_path};
 
     #[test]
     fn every_nav_item_is_complete() {
-        for item in NAV_ITEMS {
+        for (_, item) in all_nav_items() {
             assert!(!item.key.is_empty(), "{item:?} has no message key");
             assert!(
                 item.path.starts_with("/dashboard"),
                 "{item:?} escapes the dashboard"
             );
-            assert!(!item.icon.is_empty(), "{item:?} has no icon");
             assert!(
                 item.key.starts_with("nav."),
                 "{item:?} key should be namespaced"
@@ -569,34 +872,135 @@ mod tests {
     #[test]
     fn nav_paths_are_unique() {
         // A duplicate path would light up two sidebar entries at once.
-        for (index, item) in NAV_ITEMS.iter().enumerate() {
-            let duplicate = NAV_ITEMS
-                .iter()
+        for (index, (_, item)) in all_nav_items().enumerate() {
+            let duplicate = all_nav_items()
                 .skip(index + 1)
-                .find(|other| other.path == item.path);
+                .find(|(_, other)| other.path == item.path);
             assert!(duplicate.is_none(), "{:?} is listed twice", item.path);
         }
     }
 
     #[test]
     fn nav_keys_are_unique() {
-        for (index, item) in NAV_ITEMS.iter().enumerate() {
-            let duplicate = NAV_ITEMS
-                .iter()
+        for (index, (_, item)) in all_nav_items().enumerate() {
+            let duplicate = all_nav_items()
                 .skip(index + 1)
-                .find(|other| other.key == item.key);
+                .find(|(_, other)| other.key == item.key);
             assert!(duplicate.is_none(), "{:?} is listed twice", item.key);
         }
     }
 
     #[test]
+    fn every_group_has_items_and_a_namespaced_key() {
+        for group in NAV_GROUPS {
+            assert!(!group.items.is_empty(), "{} is empty", group.key);
+            assert!(
+                group.key.starts_with("nav."),
+                "{} is not namespaced",
+                group.key
+            );
+        }
+    }
+
+    #[test]
+    fn group_keys_are_unique() {
+        // Two groups sharing a key would render one heading twice.
+        for (index, group) in NAV_GROUPS.iter().enumerate() {
+            let duplicate = NAV_GROUPS
+                .iter()
+                .skip(index + 1)
+                .find(|other| other.key == group.key);
+            assert!(duplicate.is_none(), "{} is listed twice", group.key);
+        }
+    }
+
+    #[test]
     fn the_root_is_listed_exactly_once() {
-        // Active-state matching special-cases the root because it prefixes every other path. That
-        // only works while there is exactly one root entry.
-        let roots = NAV_ITEMS
-            .iter()
-            .filter(|item| item.path == "/dashboard")
+        // Active-state matching special-cases the root because it prefixes every other path. That only
+        // works while there is exactly one root entry.
+        let roots = all_nav_items()
+            .filter(|(_, item)| item.path == "/dashboard")
             .count();
         assert_eq!(roots, 1);
+    }
+
+    #[test]
+    fn every_destination_is_reachable_from_the_navigation() {
+        // The breadcrumb and the page title both resolve through this table, so a destination missing
+        // from it silently loses its heading and its section name.
+        for path in [
+            "/dashboard",
+            "/dashboard/chat",
+            "/dashboard/providers",
+            "/dashboard/models",
+            "/dashboard/combos",
+            "/dashboard/pricing",
+            "/dashboard/free-tiers",
+            "/dashboard/keys",
+            "/dashboard/users",
+            "/dashboard/sso",
+            "/dashboard/usage",
+            "/dashboard/logs",
+            "/dashboard/cli-tools",
+            "/dashboard/pxpipe",
+            "/dashboard/headroom",
+            "/dashboard/tunnel",
+            "/dashboard/proxy-pools",
+            "/dashboard/nodes",
+            "/dashboard/import",
+            "/dashboard/translator",
+            "/dashboard/catalog",
+            "/dashboard/settings",
+        ] {
+            assert!(item_for_path(path).is_some(), "{path} has no nav entry");
+        }
+    }
+
+    #[test]
+    fn the_root_does_not_swallow_child_routes() {
+        let (_, item) = item_for_path("/dashboard/keys").expect("keys is listed");
+        assert_eq!(item.path, "/dashboard/keys");
+        let (_, root) = item_for_path("/dashboard").expect("the root is listed");
+        assert_eq!(root.path, "/dashboard");
+        // A trailing slash and a query string are the same destination.
+        let (_, trailing) = item_for_path("/dashboard/keys/").expect("a trailing slash resolves");
+        assert_eq!(trailing.path, "/dashboard/keys");
+        let (_, query) = item_for_path("/dashboard/keys?tab=1").expect("a query resolves");
+        assert_eq!(query.path, "/dashboard/keys");
+    }
+
+    #[test]
+    fn the_most_specific_entry_wins() {
+        // `/dashboard/providers/openai` is the provider detail page: it belongs under Providers, not
+        // under the dashboard root, even though both are prefixes of it.
+        let (group, item) = item_for_path("/dashboard/providers/openai").expect("resolves");
+        assert_eq!(item.path, "/dashboard/providers");
+        assert_eq!(group.map(|group| group.key), Some("nav.group_routing"));
+    }
+
+    #[test]
+    fn every_navigation_key_resolves_to_a_message() {
+        // The sidebar reads its labels through a `key` field rather than a literal at the call site, so a
+        // key missing from the catalogue does not fail to compile and is not caught by the `t!` scanner's
+        // usual path. It renders as the raw key instead -- `nav.chat` in the sidebar, which is what
+        // shipped before this test existed.
+        let locale = crate::i18n::Locale::embedded();
+        let mut keys: Vec<&str> = NAV_GROUPS.iter().map(|group| group.key).collect();
+        keys.extend(all_nav_items().map(|(_, item)| item.key));
+
+        for key in keys {
+            assert_ne!(
+                locale.get(key),
+                key,
+                "{key} is used by the navigation but missing from en-US.json"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_path_resolves_to_nothing() {
+        // The status fallback route renders for these, and a breadcrumb that invented a name for it
+        // would be a guess.
+        assert!(item_for_path("/nonsense").is_none());
     }
 }

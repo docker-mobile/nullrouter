@@ -264,7 +264,6 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
   <link rel="modulepreload" href="/pkg/dashboard_leptos.js">
   <link rel="preload" href="/pkg/dashboard_leptos_bg.wasm" as="fetch" type="application/wasm" crossorigin>
   <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/assets/fonts/material-symbols-g016.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/dashboard/app.css">
   <link rel="stylesheet" href="/assets/dashboard.css">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">

@@ -247,18 +247,56 @@ fn render(table: &BTreeMap<String, String>) -> String {
 
 /// Every message key used in the dashboard's source.
 ///
-/// Matches `locale.get("…")` and `locale.fmt("…"`, which are the only two ways a message is looked
-/// up. A key built at runtime by concatenation would be invisible here, which is the reason not to
-/// build one.
+/// Every spelling that reaches a message table, or a key the UI uses is missing from every locale file:
+///
+/// - `locale.get("…")` and `locale.fmt("…"`, the direct calls.
+/// - `t!("…")`, the macro in `apps/dashboard-leptos/src/i18n.rs` that re-reads the locale from context so a
+///   `view!` closure does not have to capture it.
+/// - `"nav.…"`, a message key written as a bare string literal in a table and resolved at render time.
+///   The sidebar's `NAV_GROUPS` and the overview's quick actions both do this: their entries hold a
+///   `&'static str` key rather than a literal at the call site, so without this pattern `nav.chat`,
+///   `nav.free_tiers` and `overview.action_providers` were pruned from every locale file and the pages
+///   rendered their raw key names.
+///
+///   A bare literal is only treated as a key when it is *looks* like one -- lower-case, dotted,
+///   namespaced -- which is what keeps an unrelated string such as `"redis.example.com"` out of the
+///   message table.
+///
+/// A key built at runtime by concatenation would be invisible here, which is the reason not to build one.
 fn collect_keys(source_dir: &Path) -> Result<BTreeSet<String>, String> {
     let mut keys = BTreeSet::new();
     for file in rust_files(source_dir)? {
         let raw = fs::read_to_string(&file)
             .map_err(|error| format!("reading {}: {error}", file.display()))?;
         let text = strip_non_shipping(&raw);
-        for call in ["get(\"", "fmt(\""] {
+        // Bare literals are collected separately and filtered by shape, because unlike the call
+        // prefixes above there is no syntax to anchor on.
+        {
+            let mut rest = text.as_str();
+            while let Some(start) = rest.find('"') {
+                let after = &rest[start + 1..];
+                let Some(end) = after.find('"') else { break };
+                let candidate = &after[..end];
+                if looks_like_key(candidate) {
+                    keys.insert(candidate.to_owned());
+                }
+                rest = &after[end..];
+            }
+        }
+        for call in ["get(\"", "fmt(\"", "t!(\""] {
             let mut rest = text.as_str();
             while let Some(start) = rest.find(call) {
+                // The call has to begin a token. Without this check `fmt("` also matches the tail of
+                // `format!("`, so a formatting string like `format!("{value:.2}%")` in a page that has
+                // nothing to do with i18n was collected as a message key -- and reported as one that 35
+                // locale files were missing.
+                let bounded = start == 0
+                    || !rest.as_bytes()[start - 1].is_ascii_alphanumeric()
+                        && rest.as_bytes()[start - 1] != b'_';
+                if !bounded {
+                    rest = &rest[start + call.len()..];
+                    continue;
+                }
                 let after = &rest[start + call.len()..];
                 match after.find('"') {
                     Some(end) => {
@@ -276,6 +314,57 @@ fn collect_keys(source_dir: &Path) -> Result<BTreeSet<String>, String> {
         }
     }
     Ok(keys)
+}
+
+/// Whether a bare string literal is a message key.
+///
+/// Deliberately narrow. Collecting every string literal put `0.1`, `12.01` and
+/// `3_req_openai.json` into the message table as keys 35 locale files were then missing, because an
+/// SVG path coordinate and a pane filename both look like `word.word`.
+///
+/// So a candidate must be `section.name` where the section is one this dashboard actually namespaces
+/// under, and the name is lower snake case. Adding a namespace means adding it here, which is the point:
+/// a new namespace should be a deliberate act rather than whatever a regex happened to match.
+const KEY_SECTIONS: [&str; 26] = [
+    "action",
+    "callback",
+    "catalog",
+    "chat",
+    "cli_tools",
+    "combos",
+    "error",
+    "free_tiers",
+    "headroom",
+    "import",
+    "keys",
+    "language",
+    "login",
+    "logs",
+    "models",
+    "nav",
+    "nodes",
+    "not_found",
+    "overview",
+    "pools",
+    "pricing",
+    "providers",
+    "pxpipe",
+    "settings",
+    "sso",
+    "state",
+];
+
+fn looks_like_key(candidate: &str) -> bool {
+    let Some((section, name)) = candidate.split_once('.') else {
+        return false;
+    };
+    if !KEY_SECTIONS.contains(&section) {
+        return false;
+    }
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 /// Drop the parts of a source file that do not ship: doc comments and `#[cfg(test)]` modules.

@@ -24,7 +24,13 @@ use serde_json::Value;
 
 use crate::api::{Hydrate, Method, Save, load};
 use crate::routes::types::{ProviderRow, ProvidersList};
-use crate::routes::{PageHeader, Panel, write_reporting};
+use crate::routes::write_reporting;
+use crate::t;
+use crate::ui::{
+    Alert, AlertDescription, AlertTitle, AlertVariant, Badge, BadgeVariant, Button, Card,
+    CardContent, CardDescription, CardHeader, CardTitle, Field, Input, PageBody, PageHeader, Panel,
+    Table, TableCell, TableEmpty, TableFrame, TableHead, TableHeaderCell, TableRow,
+};
 
 /// One input in an import form.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -482,9 +488,9 @@ fn ImportForm(spec: ImportSpec, refresh: Callback<()>) -> impl IntoView {
     let (busy, set_busy) = signal(Save::Idle);
     let (notice, set_notice) = signal(Option::<Notice>::None);
 
-    let stored = locale.get("import.imported").to_owned();
-    let unreadable = locale.get("import.unreadable").to_owned();
-    let required = locale.get("import.required").to_owned();
+    let stored = t!("import.imported");
+    let unreadable = t!("import.unreadable");
+    let required = t!("import.required");
 
     let submit = move || {
         let mut payload = serde_json::Map::new();
@@ -528,8 +534,18 @@ fn ImportForm(spec: ImportSpec, refresh: Callback<()>) -> impl IntoView {
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <SectionHead title=locale.get(spec.title).to_owned() hint=locale.get(spec.hint).to_owned() path=spec.path />
+        <Card>
+            <CardHeader>
+            // `spec.title`/`spec.hint` are keys held in the spec table, not literals at this call site, so
+            // the macro cannot take them. The literal keys live in `FORMS` above, where the scanner finds
+            // them, and this reads the resolved table the same way any other lookup does.
+            <SectionHead
+                title=locale.get(spec.title).to_owned()
+                hint=locale.get(spec.hint).to_owned()
+                path=spec.path
+            />
+            </CardHeader>
+            <CardContent class="space-y-4">
             <div class="grid gap-3 sm:grid-cols-2">
                 {spec
                     .fields
@@ -538,12 +554,13 @@ fn ImportForm(spec: ImportSpec, refresh: Callback<()>) -> impl IntoView {
                     .collect_view()}
             </div>
             <SubmitButton
-                label=locale.get("import.submit").to_owned()
+                label=t!("import.submit")
                 busy=busy
                 on_run=Callback::new(move |()| submit())
             />
             <NoticeLine notice=notice />
-        </section>
+            </CardContent>
+        </Card>
     }
 }
 
@@ -561,14 +578,14 @@ const CURSOR_IMPORT_PATH: &str = "/api/oauth/cursor/import";
 /// is named as one here rather than coming back as a complaint about a missing field.
 #[component]
 fn CliProxyForm(refresh: Callback<()>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let _locale = crate::i18n::use_locale();
     let (document, set_document) = signal(String::new());
     let (busy, set_busy) = signal(Save::Idle);
     let (notice, set_notice) = signal(Option::<Notice>::None);
 
-    let stored = locale.get("import.imported").to_owned();
-    let unreadable = locale.get("import.unreadable").to_owned();
-    let invalid = locale.get("import.invalid_json").to_owned();
+    let stored = t!("import.imported");
+    let unreadable = t!("import.unreadable");
+    let invalid = t!("import.invalid_json");
 
     let submit = move || {
         let text = document.get().trim().to_owned();
@@ -596,24 +613,28 @@ fn CliProxyForm(refresh: Callback<()>) -> impl IntoView {
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
+        <Card>
+            <CardHeader>
             <SectionHead
-                title=locale.get("import.kiro_cli_title").to_owned()
-                hint=locale.get("import.kiro_cli_hint").to_owned()
+                title=t!("import.kiro_cli_title")
+                hint=t!("import.kiro_cli_hint")
                 path=CLI_PROXY_PATH
             />
+            </CardHeader>
+            <CardContent class="space-y-4">
             <SecretLine
-                label=locale.get("import.field_document").to_owned()
+                label=t!("import.field_document")
                 value=document
                 set=set_document
             />
             <SubmitButton
-                label=locale.get("import.submit").to_owned()
+                label=t!("import.submit")
                 busy=busy
                 on_run=Callback::new(move |()| submit())
             />
             <NoticeLine notice=notice />
-        </section>
+            </CardContent>
+        </Card>
     }
 }
 
@@ -624,14 +645,14 @@ fn CliProxyForm(refresh: Callback<()>) -> impl IntoView {
 /// leaves the list in place, because the entries that need fixing are in it.
 #[component]
 fn BulkImportForm(refresh: Callback<()>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let _locale = crate::i18n::use_locale();
     let (document, set_document) = signal(String::new());
     let (busy, set_busy) = signal(Save::Idle);
     let (notice, set_notice) = signal(Option::<Notice>::None);
     let (report, set_report) = signal(Option::<BulkReply>::None);
 
-    let unreadable = locale.get("import.unreadable").to_owned();
-    let invalid = locale.get("import.invalid_json").to_owned();
+    let unreadable = t!("import.unreadable");
+    let invalid = t!("import.invalid_json");
 
     let submit = move || {
         let text = document.get().trim().to_owned();
@@ -679,25 +700,29 @@ fn BulkImportForm(refresh: Callback<()>) -> impl IntoView {
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
+        <Card>
+            <CardHeader>
             <SectionHead
-                title=locale.get("import.codex_bulk_title").to_owned()
-                hint=locale.get("import.codex_bulk_hint").to_owned()
+                title=t!("import.codex_bulk_title")
+                hint=t!("import.codex_bulk_hint")
                 path=BULK_PATH
             />
+            </CardHeader>
+            <CardContent class="space-y-4">
             <SecretLine
-                label=locale.get("import.field_document").to_owned()
+                label=t!("import.field_document")
                 value=document
                 set=set_document
             />
             <SubmitButton
-                label=locale.get("import.submit").to_owned()
+                label=t!("import.submit")
                 busy=busy
                 on_run=Callback::new(move |()| submit())
             />
             <NoticeLine notice=notice />
             {move || report.get().map(|reply| view! { <BulkReport reply=reply /> })}
-        </section>
+            </CardContent>
+        </Card>
     }
 }
 
@@ -753,14 +778,14 @@ fn BulkReport(reply: BulkReply) -> impl IntoView {
 /// found -- not the credential. That is also why there is no "reveal" control here.
 #[component]
 fn CursorAutoPanel(refresh: Callback<()>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let _locale = crate::i18n::use_locale();
     let (busy, set_busy) = signal(Save::Idle);
     let (notice, set_notice) = signal(Option::<Notice>::None);
     let found = RwSignal::new(Option::<CursorFound>::None);
 
-    let stored = locale.get("import.imported").to_owned();
-    let unreadable = locale.get("import.unreadable").to_owned();
-    let none_found = locale.get("import.auto_none").to_owned();
+    let stored = t!("import.imported");
+    let unreadable = t!("import.unreadable");
+    let none_found = t!("import.auto_none");
 
     let check = {
         let unreadable = unreadable.clone();
@@ -844,19 +869,22 @@ fn CursorAutoPanel(refresh: Callback<()>) -> impl IntoView {
     // closure moves `import` into it, which makes that closure `FnOnce` where the view needs
     // `FnMut`. A `Callback` is `Copy`, so hoisting it lets the closure run on every re-render.
     let run_import = Callback::new(move |()| import());
-    let label_use = locale.get("import.auto_use").to_owned();
-    let text_found = locale.get("import.auto_found").to_owned();
+    let label_use = t!("import.auto_use");
+    let text_found = t!("import.auto_found");
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
+        <Card>
+            <CardHeader>
             <SectionHead
-                title=locale.get("import.auto_cursor_title").to_owned()
-                hint=locale.get("import.auto_cursor_hint").to_owned()
+                title=t!("import.auto_cursor_title")
+                hint=t!("import.auto_cursor_hint")
                 path=CURSOR_AUTO_PATH
             />
+            </CardHeader>
+            <CardContent class="space-y-4">
             <div class="flex flex-wrap gap-2">
                 <SubmitButton
-                    label=locale.get("import.auto_check").to_owned()
+                    label=t!("import.auto_check")
                     busy=busy
                     on_run=Callback::new(move |()| check())
                 />
@@ -886,7 +914,8 @@ fn CursorAutoPanel(refresh: Callback<()>) -> impl IntoView {
                     })
             }}
             <NoticeLine notice=notice />
-        </section>
+            </CardContent>
+        </Card>
     }
 }
 
@@ -898,14 +927,14 @@ fn CursorAutoPanel(refresh: Callback<()>) -> impl IntoView {
 /// here does, because Kiro's only way to verify a refresh token is to use it.
 #[component]
 fn KiroAutoPanel(refresh: Callback<()>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let _locale = crate::i18n::use_locale();
     let (busy, set_busy) = signal(Save::Idle);
     let (notice, set_notice) = signal(Option::<Notice>::None);
     let found = RwSignal::new(Option::<KiroFound>::None);
 
-    let stored = locale.get("import.imported").to_owned();
-    let unreadable = locale.get("import.unreadable").to_owned();
-    let none_found = locale.get("import.auto_none").to_owned();
+    let stored = t!("import.imported");
+    let unreadable = t!("import.unreadable");
+    let none_found = t!("import.auto_none");
 
     let check = {
         let unreadable = unreadable.clone();
@@ -995,18 +1024,21 @@ fn KiroAutoPanel(refresh: Callback<()>) -> impl IntoView {
     // closure moves `import` into it, which makes that closure `FnOnce` where the view needs
     // `FnMut`. A `Callback` is `Copy`, so hoisting it lets the closure run on every re-render.
     let run_import = Callback::new(move |()| import());
-    let label_use = locale.get("import.auto_use").to_owned();
+    let label_use = t!("import.auto_use");
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
+        <Card>
+            <CardHeader>
             <SectionHead
-                title=locale.get("import.auto_kiro_title").to_owned()
-                hint=locale.get("import.auto_kiro_hint").to_owned()
+                title=t!("import.auto_kiro_title")
+                hint=t!("import.auto_kiro_hint")
                 path=KIRO_AUTO_PATH
             />
+            </CardHeader>
+            <CardContent class="space-y-4">
             <div class="flex flex-wrap gap-2">
                 <SubmitButton
-                    label=locale.get("import.auto_check").to_owned()
+                    label=t!("import.auto_check")
                     busy=busy
                     on_run=Callback::new(move |()| check())
                 />
@@ -1042,7 +1074,8 @@ fn KiroAutoPanel(refresh: Callback<()>) -> impl IntoView {
                     })
             }}
             <NoticeLine notice=notice />
-        </section>
+            </CardContent>
+        </Card>
     }
 }
 
@@ -1060,18 +1093,18 @@ fn KiroDetails(
     /// protocol. Shown because it is the difference between an organisation's login and a social one.
     idc: bool,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let _locale = crate::i18n::use_locale();
     let protocol = if idc {
-        locale.get("import.auto_idc").to_owned()
+        t!("import.auto_idc")
     } else {
-        locale.get("import.auto_social").to_owned()
+        t!("import.auto_social")
     };
     let rows = [
-        (locale.get("import.auto_source").to_owned(), source),
-        (locale.get("import.auto_region").to_owned(), region),
-        (locale.get("import.auto_method").to_owned(), method),
-        (locale.get("import.auto_profile").to_owned(), profile),
-        (locale.get("import.auto_protocol").to_owned(), protocol),
+        (t!("import.auto_source"), source),
+        (t!("import.auto_region"), region),
+        (t!("import.auto_method"), method),
+        (t!("import.auto_profile"), profile),
+        (t!("import.auto_protocol"), protocol),
     ];
 
     view! {
@@ -1092,15 +1125,20 @@ fn KiroDetails(
     }
 }
 
+/// The heading of one import card.
+///
+/// The route is shown inline as a chip rather than on its own line: this page's whole subject is which
+/// endpoint a credential is being handed to, and a bare URL under a paragraph reads as body text.
 #[component]
 fn SectionHead(title: String, hint: String, path: &'static str) -> impl IntoView {
     view! {
-        <div class="space-y-1">
-            <h2 class="text-sm font-semibold tracking-tight">{title}</h2>
-            <p class="text-sm text-muted-foreground">{hint}</p>
-            // The route being called, shown because this page's whole subject is which endpoint a
-            // credential is being handed to.
-            <code class="text-xs text-muted-foreground">{path}</code>
+        <div class="min-w-0 space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+                <CardTitle>{title}</CardTitle>
+                // The route being called.
+                <Badge variant=BadgeVariant::Code>{path}</Badge>
+            </div>
+            <CardDescription>{hint}</CardDescription>
         </div>
     }
 }
@@ -1108,15 +1146,12 @@ fn SectionHead(title: String, hint: String, path: &'static str) -> impl IntoView
 #[component]
 fn SubmitButton(label: String, busy: ReadSignal<Save>, on_run: Callback<()>) -> impl IntoView {
     view! {
-        <button
-            type="button"
-            class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground \
-                   disabled:opacity-50"
-            disabled=move || busy.get().is_saving()
-            on:click=move |_| on_run.run(())
-        >
-            {label}
-        </button>
+        <Button
+            label=label
+            disabled=Signal::derive(move || busy.get().is_saving())
+            busy=Signal::derive(move || busy.get().is_saving())
+            on_click=on_run
+        />
     }
 }
 
@@ -1128,16 +1163,17 @@ fn NoticeLine(notice: ReadSignal<Option<Notice>>) -> impl IntoView {
             notice
                 .get()
                 .map(|shown| {
-                    let class = if shown.ok {
-                        "text-sm text-foreground whitespace-pre-line"
+                    let variant = if shown.ok {
+                        AlertVariant::Info
                     } else {
-                        "text-sm text-destructive whitespace-pre-line"
+                        AlertVariant::Destructive
                     };
-                    let role = if shown.ok { "status" } else { "alert" };
                     view! {
-                        <p class=class role=role>
-                            {shown.text}
-                        </p>
+                        <Alert variant=variant>
+                            <AlertDescription>
+                                <p class="whitespace-pre-line">{shown.text}</p>
+                            </AlertDescription>
+                        </Alert>
                     }
                 })
         }}
@@ -1154,32 +1190,28 @@ fn CredentialInput(
     values: RwSignal<BTreeMap<&'static str, String>>,
 ) -> impl IntoView {
     let locale = crate::i18n::use_locale();
-    let label = if field.required {
-        format!("{} *", locale.get(field.label))
-    } else {
-        locale.get(field.label).to_owned()
-    };
+    let label = locale.get(field.label).to_owned();
     let key = field.key;
 
     view! {
-        <label class="block space-y-1 text-sm">
-            <span class="text-muted-foreground">{label}</span>
-            <input
-                type=if field.secret { "password" } else { "text" }
+        <Field label=label required=field.required>
+            <Input
+                // Decided by `FieldSpec::secret` and by nothing else -- not by a toggle, and not by
+                // whether the value happens to look like a secret.
+                input_type=if field.secret { "password" } else { "text" }
                 // Off rather than a password-manager hint: these are other services' credentials
                 // being handed over once, not this site's password to be remembered.
                 autocomplete="off"
-                spellcheck="false"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                prop:value=move || values.with(|map| map.get(key).cloned().unwrap_or_default())
-                on:input=move |ev| {
-                    values
-                        .update(|map| {
-                            map.insert(key, event_target_value(&ev));
-                        });
-                }
+                value=Signal::derive(move || {
+                    values.with(|map| map.get(key).cloned().unwrap_or_default())
+                })
+                on_input=Callback::new(move |value: String| {
+                    values.update(|map| {
+                        map.insert(key, value);
+                    });
+                })
             />
-        </label>
+        </Field>
     }
 }
 
@@ -1192,17 +1224,15 @@ fn CredentialInput(
 #[component]
 fn SecretLine(label: String, value: ReadSignal<String>, set: WriteSignal<String>) -> impl IntoView {
     view! {
-        <label class="block space-y-1 text-sm">
-            <span class="text-muted-foreground">{label}</span>
-            <input
-                type="password"
+        <Field label=label>
+            <Input
+                input_type="password"
                 autocomplete="off"
-                spellcheck="false"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
-                prop:value=move || value.get()
-                on:input=move |ev| set.set(event_target_value(&ev))
+                value=Signal::derive(move || value.get())
+                on_input=Callback::new(move |next: String| set.set(next))
+                class="font-mono"
             />
-        </label>
+        </Field>
     }
 }
 
@@ -1213,35 +1243,82 @@ fn SecretLine(label: String, value: ReadSignal<String>, set: WriteSignal<String>
 /// answer a page like this must not give.
 #[component]
 fn StoredList(rows: Vec<ProviderRow>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("import.none_stored").to_owned()}</p>
+            <TableFrame>
+                <Table>
+                    <TableEmpty message=t!("import.none_stored") columns=3 />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
+    let disconnected = t!("import.none_stored");
+    let _ = disconnected;
     view! {
-        <ul class="flex flex-wrap gap-1.5">
-            {rows
-                .into_iter()
-                .map(|row| {
-                    let label = if row.name.is_empty() { row.provider.clone() } else { row.name };
-                    view! {
-                        <li class="rounded border border-border px-2 py-1 text-xs">
-                            <span>{label}</span>
-                            <code class="ml-1.5 text-muted-foreground">{row.provider}</code>
-                        </li>
-                    }
-                })
-                .collect_view()}
-        </ul>
+        <TableFrame>
+            <Table>
+                <TableHead>
+                    <tr>
+                        <TableHeaderCell>{t!("providers.col_name")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("providers.col_auth")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("providers.col_status")}</TableHeaderCell>
+                    </tr>
+                </TableHead>
+                <tbody>
+                    {rows
+                        .into_iter()
+                        .map(|row| {
+                            let label = if row.name.is_empty() {
+                                row.provider.clone()
+                            } else {
+                                row.name.clone()
+                            };
+                            let active = row.is_active;
+                            let provider = row.provider.clone();
+                            let auth = row.auth_type;
+                            view! {
+                                <TableRow>
+                                    <TableCell class="font-medium">{label}</TableCell>
+                                    <TableCell>
+                                        <Badge variant=BadgeVariant::Code>
+                                            {if provider.is_empty() {
+                                                "—".to_owned()
+                                            } else {
+                                                provider.clone()
+                                            }}
+                                        </Badge>
+                                        <span class="ml-2 text-xs text-muted-foreground">
+                                            {if auth.is_empty() { "—".to_owned() } else { auth }}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge variant=if active {
+                                            BadgeVariant::Success
+                                        } else {
+                                            BadgeVariant::Secondary
+                                        }>
+                                            {if active {
+                                                t!("state.enabled")
+                                            } else {
+                                                t!("state.disabled")
+                                            }}
+                                        </Badge>
+                                    </TableCell>
+                                </TableRow>
+                            }
+                        })
+                        .collect_view()}
+                </tbody>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
 
 #[component]
 pub fn OauthImport() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let _locale = crate::i18n::use_locale();
     let (stored, set_stored) = signal(Hydrate::<ProvidersList>::Loading);
     let reload = move || {
         set_stored.set(Hydrate::Loading);
@@ -1251,35 +1328,39 @@ pub fn OauthImport() -> impl IntoView {
     let refresh = Callback::new(move |()| reload());
 
     view! {
-        <PageHeader
-            title=locale.get("nav.import").to_owned()
-            description=locale.get("import.description").to_owned()
-        />
-        <section class="rounded-lg border border-border bg-card p-5 space-y-3">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("import.stored").to_owned()}
-            </h2>
-            <Panel
-                state=stored
-                on_retry=Callback::new(move |()| reload())
-                children=move |data: ProvidersList| {
-                    view! { <StoredList rows=data.connections /> }
-                }
-            />
-        </section>
-        <p class="mt-4 text-sm text-muted-foreground">
-            {locale.get("import.security_note").to_owned()}
-        </p>
-        <div class="mt-4 space-y-4">
-            {FORMS
-                .into_iter()
-                .map(|spec| view! { <ImportForm spec=spec refresh=refresh /> })
-                .collect_view()}
-            <CliProxyForm refresh=refresh />
-            <BulkImportForm refresh=refresh />
-            <CursorAutoPanel refresh=refresh />
-            <KiroAutoPanel refresh=refresh />
-        </div>
+        <PageHeader title=t!("nav.import") description=t!("import.description") />
+
+        <PageBody>
+            <Alert variant=AlertVariant::Warning>
+                <AlertTitle>{t!("import.security_note")}</AlertTitle>
+            </Alert>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("import.stored")}</CardTitle>
+                </CardHeader>
+                <CardContent class="px-0 pb-0">
+                    <Panel
+                        state=stored
+                        on_retry=Callback::new(move |()| reload())
+                        children=move |data: ProvidersList| {
+                            view! { <StoredList rows=data.connections /> }
+                        }
+                    />
+                </CardContent>
+            </Card>
+
+            <div class="grid gap-4 xl:grid-cols-2">
+                {FORMS
+                    .into_iter()
+                    .map(|spec| view! { <ImportForm spec=spec refresh=refresh /> })
+                    .collect_view()}
+                <CliProxyForm refresh=refresh />
+                <BulkImportForm refresh=refresh />
+                <CursorAutoPanel refresh=refresh />
+                <KiroAutoPanel refresh=refresh />
+            </div>
+        </PageBody>
     }
 }
 

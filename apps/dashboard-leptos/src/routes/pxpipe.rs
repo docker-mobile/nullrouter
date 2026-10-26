@@ -19,8 +19,15 @@ use leptos::prelude::*;
 use serde::Deserialize;
 
 use crate::api::{Hydrate, load};
-use crate::routes::controls::{Action, Caution, Field, Flag, Outcome, OutcomeLine, Section, Tone};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::controls::{
+    Action, Caution, Field, Flag, Outcome, OutcomeLine, Section, StateBadge, Tone,
+};
+use crate::routes::{
+    Alert, AlertDescription, AlertVariant, Badge, BadgeVariant, Card, CardContent, CardHeader,
+    CardTitle, PageBody, PageHeader, Panel, StatusDot, StatusTone, Table, TableCell, TableEmpty,
+    TableFrame, TableHead, TableHeaderCell, TableRow,
+};
+use crate::t;
 
 /// How many recent events to ask for. The server clamps to 500 and defaults to 100; a smaller
 /// window is asked for explicitly because this panel renders the rows.
@@ -198,7 +205,6 @@ struct PxpipeLogs {
 
 #[component]
 pub fn Pxpipe() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (status, set_status) = signal(Hydrate::<PxpipeStatus>::Loading);
     let (health, set_health) = signal(Hydrate::<PxpipeHealth>::Loading);
     let (savings, set_savings) = signal(Hydrate::<PxpipeStats>::Loading);
@@ -230,129 +236,155 @@ pub fn Pxpipe() -> impl IntoView {
     });
 
     view! {
-        <PageHeader
-            title=locale.get("nav.pxpipe").to_owned()
-            description=locale.get("pxpipe.description").to_owned()
-        />
-        <div class="space-y-6">
+        <PageHeader title=t!("nav.pxpipe") description=t!("pxpipe.description") />
+
+        <PageBody>
+            // Two reads, two cards, side by side: install/worker state and the ordered health
+            // checklist answer different questions and can disagree, so neither is folded into the
+            // other.
             <div class="grid gap-4 md:grid-cols-2">
-                <Section title=locale.get("pxpipe.state").to_owned()>
-                    <Panel
-                        state=status
-                        on_retry=Callback::new(move |()| reload())
-                        children=|data: PxpipeStatus| view! { <StatusBody data=data /> }
-                    />
-                </Section>
-                <Section title=locale.get("pxpipe.health").to_owned()>
-                    <Panel
-                        state=health
-                        on_retry=Callback::new(move |()| reload())
-                        children=|data: PxpipeHealth| view! { <HealthBody data=data /> }
-                    />
-                </Section>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("pxpipe.state")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=status
+                            on_retry=Callback::new(move |()| reload())
+                            children=|data: PxpipeStatus| view! { <StatusBody data=data /> }
+                        />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("pxpipe.health")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=health
+                            on_retry=Callback::new(move |()| reload())
+                            children=|data: PxpipeHealth| view! { <HealthBody data=data /> }
+                        />
+                    </CardContent>
+                </Card>
             </div>
 
             <ControlPanel outcome=outcome on_done=done />
 
-            <Section title=locale.get("pxpipe.savings").to_owned()>
-                <Panel
-                    state=savings
-                    on_retry=Callback::new(move |()| reload())
-                    children=|data: PxpipeStats| view! { <StatsBody data=data /> }
-                />
-            </Section>
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("pxpipe.savings")}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <Panel
+                        state=savings
+                        on_retry=Callback::new(move |()| reload())
+                        children=|data: PxpipeStats| view! { <StatsBody data=data /> }
+                    />
+                </CardContent>
+            </Card>
 
-            <Section title=locale.get("pxpipe.logs").to_owned()>
-                <Panel
-                    state=logs
-                    on_retry=Callback::new(move |()| reload())
-                    children=|data: PxpipeLogs| view! { <LogsBody data=data /> }
-                />
-            </Section>
-        </div>
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("pxpipe.logs")}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <Panel
+                        state=logs
+                        on_retry=Callback::new(move |()| reload())
+                        children=|data: PxpipeLogs| view! { <LogsBody data=data /> }
+                    />
+                </CardContent>
+            </Card>
+        </PageBody>
     }
 }
 
 /// Start, stop, reload, install.
 ///
 /// Its own component because [`Section`]'s children are a `FnOnce`, which takes the caller's
-/// `Locale` with them; a second section needing a label would then have none.
+/// `Locale` with them; a second section needing a label would then have none. `t!` is what makes
+/// that constraint painless: it re-reads the locale on each use, so nothing here holds one.
 #[component]
 fn ControlPanel(outcome: ReadSignal<Option<Outcome>>, on_done: Callback<Outcome>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     view! {
-        <Section title=locale.get("pxpipe.controls").to_owned()>
-            <div class="flex flex-wrap gap-2">
-                <Action
-                    label=locale.get("pxpipe.start").to_owned()
-                    path="/api/pxpipe/start".to_owned()
-                    tone=Tone::Primary
-                    done_label=locale.get("pxpipe.started").to_owned()
-                    on_done=on_done
-                />
-                <Action
-                    label=locale.get("pxpipe.stop").to_owned()
-                    path="/api/pxpipe/stop".to_owned()
-                    done_label=locale.get("pxpipe.stopped").to_owned()
-                    on_done=on_done
-                />
-                <Action
-                    label=locale.get("pxpipe.restart").to_owned()
-                    path="/api/pxpipe/restart".to_owned()
-                    done_label=locale.get("pxpipe.restarted").to_owned()
-                    on_done=on_done
-                />
-                // Runs `npm install pxpipe-proxy@latest` for real, which is why it is toned as a
-                // cost rather than as the obvious next step.
-                <Action
-                    label=locale.get("pxpipe.install").to_owned()
-                    path="/api/pxpipe/install".to_owned()
-                    tone=Tone::Destructive
-                    done_label=locale.get("pxpipe.installed").to_owned()
-                    on_done=on_done
-                />
+        <Section title=t!("pxpipe.controls")>
+            <div class="space-y-3">
+                <div class="flex flex-wrap gap-2">
+                    <Action
+                        label=t!("pxpipe.start")
+                        path="/api/pxpipe/start".to_owned()
+                        tone=Tone::Primary
+                        done_label=t!("pxpipe.started")
+                        on_done=on_done
+                    />
+                    <Action
+                        label=t!("pxpipe.stop")
+                        path="/api/pxpipe/stop".to_owned()
+                        done_label=t!("pxpipe.stopped")
+                        on_done=on_done
+                    />
+                    <Action
+                        label=t!("pxpipe.restart")
+                        path="/api/pxpipe/restart".to_owned()
+                        done_label=t!("pxpipe.restarted")
+                        on_done=on_done
+                    />
+                    // Runs `npm install pxpipe-proxy@latest` for real, which is why it is toned as a
+                    // cost rather than as the obvious next step.
+                    <Action
+                        label=t!("pxpipe.install")
+                        path="/api/pxpipe/install".to_owned()
+                        tone=Tone::Destructive
+                        done_label=t!("pxpipe.installed")
+                        on_done=on_done
+                    />
+                </div>
+                <Caution text=t!("pxpipe.install_caution") />
+                <OutcomeLine outcome=outcome />
             </div>
-            <Caution text=locale.get("pxpipe.install_caution").to_owned() />
-            <OutcomeLine outcome=outcome />
         </Section>
     }
 }
 
 #[component]
 fn StatusBody(data: PxpipeStatus) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    // Copied out because the install badge's closure below reads it after the rest of the tree has
+    // taken its own borrows of `data`.
+    let installing = data.installing;
     view! {
-        <dl class="space-y-2.5 text-sm">
-            <Flag label=locale.get("pxpipe.installed_flag").to_owned() on=data.installed />
-            <Flag label=locale.get("pxpipe.running").to_owned() on=data.running />
-            {data
-                .installing
-                .then(|| {
-                    view! {
-                        <Flag label=locale.get("pxpipe.installing").to_owned() on=true />
-                    }
-                })}
-            <Flag label=locale.get("pxpipe.npm").to_owned() on=data.npm_available />
-            <Flag label=locale.get("pxpipe.node").to_owned() on=data.node_available />
-            <Field
-                label=locale.get("pxpipe.uptime").to_owned()
-                value=if data.running { duration(data.uptime_ms) } else { String::new() }
-            />
-            <Field
-                label=locale.get("pxpipe.version").to_owned()
-                value=data.version.unwrap_or_default()
-            />
-            <Field
-                label=locale.get("pxpipe.node_version").to_owned()
-                value=data.node_version.unwrap_or_default()
-            />
-            <Field
-                label=locale.get("pxpipe.requires_node").to_owned()
-                value=data.requires_node.unwrap_or_default()
-            />
-            <Field label=locale.get("pxpipe.mode").to_owned() value=data.mode.unwrap_or_default() />
-            <Field label=locale.get("pxpipe.path").to_owned() value=data.path.unwrap_or_default() />
-        </dl>
+        <div class="space-y-3">
+            // The two states someone opens this page to check, above the detail. Each badge spells
+            // both the name and the value, so the colour is reinforcement rather than the message.
+            <div class="flex flex-wrap items-center gap-1.5">
+                <StateBadge label=t!("pxpipe.installed_flag") on=data.installed />
+                <StateBadge label=t!("pxpipe.running") on=data.running />
+                {installing
+                    .then(|| {
+                        view! { <Badge variant=BadgeVariant::Warning>{t!("pxpipe.installing")}</Badge> }
+                    })}
+            </div>
+            <dl class="divide-y divide-border/70 text-sm">
+                <Flag label=t!("pxpipe.npm") on=data.npm_available />
+                <Flag label=t!("pxpipe.node") on=data.node_available />
+                <Field
+                    label=t!("pxpipe.uptime")
+                    value=if data.running { duration(data.uptime_ms) } else { String::new() }
+                />
+                <Field label=t!("pxpipe.version") value=data.version.unwrap_or_default() />
+                <Field
+                    label=t!("pxpipe.node_version")
+                    value=data.node_version.unwrap_or_default()
+                />
+                <Field
+                    label=t!("pxpipe.requires_node")
+                    value=data.requires_node.unwrap_or_default()
+                />
+                <Field label=t!("pxpipe.mode") value=data.mode.unwrap_or_default() />
+                <Field label=t!("pxpipe.path") value=data.path.unwrap_or_default() />
+            </dl>
+        </div>
     }
 }
 
@@ -362,40 +394,30 @@ fn StatusBody(data: PxpipeStatus) -> impl IntoView {
 /// and recomputing it here would let the two disagree.
 #[component]
 fn HealthBody(data: PxpipeHealth) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let error = data.error.unwrap_or_default();
     view! {
         <div class="space-y-3 text-sm">
-            <div class="flex items-center gap-2">
-                <span class=if data.healthy {
-                    "size-1.5 rounded-full bg-success"
-                } else {
-                    "size-1.5 rounded-full bg-warning"
-                } />
-                <span>
-                    {if data.healthy {
-                        locale.get("pxpipe.healthy").to_owned()
-                    } else {
-                        locale.get("pxpipe.unhealthy").to_owned()
-                    }}
-                </span>
-            </div>
+            // A dot plus a word, never a bare coloured dot: the state has a name and the colour only
+            // reinforces it. Unhealthy is amber rather than red -- the transform being off is a
+            // configuration the router asked for as often as it is a fault.
+            <StatusDot
+                label=if data.healthy { t!("pxpipe.healthy") } else { t!("pxpipe.unhealthy") }
+                tone=if data.healthy { StatusTone::Success } else { StatusTone::Warning }
+            />
             {(!error.is_empty())
                 .then(|| {
                     view! {
-                        <p class="text-muted-foreground break-words">{error.clone()}</p>
+                        <Alert variant=AlertVariant::Warning>
+                            <AlertDescription>{error.clone()}</AlertDescription>
+                        </Alert>
                     }
                 })}
             {if data.checks.is_empty() {
-                view! {
-                    <p class="text-muted-foreground">
-                        {locale.get("pxpipe.no_checks").to_owned()}
-                    </p>
-                }
+                view! { <p class="text-muted-foreground">{t!("pxpipe.no_checks")}</p> }
                     .into_any()
             } else {
                 view! {
-                    <ul class="space-y-2">
+                    <ul class="divide-y divide-border/70">
                         {data
                             .checks
                             .into_iter()
@@ -403,13 +425,8 @@ fn HealthBody(data: PxpipeHealth) -> impl IntoView {
                                 let detail = step.detail.unwrap_or_default();
                                 let label = if step.label.is_empty() { step.id } else { step.label };
                                 view! {
-                                    <li class="flex items-start gap-2">
-                                        <span class=if step.ok {
-                                            "size-1.5 rounded-full bg-success mt-1.5 shrink-0"
-                                        } else {
-                                            "size-1.5 rounded-full bg-muted-foreground/40 mt-1.5 shrink-0"
-                                        } />
-                                        <span class="min-w-0">
+                                    <li class="flex items-start justify-between gap-3 py-1.5">
+                                        <div class="min-w-0">
                                             <span class="break-words">{label}</span>
                                             {(!detail.is_empty())
                                                 .then(|| {
@@ -419,6 +436,20 @@ fn HealthBody(data: PxpipeHealth) -> impl IntoView {
                                                         </span>
                                                     }
                                                 })}
+                                        </div>
+                                        <span class="shrink-0 pt-0.5">
+                                            <StatusDot
+                                                label=if step.ok {
+                                                    t!("state.yes")
+                                                } else {
+                                                    t!("state.no")
+                                                }
+                                                tone=if step.ok {
+                                                    StatusTone::Success
+                                                } else {
+                                                    StatusTone::Muted
+                                                }
+                                            />
                                         </span>
                                     </li>
                                 }
@@ -434,122 +465,97 @@ fn HealthBody(data: PxpipeHealth) -> impl IntoView {
 
 #[component]
 fn StatsBody(data: PxpipeStats) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    // `t!` reads the locale on each use, so the labels need no shared binding here either.
     let windows = [
-        (
-            locale.get("pxpipe.window_today").to_owned(),
-            data.windows.today,
-        ),
-        (
-            locale.get("pxpipe.window_yesterday").to_owned(),
-            data.windows.yesterday,
-        ),
-        (
-            locale.get("pxpipe.window_7d").to_owned(),
-            data.windows.last7d,
-        ),
-        (
-            locale.get("pxpipe.window_30d").to_owned(),
-            data.windows.last30d,
-        ),
-        (locale.get("pxpipe.window_all").to_owned(), data.windows.all),
+        (t!("pxpipe.window_today"), data.windows.today),
+        (t!("pxpipe.window_yesterday"), data.windows.yesterday),
+        (t!("pxpipe.window_7d"), data.windows.last7d),
+        (t!("pxpipe.window_30d"), data.windows.last30d),
+        (t!("pxpipe.window_all"), data.windows.all),
     ];
 
     view! {
         <div class="space-y-4">
-            <div class="rounded-lg border border-border overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead class="bg-muted/50 text-muted-foreground">
+            <TableFrame>
+                <Table>
+                    <TableHead>
                         <tr>
-                            <th class="text-left font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_window").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_requests").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_compressed").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_bypassed").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_errors").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_tokens_before").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_tokens_after").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_saved").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_saved_pct").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_images").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_total_ms").to_owned()}
-                            </th>
-                            <th class="text-right font-medium px-3 py-2">
-                                {locale.get("pxpipe.col_avg_ms").to_owned()}
-                            </th>
+                            <TableHeaderCell>{t!("pxpipe.col_window")}</TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_requests")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_compressed")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_bypassed")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_errors")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_tokens_before")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_tokens_after")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_saved")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_saved_pct")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_images")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_total_ms")}
+                            </TableHeaderCell>
+                            <TableHeaderCell class="text-right">
+                                {t!("pxpipe.col_avg_ms")}
+                            </TableHeaderCell>
                         </tr>
-                    </thead>
+                    </TableHead>
                     <tbody>
                         {windows
                             .into_iter()
                             .map(|(label, totals)| {
                                 view! {
-                                    <tr class="border-t border-border">
-                                        <td class="px-3 py-2">{label}</td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.requests.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.compressed.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.bypassed.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.errors.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.tokens_before_est.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.tokens_after_est.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.tokens_saved_est.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
+                                    <TableRow hoverable=false>
+                                        <TableCell class="whitespace-nowrap font-medium">{label}</TableCell>
+                                        <NumberCell value=totals.requests />
+                                        <NumberCell value=totals.compressed />
+                                        <NumberCell value=totals.bypassed />
+                                        <NumberCell value=totals.errors />
+                                        <NumberCell value=totals.tokens_before_est />
+                                        <NumberCell value=totals.tokens_after_est />
+                                        <NumberCell value=totals.tokens_saved_est />
+                                        <TableCell class="text-right font-mono text-xs tabular-nums">
                                             {percent(totals.saved_pct)}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.images_generated.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.compression_time_ms.to_string()}
-                                        </td>
-                                        <td class="px-3 py-2 text-right font-mono">
-                                            {totals.avg_compression_ms.to_string()}
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                        <NumberCell value=totals.images_generated />
+                                        <NumberCell value=totals.compression_time_ms />
+                                        <NumberCell value=totals.avg_compression_ms />
+                                    </TableRow>
                                 }
                             })
                             .collect_view()}
                     </tbody>
-                </table>
-            </div>
+                </Table>
+            </TableFrame>
 
             <Timeline days=data.timeline />
             <Recent events=data.recent />
         </div>
+    }
+}
+
+/// One right-aligned figure. A named component so the twelve numeric cells cannot drift apart in
+/// alignment or in whether they are monospaced.
+#[component]
+fn NumberCell(value: u64) -> impl IntoView {
+    view! {
+        <TableCell class="text-right font-mono text-xs tabular-nums">{value.to_string()}</TableCell>
     }
 }
 
@@ -560,19 +566,17 @@ fn StatsBody(data: PxpipeStats) -> impl IntoView {
 /// strip is for — was anything compressed that day — without implying a magnitude it does not have.
 #[component]
 fn Timeline(days: Vec<DayTotals>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if days.is_empty() {
         return ().into_any();
     }
     let active = days.iter().filter(|day| day.compressed > 0).count();
     let total: u64 = days.iter().map(|day| day.tokens_saved_est).sum();
-    let summary = locale.fmt(
-        "pxpipe.timeline_summary",
-        &[
-            ("days", &active.to_string()),
-            ("of", &days.len().to_string()),
-            ("saved", &total.to_string()),
-        ],
+    // The key literal has to sit on the same line as `t!` for the i18n generator's source scan to
+    // see it; a `t!` split across lines after the macro name is invisible to that scan.
+    let summary = t!("pxpipe.timeline_summary",
+        "days" => active.to_string(),
+        "of" => days.len().to_string(),
+        "saved" => total.to_string(),
     );
 
     view! {
@@ -607,123 +611,116 @@ fn Timeline(days: Vec<DayTotals>) -> impl IntoView {
 
 #[component]
 fn Recent(events: Vec<Event>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if events.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("pxpipe.no_events").to_owned()}</p>
+            <TableFrame>
+                <Table>
+                    <TableEmpty
+                        message=t!("pxpipe.no_events")
+                        columns=6
+                        hint=t!("pxpipe.no_events_hint")
+                    />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame>
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pxpipe.col_when").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pxpipe.col_outcome").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pxpipe.col_before").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pxpipe.col_after").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pxpipe.col_saved").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pxpipe.col_took").to_owned()}
-                        </th>
+                        <TableHeaderCell>{t!("pxpipe.col_when")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("pxpipe.col_outcome")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("pxpipe.col_before")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("pxpipe.col_after")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("pxpipe.col_saved")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("pxpipe.col_took")}</TableHeaderCell>
                     </tr>
-                </thead>
+                </TableHead>
                 <tbody>
                     {events
                         .into_iter()
                         .map(|event| {
                             let detail = event.detail.unwrap_or_default();
                             view! {
-                                <tr class="border-t border-border align-top">
-                                    <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">
+                                <TableRow class="align-top">
+                                    <TableCell class="whitespace-nowrap font-mono text-xs text-muted-foreground">
                                         {timestamp(event.ts)}
-                                    </td>
-                                    <td class="px-3 py-2">
-                                        <span class="flex items-center gap-2">
-                                            <span class=if event.applied {
-                                                "size-1.5 rounded-full bg-success shrink-0"
+                                    </TableCell>
+                                    <TableCell>
+                                        <StatusDot
+                                            label=event.reason
+                                            tone=if event.applied {
+                                                StatusTone::Success
                                             } else {
-                                                "size-1.5 rounded-full bg-muted-foreground/40 shrink-0"
-                                            } />
-                                            <span class="break-words">{event.reason}</span>
-                                        </span>
+                                                StatusTone::Muted
+                                            }
+                                        />
                                         {(!detail.is_empty())
                                             .then(|| {
                                                 view! {
-                                                    <span class="block text-xs text-muted-foreground break-words">
+                                                    <span class="mt-1 block text-xs text-muted-foreground break-words">
                                                         {detail}
                                                     </span>
                                                 }
                                             })}
-                                    </td>
-                                    <td class="px-3 py-2 text-right font-mono">
-                                        {event.tokens_before_est.to_string()}
-                                    </td>
-                                    <td class="px-3 py-2 text-right font-mono">
-                                        {event.tokens_after_est.to_string()}
-                                    </td>
-                                    <td class="px-3 py-2 text-right font-mono">
-                                        {event.tokens_saved_est.to_string()}
-                                    </td>
-                                    <td class="px-3 py-2 text-right font-mono">
+                                    </TableCell>
+                                    <NumberCell value=event.tokens_before_est />
+                                    <NumberCell value=event.tokens_after_est />
+                                    <NumberCell value=event.tokens_saved_est />
+                                    <TableCell class="text-right font-mono text-xs tabular-nums">
                                         {format!("{}ms", event.duration_ms)}
-                                    </td>
-                                </tr>
+                                    </TableCell>
+                                </TableRow>
                             }
                         })
                         .collect_view()}
                 </tbody>
-            </table>
-        </div>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
 
 #[component]
 fn LogsBody(data: PxpipeLogs) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let worker = data.worker_log.unwrap_or_default();
     let events = data.events.len();
 
     view! {
         <div class="space-y-4">
             <LogBlock
-                title=locale.get("pxpipe.install_log").to_owned()
+                title=t!("pxpipe.install_log")
                 text=data.install_log
-                empty=locale.get("pxpipe.no_install_log").to_owned()
+                empty=t!("pxpipe.no_install_log")
             />
             <LogBlock
-                title=locale.get("pxpipe.worker_log").to_owned()
+                title=t!("pxpipe.worker_log")
                 text=worker
-                empty=locale.get("pxpipe.no_worker_log").to_owned()
+                empty=t!("pxpipe.no_worker_log")
             />
             <p class="text-xs text-muted-foreground">
-                {locale.fmt("pxpipe.event_count", &[("count", &events.to_string())])}
+                {t!("pxpipe.event_count", "count" => events.to_string())}
             </p>
         </div>
     }
 }
 
+/// A log tail under its own sub-heading.
+///
+/// Not an [`EmptyState`]: nothing is missing here that the user could add, and a centred call to
+/// action would invite a click that does not exist. The empty branch says who did not write
+/// anything, which is the fact the panel actually has.
 #[component]
 fn LogBlock(title: String, text: String, empty: String) -> impl IntoView {
     view! {
-        <div class="space-y-1">
-            <h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div class="space-y-1.5">
+            <h3 class="text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase">
                 {title}
             </h3>
             {if text.trim().is_empty() {
-                view! { <p class="text-sm text-muted-foreground italic">{empty}</p> }.into_any()
+                view! { <p class="text-xs text-muted-foreground italic">{empty}</p> }.into_any()
             } else {
                 view! {
                     <pre class="max-h-64 overflow-auto rounded-md border border-border bg-muted/30 \

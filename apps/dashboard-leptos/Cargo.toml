@@ -24,48 +24,13 @@ uuid.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 
-# Enabled one at a time rather than through `all-components`, which does not compile. See the
-# note on `leptos-shadcn-ui` in the workspace manifest.
-[dependencies.leptos-shadcn-ui]
-workspace = true
-features = [
-    "accordion",
-    "alert",
-    "avatar",
-    "badge",
-    "button",
-    "card",
-    "checkbox",
-    "collapsible",
-    "combobox",
-    "dialog",
-    "dropdown-menu",
-    "input",
-    "label",
-    "pagination",
-    "popover",
-    "progress",
-    "radio-group",
-    "scroll-area",
-    "separator",
-    "sheet",
-    "skeleton",
-    "slider",
-    "switch",
-    "table",
-    "tabs",
-    "textarea",
-    "toast",
-    "toggle",
-    "tooltip",
-]
-
 [dependencies.web-sys]
 workspace = true
 features = [
     "BroadcastChannel",
     "Clipboard",
     "Document",
+    "HtmlDialogElement",
     "Element",
     "EventSource",
     "EventTarget",
@@ -77,6 +42,7 @@ features = [
     "MediaQueryListEvent",
     "MessageEvent",
     "Navigator",
+    "Node",
     "Request",
     "RequestCache",
     "RequestCredentials",

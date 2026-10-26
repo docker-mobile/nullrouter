@@ -29,7 +29,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, Hydrate, Method, encode, load_with};
 use crate::routes::controls::{Action, Caution, Outcome, OutcomeLine, Section, Tone};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Field, Input, PageBody, PageHeader, Panel, Select, StatusDot, StatusTone, Table, TableCell,
+    TableEmpty, TableFrame, TableHead, TableHeaderCell, TableRow,
+};
+use crate::t;
 
 /// One tool's status.
 ///
@@ -216,7 +220,6 @@ fn router_origin() -> String {
 
 #[component]
 pub fn CliTools() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (tools, set_tools) = signal(Hydrate::<ToolRows>::Loading);
 
     let reload = move || {
@@ -226,18 +229,16 @@ pub fn CliTools() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.cli_tools").to_owned()
-            description=locale.get("cli_tools.description").to_owned()
-        />
-        <div class="space-y-6">
+        <PageHeader title=t!("nav.cli_tools") description=t!("cli_tools.description") />
+
+        <PageBody>
             <ApplyForm tools=tools reload=reload />
             <Panel
                 state=tools
                 on_retry=Callback::new(move |()| reload())
                 children=move |rows: ToolRows| view! { <ToolTable rows=rows /> }
             />
-        </div>
+        </PageBody>
     }
 }
 
@@ -250,7 +251,6 @@ fn ApplyForm(
     tools: ReadSignal<Hydrate<ToolRows>>,
     reload: impl Fn() + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (selected, set_selected) = signal(String::new());
     let (base_url, set_base_url) = signal(router_origin());
     let (api_key, set_api_key) = signal(String::new());
@@ -299,188 +299,160 @@ fn ApplyForm(
     });
 
     view! {
-        <Section title=locale.get("cli_tools.apply").to_owned()>
-            <p class="text-sm text-muted-foreground">
-                {locale.get("cli_tools.apply_hint").to_owned()}
-            </p>
-            {move || {
-                // Re-acquired rather than captured: `Locale` owns its message table and is not
-                // `Copy`, so moving the outer one into this closure would take it away from the
-                // rest of the form.
-                let locale = crate::i18n::use_locale();
-                let options = writable.get();
-                if options.is_empty() && tools.get().ready().is_some() {
-                    return view! {
-                        <p class="text-sm text-muted-foreground">
-                            {locale.get("cli_tools.none_writable").to_owned()}
-                        </p>
-                    }
-                        .into_any();
-                }
-                view! {
-                    <label class="block space-y-1 text-sm">
-                        <span class="text-muted-foreground">
-                            {locale.get("cli_tools.tool").to_owned()}
-                        </span>
-                        <select
-                            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                            prop:value=move || selected.get()
-                            on:change=move |ev| set_selected.set(event_target_value(&ev))
-                        >
-                            <option value="">{locale.get("cli_tools.pick").to_owned()}</option>
-                            {options
-                                .into_iter()
-                                .map(|(id, label)| {
-                                    view! { <option value=id>{label}</option> }
-                                })
-                                .collect_view()}
-                        </select>
-                    </label>
-                }
-                    .into_any()
-            }}
-            <div class="grid gap-3 sm:grid-cols-3">
-                <label class="block space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("cli_tools.base_url").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || base_url.get()
-                        on:input=move |ev| set_base_url.set(event_target_value(&ev))
-                    />
-                </label>
-                <label class="block space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("cli_tools.api_key").to_owned()}
-                    </span>
-                    // Masked: this is a live credential being typed on a screen someone may be
-                    // sharing.
-                    <input
-                        type="password"
-                        autocomplete="off"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || api_key.get()
-                        on:input=move |ev| set_api_key.set(event_target_value(&ev))
-                    />
-                </label>
-                <label class="block space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("cli_tools.model").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || model.get()
-                        on:input=move |ev| set_model.set(event_target_value(&ev))
-                    />
-                </label>
-            </div>
-            <p class="text-xs text-muted-foreground">
-                {locale.get("cli_tools.required_hint").to_owned()}
-            </p>
-            <div class="flex flex-wrap gap-2">
+        <Section title=t!("cli_tools.apply")>
+            <div class="space-y-3">
+                <p class="text-sm text-muted-foreground">{t!("cli_tools.apply_hint")}</p>
                 {move || {
-                    let locale = crate::i18n::use_locale();
-                    let path = apply_path.get();
-                    let revoke_path = path.clone();
-                    view! {
-                        <Action
-                            label=locale.get("cli_tools.apply_action").to_owned()
-                            path=path
-                            method=Method::Post
-                            tone=Tone::Primary
-                            disabled=held
-                            done_label=locale.get("cli_tools.applied").to_owned()
-                            body=Callback::new(move |()| {
-                                encode(
-                                        &ApplyBody::new(
-                                            base_url.get().trim().to_owned(),
-                                            api_key.get().trim().to_owned(),
-                                            model.get().trim().to_owned(),
-                                        ),
-                                    )
-                                    .ok()
-                            })
-                            on_done=Callback::new(move |outcome: Outcome| {
-                                let applied = outcome.ok;
-                                set_outcome.set(Some(outcome));
-                                if applied {
-                                    reload();
-                                }
-                            })
-                        />
-                        // DELETE carries no body upstream, and the server accepts an empty one.
-                        <Action
-                            label=locale.get("cli_tools.revoke").to_owned()
-                            path=revoke_path
-                            method=Method::Delete
-                            tone=Tone::Destructive
-                            disabled=held
-                            done_label=locale.get("cli_tools.revoked").to_owned()
-                            on_done=Callback::new(move |outcome: Outcome| {
-                                let removed = outcome.ok;
-                                set_outcome.set(Some(outcome));
-                                if removed {
-                                    reload();
-                                }
-                            })
-                        />
+                    let options = writable.get();
+                    if options.is_empty() && tools.get().ready().is_some() {
+                        return view! {
+                            <p class="text-sm text-muted-foreground">
+                                {t!("cli_tools.none_writable")}
+                            </p>
+                        }
+                            .into_any();
                     }
+                    view! {
+                        <Field label=t!("cli_tools.tool")>
+                            <Select
+                                value=Signal::derive(move || selected.get())
+                                options=Signal::derive(move || options.clone())
+                                on_change=Callback::new(move |value| set_selected.set(value))
+                                placeholder=t!("cli_tools.pick")
+                            />
+                        </Field>
+                    }
+                        .into_any()
                 }}
+                <div class="grid gap-3 sm:grid-cols-3">
+                    <Field label=t!("cli_tools.base_url")>
+                        <Input
+                            value=Signal::derive(move || base_url.get())
+                            on_input=Callback::new(move |value| set_base_url.set(value))
+                            input_type="text"
+                        />
+                    </Field>
+                    <Field label=t!("cli_tools.api_key")>
+                        // Masked: this is a live credential being typed on a screen someone may be
+                        // sharing.
+                        <Input
+                            value=Signal::derive(move || api_key.get())
+                            on_input=Callback::new(move |value| set_api_key.set(value))
+                            input_type="password"
+                            autocomplete="off"
+                        />
+                    </Field>
+                    <Field label=t!("cli_tools.model")>
+                        <Input
+                            value=Signal::derive(move || model.get())
+                            on_input=Callback::new(move |value| set_model.set(value))
+                            input_type="text"
+                        />
+                    </Field>
+                </div>
+                <p class="text-xs text-muted-foreground">{t!("cli_tools.required_hint")}</p>
+                <div class="flex flex-wrap gap-2">
+                    {move || {
+                        let path = apply_path.get();
+                        let revoke_path = path.clone();
+                        view! {
+                            <Action
+                                label=t!("cli_tools.apply_action")
+                                path=path
+                                method=Method::Post
+                                tone=Tone::Primary
+                                disabled=held
+                                done_label=t!("cli_tools.applied")
+                                body=Callback::new(move |()| {
+                                    encode(
+                                            &ApplyBody::new(
+                                                base_url.get().trim().to_owned(),
+                                                api_key.get().trim().to_owned(),
+                                                model.get().trim().to_owned(),
+                                            ),
+                                        )
+                                        .ok()
+                                })
+                                on_done=Callback::new(move |outcome: Outcome| {
+                                    let applied = outcome.ok;
+                                    set_outcome.set(Some(outcome));
+                                    if applied {
+                                        reload();
+                                    }
+                                })
+                            />
+                            // DELETE carries no body upstream, and the server accepts an empty one.
+                            <Action
+                                label=t!("cli_tools.revoke")
+                                path=revoke_path
+                                method=Method::Delete
+                                tone=Tone::Destructive
+                                disabled=held
+                                done_label=t!("cli_tools.revoked")
+                                on_done=Callback::new(move |outcome: Outcome| {
+                                    let removed = outcome.ok;
+                                    set_outcome.set(Some(outcome));
+                                    if removed {
+                                        reload();
+                                    }
+                                })
+                            />
+                        }
+                    }}
+                </div>
+                <Caution text=t!("cli_tools.revoke_caution") />
+                <OutcomeLine outcome=outcome />
             </div>
-            <Caution text=locale.get("cli_tools.revoke_caution").to_owned() />
-            <OutcomeLine outcome=outcome />
         </Section>
     }
 }
 
 #[component]
 fn ToolTable(rows: ToolRows) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
+        // `TableEmpty` renders its own `<tbody>`, so the frame and the header row stay and only the
+        // body is replaced by the message. The column count has to match the header below.
         return view! {
-            <p class="text-sm text-muted-foreground">
-                {locale.get("cli_tools.empty").to_owned()}
-            </p>
+            <TableFrame>
+                <Table>
+                    <TableHead>
+                        <tr>
+                            <TableHeaderCell>{t!("cli_tools.col_tool")}</TableHeaderCell>
+                            <TableHeaderCell>{t!("cli_tools.col_installed")}</TableHeaderCell>
+                            <TableHeaderCell>{t!("cli_tools.col_points_here")}</TableHeaderCell>
+                            <TableHeaderCell>{t!("cli_tools.col_config")}</TableHeaderCell>
+                            <TableHeaderCell>{t!("cli_tools.col_notes")}</TableHeaderCell>
+                        </tr>
+                    </TableHead>
+                    <TableEmpty message=t!("cli_tools.empty") columns=5 />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame>
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("cli_tools.col_tool").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("cli_tools.col_installed").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("cli_tools.col_points_here").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("cli_tools.col_config").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("cli_tools.col_notes").to_owned()}
-                        </th>
+                        <TableHeaderCell>{t!("cli_tools.col_tool")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("cli_tools.col_installed")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("cli_tools.col_points_here")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("cli_tools.col_config")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("cli_tools.col_notes")}</TableHeaderCell>
                     </tr>
-                </thead>
+                </TableHead>
                 <tbody>
                     {rows.into_iter().map(|tool| view! { <ToolRow tool=tool /> }).collect_view()}
                 </tbody>
-            </table>
-        </div>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
 
 #[component]
 fn ToolRow(tool: Tool) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let status = tool.status;
     let name = if status.display_name.is_empty() {
         tool.id.clone()
@@ -494,31 +466,30 @@ fn ToolRow(tool: Tool) -> impl IntoView {
     if !status.config_error.is_empty() {
         notes.push(format!(
             "{} {}",
-            locale.get("cli_tools.config_error"),
+            t!("cli_tools.config_error"),
             status.config_error
         ));
     } else if !status.message.is_empty() {
         notes.push(status.message.clone());
     }
     if status.installed && status.config_error.is_empty() {
-        notes.push(
-            if status.config_readable() {
-                locale.get("cli_tools.config_read")
-            } else {
-                locale.get("cli_tools.config_absent")
-            }
-            .to_owned(),
-        );
+        notes.push(if status.config_readable() {
+            t!("cli_tools.config_read")
+        } else {
+            t!("cli_tools.config_absent")
+        });
     }
     if status.installed && !status.writable {
-        notes.push(locale.get("cli_tools.read_only").to_owned());
+        notes.push(t!("cli_tools.read_only"));
     }
 
+    let path = status.path().to_owned();
+
     view! {
-        <tr class="border-t border-border align-top">
-            <td class="px-3 py-2">
-                <div class="font-medium">{name}</div>
-                <code class="text-xs text-muted-foreground">{tool.id}</code>
+        <TableRow class="align-top">
+            <TableCell>
+                <div class="font-medium text-foreground">{name}</div>
+                <code class="font-mono text-xs text-muted-foreground">{tool.id}</code>
                 {(!status.source.is_empty())
                     .then(|| {
                         view! {
@@ -527,50 +498,43 @@ fn ToolRow(tool: Tool) -> impl IntoView {
                             </div>
                         }
                     })}
-            </td>
-            <td class="px-3 py-2">
+            </TableCell>
+            <TableCell>
                 <StateDot on=status.installed />
-            </td>
-            <td class="px-3 py-2">
+            </TableCell>
+            <TableCell>
                 <StateDot on=status.has_router />
-            </td>
-            <td class="px-3 py-2 font-mono text-xs text-muted-foreground break-all">
-                {let path = status.path().to_owned();
-                if path.is_empty() { "—".to_owned() } else { path }}
-            </td>
-            <td class="px-3 py-2 text-muted-foreground space-y-1">
+            </TableCell>
+            <TableCell class="font-mono text-xs text-muted-foreground break-all">
+                {crate::routes::or_dash(&path)}
+            </TableCell>
+            <TableCell class="space-y-1 text-muted-foreground">
                 {if notes.is_empty() {
                     view! { <span>"—"</span> }.into_any()
                 } else {
                     notes
                         .into_iter()
-                        .map(|note| view! { <div class="break-words">{note}</div> })
+                        .map(|note| view! { <div class="text-xs break-words">{note}</div> })
                         .collect_view()
                         .into_any()
                 }}
-            </td>
-        </tr>
+            </TableCell>
+        </TableRow>
     }
 }
 
 /// A yes/no the server reported.
+///
+/// A [`StatusDot`] rather than a bare coloured circle: the word is what the reader acts on, and the
+/// dot only reinforces it. `false` is muted, because "not installed" is a fact about the machine
+/// and not a fault.
 #[component]
 fn StateDot(on: bool) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label = if on {
-        locale.get("state.yes").to_owned()
-    } else {
-        locale.get("state.no").to_owned()
-    };
     view! {
-        <span class="flex items-center gap-2 whitespace-nowrap">
-            <span class=if on {
-                "size-1.5 rounded-full bg-success"
-            } else {
-                "size-1.5 rounded-full bg-muted-foreground/40"
-            } />
-            <span>{label}</span>
-        </span>
+        <StatusDot
+            label=if on { t!("state.yes") } else { t!("state.no") }
+            tone=if on { StatusTone::Success } else { StatusTone::Muted }
+        />
     }
 }
 

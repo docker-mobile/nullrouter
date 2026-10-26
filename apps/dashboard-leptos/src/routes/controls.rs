@@ -14,6 +14,11 @@
 use leptos::prelude::*;
 
 use crate::api::{ApiError, Method, Save, decode, request_detailed};
+use crate::routes::{
+    Alert, AlertVariant, Badge, BadgeVariant, ButtonSize, ButtonVariant, Card, CardContent,
+    CardHeader, CardTitle, ErrorNote, Icon, IconName, StatusDot, StatusTone, button_class,
+};
+use crate::t;
 
 /// The fields a refusal or a completion can carry, across all three panels' endpoints.
 ///
@@ -100,18 +105,22 @@ pub enum Tone {
 }
 
 impl Tone {
-    const fn classes(self) -> &'static str {
+    /// The button weight this tone maps onto.
+    ///
+    /// Presentation lives in the shared button layer now, so the three tones resolve to three of its
+    /// variants rather than to three hand-written class lists here. A stop and a start still differ by
+    /// weight alone, which is the only thing [`Tone`] ever meant.
+    const fn variant(self) -> ButtonVariant {
         match self {
-            Self::Primary => "bg-primary text-primary-foreground hover:bg-primary/90",
-            Self::Neutral => {
-                "border border-border bg-background text-foreground hover:bg-accent \
-                 hover:text-accent-foreground"
-            }
-            Self::Destructive => {
-                "border border-destructive/40 bg-destructive/5 text-destructive \
-                 hover:bg-destructive/10"
-            }
+            Self::Primary => ButtonVariant::Default,
+            Self::Neutral => ButtonVariant::Outline,
+            Self::Destructive => ButtonVariant::Destructive,
         }
+    }
+
+    /// The full class list for a button of this weight.
+    fn classes(self) -> String {
+        button_class(self.variant(), ButtonSize::Default)
     }
 }
 
@@ -149,13 +158,7 @@ pub fn Action(
     view! {
         <button
             type="button"
-            class=move || {
-                format!(
-                    "{} rounded-md px-3 py-2 text-sm font-medium transition-colors \
-                     disabled:opacity-50 disabled:pointer-events-none",
-                    tone.classes(),
-                )
-            }
+            class=tone.classes()
             disabled=move || {
                 save.get().is_saving() || disabled.is_some_and(|held| held.get())
             }
@@ -202,6 +205,11 @@ pub fn Action(
 }
 
 /// The last outcome, rendered as itself.
+///
+/// A refusal is an [`ErrorNote`] -- `role="alert"`, an icon, the server's own sentence -- because the
+/// endpoints behind these buttons answer 4xx with the reason, and that wording is the only thing that
+/// tells the user which field or which package the server wanted. A completion is the quieter line: it
+/// is a confirmation, not a warning.
 #[component]
 pub fn OutcomeLine(outcome: ReadSignal<Option<Outcome>>) -> impl IntoView {
     view! {
@@ -209,15 +217,21 @@ pub fn OutcomeLine(outcome: ReadSignal<Option<Outcome>>) -> impl IntoView {
             outcome
                 .get()
                 .map(|outcome| {
-                    let class = if outcome.ok {
-                        "text-sm text-foreground whitespace-pre-wrap break-words"
+                    if outcome.ok {
+                        view! {
+                            <p
+                                class="flex items-start gap-2 text-[0.8125rem] leading-relaxed text-foreground"
+                                role="status"
+                            >
+                                <Icon name=IconName::Check class="mt-0.5 size-3.5 shrink-0 text-success" />
+                                <span class="min-w-0 whitespace-pre-wrap break-words">
+                                    {outcome.detail}
+                                </span>
+                            </p>
+                        }
+                            .into_any()
                     } else {
-                        "text-sm text-destructive whitespace-pre-wrap break-words"
-                    };
-                    view! {
-                        <p class=class role="status">
-                            {outcome.detail}
-                        </p>
+                        view! { <ErrorNote message=outcome.detail /> }.into_any()
                     }
                 })
         }}
@@ -226,16 +240,14 @@ pub fn OutcomeLine(outcome: ReadSignal<Option<Outcome>>) -> impl IntoView {
 
 /// A labelled value in a definition list, with an em dash for "the server did not say".
 #[component]
-pub fn Field(label: String, value: String) -> impl IntoView {
-    let shown = if value.trim().is_empty() {
-        "—".to_owned()
-    } else {
-        value
-    };
+pub fn Field(#[prop(into)] label: String, #[prop(into)] value: String) -> impl IntoView {
+    // `or_dash` takes `&str`; the owned value is dropped here rather than threaded through.
+    let shown = crate::routes::or_dash(&value);
+    drop(value);
     view! {
-        <div class="flex items-start justify-between gap-4">
-            <dt class="text-muted-foreground shrink-0">{label}</dt>
-            <dd class="text-right break-all">{shown}</dd>
+        <div class="flex items-start justify-between gap-4 py-1">
+            <dt class="shrink-0 text-muted-foreground">{label}</dt>
+            <dd class="min-w-0 text-right font-mono text-xs break-all text-foreground">{shown}</dd>
         </div>
     }
 }
@@ -246,48 +258,84 @@ pub fn Field(label: String, value: String) -> impl IntoView {
 /// token saver that is off is a configuration, not a fault.
 #[component]
 pub fn Flag(label: String, on: bool) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let state = if on {
-        locale.get("state.enabled").to_owned()
+        t!("state.enabled")
     } else {
-        locale.get("state.disabled").to_owned()
+        t!("state.disabled")
     };
     view! {
-        <div class="flex items-center justify-between gap-4">
-            <dt class="text-muted-foreground truncate">{label}</dt>
-            <dd class="flex items-center gap-2 shrink-0">
-                <span class=if on {
-                    "size-1.5 rounded-full bg-success"
-                } else {
-                    "size-1.5 rounded-full bg-muted-foreground/40"
-                } />
-                <span>{state}</span>
+        <div class="flex items-center justify-between gap-4 py-1">
+            <dt class="truncate text-muted-foreground">{label}</dt>
+            <dd class="shrink-0">
+                <StatusDot
+                    label=state
+                    tone=if on { StatusTone::Success } else { StatusTone::Muted }
+                />
             </dd>
         </div>
     }
 }
 
+/// A named flag and its value, as one badge.
+///
+/// The label alone ("Installed") is ambiguous once colour is the only thing that changes it, and a
+/// badge whose text does not say which state it is in is a coloured rectangle. So the badge spells
+/// both: the name the server used and the word for the value.
+///
+/// `off_variant` exists because "off" is not always neutral -- a proxy that is not answering is a
+/// warning, while a token saver that is not loaded is a configuration.
+#[component]
+// Owned, not `&str`: the label is a translated message, so it is a `String` at every call site and a
+// borrow would have to be kept alive for the render.
+#[allow(clippy::needless_pass_by_value)]
+pub fn StateBadge(
+    /// The name the server used for the state's subject.
+    #[prop(into)]
+    label: String,
+    on: bool,
+    #[prop(optional, into)] off_variant: Option<BadgeVariant>,
+) -> impl IntoView {
+    let state = if on {
+        t!("state.enabled")
+    } else {
+        t!("state.disabled")
+    };
+    let variant = if on {
+        BadgeVariant::Success
+    } else {
+        off_variant.unwrap_or(BadgeVariant::Secondary)
+    };
+    view! { <Badge variant=variant>{format!("{label} · {state}")}</Badge> }
+}
+
 /// A card with a heading, matching the one `overview` uses.
+///
+/// `Card` plus `CardHeader`/`CardContent` rather than a hand-written `<section>`: the border, radius,
+/// shadow and inset are the same ones every other panel draws, and a panel that spelled them out
+/// itself would drift the moment the shared surface changed.
 #[component]
 pub fn Section(title: String, children: Children) -> impl IntoView {
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 class="text-sm font-medium text-muted-foreground">{title}</h2>
-            {children()}
-        </section>
+        <Card>
+            <CardHeader>
+                <CardTitle>{title}</CardTitle>
+            </CardHeader>
+            <CardContent>{children()}</CardContent>
+        </Card>
     }
 }
 
 /// A warning about something that will take real time or real disk if pressed.
+///
+/// An [`Alert`] rather than a hand-styled box: it carries the icon, the warning palette and the
+/// `role="status"` that makes the sentence announced, and those have to match every other caution in
+/// the dashboard.
 #[component]
 pub fn Caution(text: String) -> impl IntoView {
     view! {
-        <div
-            class="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-foreground"
-            role="note"
-        >
-            {text}
-        </div>
+        <Alert variant=AlertVariant::Warning>
+            <p class="text-[0.8125rem] leading-relaxed text-foreground">{text}</p>
+        </Alert>
     }
 }
 
