@@ -20,13 +20,26 @@
 //! unconditionally, on this build and in the state service both: there is no input for which it can
 //! return success, so a "test connection" control could only ever report failure for a node that
 //! works. The limitation is stated in the panel instead.
+//!
+//! # Why create and edit are dialogs
+//!
+//! Create used to be a form pinned above the table, and edit was a second `<tr>` opened beneath the
+//! node it edited. Both are five-field forms, so both now open as dialogs: the table is the page, a
+//! dialog keeps the form out of the list's column widths, and an edit dialog can state the one field
+//! it cannot change (the family) without reserving a row of the table for it.
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Hydrate, Method, Save, encode, load, request_detailed, submit_reporting};
 use crate::routes::types::timestamp_label;
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Alert, AlertDescription, AlertTitle, AlertVariant, Button, ButtonSize, ButtonVariant, Dialog,
+    DialogContent, DialogDescription, DialogDismiss, DialogFooter, DialogHeader, DialogTitle,
+    ErrorNote, Field, IconName, Input, Menu, MenuItem, MenuSeparator, Mono, PageBody, PageHeader,
+    Panel, Select, Table, TableCell, TableEmpty, TableFrame, TableHead, TableHeaderCell, TableRow,
+};
+use crate::t;
 
 /// `GET /api/provider-nodes`.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -88,6 +101,12 @@ struct UpdateNode<'a> {
 const OPENAI_COMPATIBLE: &str = "openai-compatible";
 
 /// The three families, with their label keys.
+///
+/// Test-only. It is the list the tests below pin against `services/state-actix`'s validator, and it
+/// documents the families in one place; the dialogs cannot read it, because `t!` only accepts a string
+/// literal, so the labels are written out literally at each call site ([`type_label`], the option
+/// vectors) rather than looked up through this table.
+#[cfg(test)]
 const NODE_TYPES: [(&str, &str); 3] = [
     (OPENAI_COMPATIBLE, "nodes.type_openai"),
     ("anthropic-compatible", "nodes.type_anthropic"),
@@ -102,10 +121,25 @@ fn takes_api_type(node_type: &str) -> bool {
     node_type == OPENAI_COMPATIBLE
 }
 
+/// A family's label, falling back to the stored value for one this build does not know.
+///
+/// A `match` on the wire value rather than a lookup of the key in [`NODE_TYPES`], because `t!` only
+/// accepts a string literal and the table's keys are runtime `&str`s.
+fn type_label(node_type: &str) -> String {
+    match node_type {
+        OPENAI_COMPATIBLE => t!("nodes.type_openai"),
+        "anthropic-compatible" => t!("nodes.type_anthropic"),
+        "custom-embedding" => t!("nodes.type_embedding"),
+        other => other.to_owned(),
+    }
+}
+
 #[component]
 pub fn ProviderNodes() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (list, set_list) = signal(Hydrate::<NodesList>::Loading);
+    let (creating, set_creating) = signal(false);
+    let (editing, set_editing) = signal(None::<NodeRow>);
+    let (deleting, set_deleting) = signal(None::<NodeRow>);
     let reload = move || {
         set_list.set(Hydrate::Loading);
         load("/api/provider-nodes", set_list);
@@ -113,24 +147,72 @@ pub fn ProviderNodes() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.nodes").to_owned()
-            description=locale.get("nodes.description").to_owned()
-        />
-        <CreateForm reload=reload />
-        <Panel
-            state=list
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: NodesList| view! { <NodeTable rows=data.nodes reload=reload /> }
-        />
-        <p class="mt-3 text-sm text-muted-foreground">
-            {locale.get("nodes.validate_unsupported").to_owned()}
-        </p>
+        <PageHeader title=t!("nav.nodes") description=t!("nodes.description")>
+            <Button
+                label=t!("nodes.create")
+                size=ButtonSize::Sm
+                on_click=Callback::new(move |()| set_creating.set(true))
+            />
+        </PageHeader>
+
+        <PageBody>
+            <Panel
+                state=list
+                on_retry=Callback::new(move |()| reload())
+                children=move |data: NodesList| {
+                    view! {
+                        <NodeTable
+                            rows=data.nodes
+                            set_edit=set_editing
+                            set_delete=set_deleting
+                        />
+                    }
+                }
+            />
+
+            // Stated rather than offered as a button: the validate route answers `valid: false` for
+            // every input, so a "test connection" control could only ever report a false negative.
+            <Alert variant=AlertVariant::Muted>
+                <AlertTitle>{t!("nodes.validation_title")}</AlertTitle>
+                <AlertDescription>{t!("nodes.validate_unsupported")}</AlertDescription>
+            </Alert>
+        </PageBody>
+
+        <CreateDialog open=creating set_open=set_creating reload=reload />
+
+        // Mounted only while a node is selected: the form's signals are seeded from that node, so
+        // there is no stale copy to keep in step when the list is refetched underneath it.
+        {move || {
+            editing
+                .get()
+                .map(|row| {
+                    view! {
+                        <EditDialog row=row set_target=set_editing reload=reload />
+                    }
+                })
+        }}
+        {move || {
+            deleting
+                .get()
+                .map(|row| {
+                    view! {
+                        <DeleteDialog row=row set_target=set_deleting reload=reload />
+                    }
+                })
+        }}
     }
 }
+
+/// Add a node.
+///
+/// The family select is offered here and nowhere else: `PUT` reads the family from the stored node, so
+/// an edit form that showed it would appear to change something the server ignores.
 #[component]
-fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+fn CreateDialog(
+    open: ReadSignal<bool>,
+    set_open: WriteSignal<bool>,
+    reload: impl Fn() + Copy + 'static + Send + Sync,
+) -> impl IntoView {
     let (name, set_name) = signal(String::new());
     let (prefix, set_prefix) = signal(String::new());
     let (kind, set_kind) = signal(OPENAI_COMPATIBLE.to_owned());
@@ -142,10 +224,26 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
         save.get().is_saving() || name.get().trim().is_empty() || prefix.get().trim().is_empty()
     };
     let shows_api_type = move || takes_api_type(&kind.get());
-    let encode_failed = locale.get("nodes.encode_failed").to_owned();
-    // The API-shape field is inside a reactive closure, which would move the whole non-`Copy`
-    // locale; its one label is taken out here instead.
-    let api_type_label = locale.get("nodes.api_type").to_owned();
+    let encode_failed = StoredValue::new(t!("nodes.encode_failed"));
+
+    // A `Signal` rather than a vec built inline: `Select` reads its options reactively, and a fresh
+    // `Vec` per render is what allows the labels to follow a locale swap.
+    let kind_options = Signal::derive(|| {
+        vec![
+            (OPENAI_COMPATIBLE.to_owned(), t!("nodes.type_openai")),
+            (
+                "anthropic-compatible".to_owned(),
+                t!("nodes.type_anthropic"),
+            ),
+            ("custom-embedding".to_owned(), t!("nodes.type_embedding")),
+        ]
+    });
+    let api_options = Signal::derive(|| {
+        API_TYPES
+            .into_iter()
+            .map(|value| (value.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>()
+    });
 
     let submit = move || {
         let (label, route, url) = (name.get(), prefix.get(), base_url.get());
@@ -162,7 +260,7 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
             api_type: takes_api_type(&family).then_some(api.as_str()),
             base_url: (!url.is_empty()).then_some(url),
         }) else {
-            set_save.set(Save::Refused(encode_failed.clone()));
+            set_save.set(Save::Refused(encode_failed.get_value()));
             return;
         };
 
@@ -175,187 +273,253 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
                 set_name.set(String::new());
                 set_prefix.set(String::new());
                 set_base_url.set(String::new());
+                set_open.set(false);
                 reload();
             },
         );
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4 mb-4">
-            <p class="text-sm text-muted-foreground">{locale.get("nodes.create_hint").to_owned()}</p>
-            <div class="grid gap-3 sm:grid-cols-2">
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">{locale.get("nodes.name").to_owned()}</span>
-                    <input
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || name.get()
-                        on:input=move |ev| set_name.set(event_target_value(&ev))
-                        placeholder=locale.get("nodes.name_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("nodes.prefix").to_owned()}
-                    </span>
-                    <input
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                        prop:value=move || prefix.get()
-                        on:input=move |ev| set_prefix.set(event_target_value(&ev))
-                        placeholder=locale.get("nodes.prefix_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">{locale.get("nodes.type").to_owned()}</span>
-                    <select
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || kind.get()
-                        on:change=move |ev| set_kind.set(event_target_value(&ev))
+        <Dialog
+            open=Signal::derive(move || open.get())
+            on_open_change=Callback::new(move |next: bool| set_open.set(next))
+        >
+            <DialogHeader>
+                <div class="space-y-1">
+                    <DialogTitle>{t!("nodes.create")}</DialogTitle>
+                    <DialogDescription>{t!("nodes.create_hint")}</DialogDescription>
+                </div>
+                <DialogDismiss />
+            </DialogHeader>
+            <DialogContent class="space-y-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <Field label=t!("nodes.name") required=true>
+                        <Input
+                            value=Signal::derive(move || name.get())
+                            on_input=Callback::new(move |value| set_name.set(value))
+                            placeholder=t!("nodes.name_placeholder")
+                            autocomplete="off"
+                        />
+                    </Field>
+                    <Field
+                        label=t!("nodes.prefix")
+                        description=t!("nodes.prefix_hint")
+                        required=true
                     >
-                        {NODE_TYPES
-                            .into_iter()
-                            .map(|(value, key)| {
+                        <Input
+                            value=Signal::derive(move || prefix.get())
+                            on_input=Callback::new(move |value| set_prefix.set(value))
+                            placeholder=t!("nodes.prefix_placeholder")
+                            autocomplete="off"
+                            class="font-mono"
+                        />
+                    </Field>
+                    <Field label=t!("nodes.type") required=true>
+                        <Select
+                            value=Signal::derive(move || kind.get())
+                            options=kind_options
+                            on_change=Callback::new(move |chosen| set_kind.set(chosen))
+                            aria_label=t!("nodes.type")
+                        />
+                    </Field>
+                    {move || {
+                        shows_api_type()
+                            .then(|| {
                                 view! {
-                                    <option value=value>{locale.get(key).to_owned()}</option>
+                                    <Field label=t!("nodes.api_type") required=true>
+                                        <Select
+                                            value=Signal::derive(move || api_type.get())
+                                            options=api_options
+                                            on_change=Callback::new(move |chosen| {
+                                                set_api_type.set(chosen);
+                                            })
+                                            aria_label=t!("nodes.api_type")
+                                        />
+                                    </Field>
                                 }
                             })
-                            .collect_view()}
-                    </select>
-                </label>
+                    }}
+                </div>
+                <Field
+                    label=t!("nodes.base_url")
+                    description=t!("nodes.base_url_hint")
+                >
+                    <Input
+                        value=Signal::derive(move || base_url.get())
+                        on_input=Callback::new(move |value| set_base_url.set(value))
+                        placeholder=t!("nodes.base_url_placeholder")
+                        autocomplete="off"
+                        class="font-mono"
+                    />
+                </Field>
                 {move || {
-                    let api_type_label = api_type_label.clone();
-                    shows_api_type()
-                        .then(|| {
-                            view! {
-                                <label class="space-y-1 text-sm">
-                                    <span class="text-muted-foreground">{api_type_label}</span>
-                                    <select
-                                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                        prop:value=move || api_type.get()
-                                        on:change=move |ev| set_api_type.set(event_target_value(&ev))
-                                    >
-                                        {API_TYPES
-                                            .into_iter()
-                                            .map(|value| view! { <option value=value>{value}</option> })
-                                            .collect_view()}
-                                    </select>
-                                </label>
-                            }
-                        })
+                    save.get().message().map(|message| view! { <ErrorNote message=message /> })
                 }}
-            </div>
-            <label class="block space-y-1 text-sm">
-                <span class="text-muted-foreground">{locale.get("nodes.base_url").to_owned()}</span>
-                <input
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                    prop:value=move || base_url.get()
-                    on:input=move |ev| set_base_url.set(event_target_value(&ev))
-                    placeholder=locale.get("nodes.base_url_placeholder").to_owned()
+            </DialogContent>
+            <DialogFooter>
+                <Button
+                    label=t!("nodes.cancel")
+                    variant=ButtonVariant::Outline
+                    size=ButtonSize::Sm
+                    on_click=Callback::new(move |()| set_open.set(false))
                 />
-                <span class="block text-xs text-muted-foreground">
-                    {locale.get("nodes.base_url_hint").to_owned()}
-                </span>
-            </label>
-            <button
-                type="button"
-                class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled=incomplete
-                on:click=move |_| submit()
-            >
-                {locale.get("nodes.create").to_owned()}
-            </button>
-            {move || {
-                save.get()
-                    .message()
-                    .map(|message| view! { <p class="text-sm text-destructive">{message}</p> })
-            }}
-        </section>
+                <Button
+                    label=t!("nodes.create")
+                    size=ButtonSize::Sm
+                    disabled=Signal::derive(incomplete)
+                    busy=Signal::derive(move || save.get().is_saving())
+                    on_click=Callback::new(move |()| submit())
+                />
+            </DialogFooter>
+        </Dialog>
     }
 }
 
 #[component]
 fn NodeTable(
     rows: Vec<NodeRow>,
-    reload: impl Fn() + Copy + 'static + Send + Sync,
+    set_edit: WriteSignal<Option<NodeRow>>,
+    set_delete: WriteSignal<Option<NodeRow>>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("nodes.empty").to_owned()}</p>
+            <TableFrame>
+                <Table>
+                    <TableEmpty
+                        message=t!("nodes.empty")
+                        columns=6
+                        hint=t!("nodes.empty_hint")
+                    />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame>
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("nodes.col_name").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("nodes.col_prefix").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("nodes.col_type").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("nodes.col_url").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("nodes.col_updated").to_owned()}
-                        </th>
-                        <th class="px-3 py-2"></th>
+                        <TableHeaderCell>{t!("nodes.col_name")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("nodes.col_prefix")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("nodes.col_type")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("nodes.col_url")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("nodes.col_updated")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("table.actions")}</TableHeaderCell>
                     </tr>
-                </thead>
+                </TableHead>
                 <tbody>
                     {rows
                         .into_iter()
-                        .map(|row| view! { <NodeLine row=row reload=reload /> })
+                        .map(|row| {
+                            view! {
+                                <NodeLine row=row set_edit=set_edit set_delete=set_delete />
+                            }
+                        })
                         .collect_view()}
                 </tbody>
-            </table>
-        </div>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
-/// A family's label, falling back to the stored value for one this build does not know.
-fn type_label(node_type: &str, locale: &crate::i18n::Locale) -> String {
-    NODE_TYPES
-        .iter()
-        .find(|(value, _)| *value == node_type)
-        .map_or_else(
-            || node_type.to_owned(),
-            |(_, key)| locale.get(key).to_owned(),
-        )
+
+/// One node's stored values, and the menu of writes the store accepts for it.
+///
+/// The writes live in dialogs mounted at page level rather than here, because a `<dialog>` cannot be
+/// a child of `<tbody>` -- it would be hoisted out of the table by the parser and lose its position in
+/// the row's lifetime. The row therefore only *names* the node it wants to act on, and the dialog that
+/// receives it is created fresh from that node's values.
+#[component]
+fn NodeLine(
+    row: NodeRow,
+    set_edit: WriteSignal<Option<NodeRow>>,
+    set_delete: WriteSignal<Option<NodeRow>>,
+) -> impl IntoView {
+    let family = row.node_type.clone();
+    let for_edit = StoredValue::new(row.clone());
+    let for_delete = StoredValue::new(row.clone());
+
+    view! {
+        <TableRow class="align-top">
+            <TableCell class="font-medium">{row.name.clone()}</TableCell>
+            <TableCell>
+                <code class="font-mono text-xs text-muted-foreground">{row.prefix.clone()}</code>
+            </TableCell>
+            <TableCell>
+                <div class="space-y-0.5">
+                    <span>{type_label(&family)}</span>
+                    {row.api_type
+                        .clone()
+                        .filter(|value| !value.is_empty())
+                        .map(|value| {
+                            view! {
+                                <p class="font-mono text-xs text-muted-foreground">{value}</p>
+                            }
+                        })}
+                </div>
+            </TableCell>
+            <TableCell>
+                <Mono value=row.base_url.clone() class="text-xs" />
+            </TableCell>
+            <TableCell>
+                <span class="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
+                    {timestamp_label(&row.updated_at)}
+                </span>
+            </TableCell>
+            <TableCell class="text-right">
+                <Menu
+                    aria_label=t!("table.actions")
+                    icon=IconName::More
+                    align_end=true
+                    trigger_variant="ghost"
+                >
+                    <MenuItem
+                        label=t!("nodes.edit")
+                        icon=IconName::Pencil
+                        on_select=Callback::new(move |()| {
+                            set_edit.set(Some(for_edit.get_value()));
+                        })
+                    />
+                    <MenuSeparator />
+                    <MenuItem
+                        label=t!("nodes.delete")
+                        icon=IconName::Trash
+                        destructive=true
+                        on_select=Callback::new(move |()| {
+                            set_delete.set(Some(for_delete.get_value()));
+                        })
+                    />
+                </Menu>
+            </TableCell>
+        </TableRow>
+    }
 }
 
-/// One node: its stored values, and an edit form that opens beneath them.
+/// Edit one node.
 ///
-/// The form is a second row rather than inputs swapped into the cells, so a base URL has the width
-/// to be read.
+/// Created only while a node is selected, so its field signals are seeded from that node and there is
+/// no "which node is this form about?" state to keep in sync.
 #[component]
-fn NodeLine(row: NodeRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let (editing, set_editing) = signal(false);
-    let (armed, set_armed) = signal(false);
-    let (save_state, set_save) = signal(Save::Idle);
-
+fn EditDialog(
+    row: NodeRow,
+    set_target: WriteSignal<Option<NodeRow>>,
+    reload: impl Fn() + Copy + 'static + Send + Sync,
+) -> impl IntoView {
     let (name, set_name) = signal(row.name.clone());
     let (prefix, set_prefix) = signal(row.prefix.clone());
     let (base_url, set_base_url) = signal(row.base_url.clone());
     let (api_type, set_api_type) =
         signal(row.api_type.clone().unwrap_or_else(|| "chat".to_owned()));
+    let (save_state, set_save) = signal(Save::Idle);
 
-    let family = row.node_type.clone();
-    let has_api_type = takes_api_type(&family);
-
-    // Stored rather than captured: both writes are invoked from inside reactive closures, which
-    // rebuild their handlers on every run and so need a `Copy` closure. A `String` captured
-    // directly would make these `FnOnce`.
-    let save_family = StoredValue::new(family.clone());
+    let has_api_type = takes_api_type(&row.node_type);
+    // Stored rather than captured: the write is invoked from inside a reactive closure, which rebuilds
+    // its handler on every run and so needs a `Copy` closure.
+    let save_family = StoredValue::new(row.node_type.clone());
     let save_id = StoredValue::new(row.id.clone());
-    let all_required = StoredValue::new(locale.get("nodes.all_required").to_owned());
-    let encode_failed = StoredValue::new(locale.get("nodes.encode_failed").to_owned());
+    let all_required = StoredValue::new(t!("nodes.all_required"));
+    let encode_failed = StoredValue::new(t!("nodes.encode_failed"));
 
     let save = move || {
         let (label, route, url) = (name.get(), prefix.get(), base_url.get());
@@ -382,234 +546,194 @@ fn NodeLine(row: NodeRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> i
             set_save,
             move || async move { request_detailed(Method::Put, &path, Some(&body)).await },
             move |_| {
-                set_editing.set(false);
+                set_target.set(None);
                 reload();
             },
         );
     };
 
+    let api_options = Signal::derive(|| {
+        API_TYPES
+            .into_iter()
+            .map(|value| (value.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>()
+    });
+    let fixed_family = StoredValue::new(row.node_type);
+
+    view! {
+        <Dialog
+            open=Signal::derive(|| true)
+            on_open_change=Callback::new(move |next: bool| {
+                if !next {
+                    set_target.set(None);
+                }
+            })
+        >
+            <DialogHeader>
+                <div class="space-y-1">
+                    <DialogTitle>{t!("nodes.edit")}</DialogTitle>
+                    <DialogDescription>{t!("nodes.edit_hint")}</DialogDescription>
+                </div>
+                <DialogDismiss />
+            </DialogHeader>
+            <DialogContent class="space-y-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <Field label=t!("nodes.name") required=true>
+                        <Input
+                            value=Signal::derive(move || name.get())
+                            on_input=Callback::new(move |value| set_name.set(value))
+                        />
+                    </Field>
+                    <Field label=t!("nodes.prefix") required=true>
+                        <Input
+                            value=Signal::derive(move || prefix.get())
+                            on_input=Callback::new(move |value| set_prefix.set(value))
+                            class="font-mono"
+                        />
+                    </Field>
+                </div>
+                // Type is stated, not offered: `PUT` reads the family from the stored node and ignores
+                // the body's, so a control here would look like it changed something it cannot.
+                <div class="space-y-1">
+                    <p class="text-[0.8125rem] font-medium text-foreground">{t!("nodes.type")}</p>
+                    <p class="text-sm text-foreground">
+                        {move || type_label(&fixed_family.get_value())}
+                    </p>
+                    <p class="text-xs leading-relaxed text-muted-foreground">
+                        {t!("nodes.type_locked")}
+                    </p>
+                </div>
+                {has_api_type
+                    .then(|| {
+                        view! {
+                            <Field label=t!("nodes.api_type") class="sm:max-w-xs">
+                                <Select
+                                    value=Signal::derive(move || api_type.get())
+                                    options=api_options
+                                    on_change=Callback::new(move |chosen| {
+                                        set_api_type.set(chosen);
+                                    })
+                                    aria_label=t!("nodes.api_type")
+                                />
+                            </Field>
+                        }
+                    })}
+                <Field
+                    label=t!("nodes.base_url")
+                    description=t!("nodes.base_url_required")
+                    required=true
+                >
+                    <Input
+                        value=Signal::derive(move || base_url.get())
+                        on_input=Callback::new(move |value| set_base_url.set(value))
+                        class="font-mono"
+                    />
+                </Field>
+                {move || {
+                    save_state
+                        .get()
+                        .message()
+                        .map(|message| view! { <ErrorNote message=message /> })
+                }}
+            </DialogContent>
+            <DialogFooter>
+                <Button
+                    label=t!("nodes.cancel")
+                    variant=ButtonVariant::Outline
+                    size=ButtonSize::Sm
+                    on_click=Callback::new(move |()| set_target.set(None))
+                />
+                <Button
+                    label=t!("nodes.save")
+                    size=ButtonSize::Sm
+                    disabled=Signal::derive(move || save_state.get().is_saving())
+                    busy=Signal::derive(move || save_state.get().is_saving())
+                    on_click=Callback::new(move |()| save())
+                />
+            </DialogFooter>
+        </Dialog>
+    }
+}
+
+/// Remove one node, after a confirmation that names what it takes with it.
+#[component]
+fn DeleteDialog(
+    row: NodeRow,
+    set_target: WriteSignal<Option<NodeRow>>,
+    reload: impl Fn() + Copy + 'static + Send + Sync,
+) -> impl IntoView {
+    let (save_state, set_save) = signal(Save::Idle);
+    let save_id = StoredValue::new(row.id.clone());
+
     let remove = move || {
+        if save_state.get().is_saving() {
+            return;
+        }
         let path = format!("/api/provider-nodes/{}", save_id.get_value());
         submit_reporting(
             set_save,
             move || async move { request_detailed(Method::Delete, &path, None).await },
             move |_| {
-                set_armed.set(false);
+                set_target.set(None);
                 reload();
             },
         );
     };
 
-    let label = type_label(&family, &locale);
-
-    // Every label read inside a reactive closure is taken out first: `Locale` is not `Copy`, so a
-    // closure reading it directly would move the whole table away from the rest of the row. The
-    // edit form needs most of the table, so it gets its own clone instead.
-    let label_edit = locale.get("nodes.edit").to_owned();
-    let label_close = locale.get("nodes.close").to_owned();
-    let label_delete = locale.get("nodes.delete").to_owned();
-    let label_confirm_delete = locale.get("nodes.confirm_delete").to_owned();
-    let label_cancel = locale.get("nodes.cancel").to_owned();
-    let form_locale = locale;
-    let form_family = family;
-
     view! {
-        <tr class="border-t border-border align-top">
-            <td class="px-3 py-2">{row.name.clone()}</td>
-            <td class="px-3 py-2 font-mono text-xs">{row.prefix.clone()}</td>
-            <td class="px-3 py-2">
-                <div class="space-y-0.5">
-                    <span>{label}</span>
-                    {row.api_type
-                        .clone()
-                        .filter(|value| !value.is_empty())
-                        .map(|value| {
-                            view! {
-                                <p class="font-mono text-xs text-muted-foreground">{value}</p>
-                            }
-                        })}
+        <Dialog
+            open=Signal::derive(|| true)
+            on_open_change=Callback::new(move |next: bool| {
+                if !next {
+                    set_target.set(None);
+                }
+            })
+        >
+            <DialogHeader>
+                <div class="space-y-1">
+                    <DialogTitle>{t!("nodes.confirm_delete")}</DialogTitle>
+                    <DialogDescription>{t!("nodes.delete_hint")}</DialogDescription>
                 </div>
-            </td>
-            <td class="px-3 py-2 font-mono text-xs break-all">{row.base_url.clone()}</td>
-            <td class="px-3 py-2 text-xs text-muted-foreground">
-                {timestamp_label(&row.updated_at)}
-            </td>
-            <td class="px-3 py-2 text-right">
-                <div class="flex flex-col items-end gap-1.5">
-                    <button
-                        type="button"
-                        class="text-sm underline-offset-4 hover:underline"
-                        on:click=move |_| set_editing.update(|open| *open = !*open)
-                    >
-                        {move || {
-                            if editing.get() {
-                                label_close.clone()
-                            } else {
-                                label_edit.clone()
-                            }
-                        }}
-                    </button>
-                    {move || {
-                        let (confirm, cancel, delete) = (
-                            label_confirm_delete.clone(),
-                            label_cancel.clone(),
-                            label_delete.clone(),
-                        );
-                        if armed.get() {
-                            view! {
-                                <div class="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        class="text-sm font-medium text-destructive underline-offset-4 \
-                                               hover:underline disabled:opacity-50"
-                                        disabled=move || save_state.get().is_saving()
-                                        on:click=move |_| remove()
-                                    >
-                                        {confirm}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="text-sm text-muted-foreground underline-offset-4 hover:underline"
-                                        on:click=move |_| set_armed.set(false)
-                                    >
-                                        {cancel}
-                                    </button>
-                                </div>
-                            }
-                                .into_any()
-                        } else {
-                            view! {
-                                <button
-                                    type="button"
-                                    class="text-sm text-destructive underline-offset-4 hover:underline"
-                                    on:click=move |_| set_armed.set(true)
-                                >
-                                    {delete}
-                                </button>
-                            }
-                                .into_any()
-                        }
-                    }}
-                </div>
-            </td>
-        </tr>
-        {move || {
-            let locale = form_locale.clone();
-            editing
-                .get()
-                .then(|| {
-                    let fixed = type_label(&form_family, &locale);
-                    view! {
-                        <tr class="border-t border-border bg-muted/20">
-                            <td colspan="6" class="px-3 py-4">
-                                <div class="space-y-3">
-                                    <div class="grid gap-3 sm:grid-cols-2">
-                                        <label class="space-y-1 text-sm">
-                                            <span class="text-muted-foreground">
-                                                {locale.get("nodes.name").to_owned()}
-                                            </span>
-                                            <input
-                                                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                                prop:value=move || name.get()
-                                                on:input=move |ev| set_name.set(event_target_value(&ev))
-                                            />
-                                        </label>
-                                        <label class="space-y-1 text-sm">
-                                            <span class="text-muted-foreground">
-                                                {locale.get("nodes.prefix").to_owned()}
-                                            </span>
-                                            <input
-                                                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                                                prop:value=move || prefix.get()
-                                                on:input=move |ev| set_prefix.set(event_target_value(&ev))
-                                            />
-                                        </label>
-                                    </div>
-                                    // Type is stated, not offered: `PUT` reads the family from the
-                                    // stored node and ignores the body's.
-                                    <p class="text-sm">
-                                        <span class="text-muted-foreground">
-                                            {locale.get("nodes.type").to_owned()}
-                                        </span>
-                                        <span class="ml-2">{fixed}</span>
-                                        <span class="ml-2 text-xs text-muted-foreground">
-                                            {locale.get("nodes.type_locked").to_owned()}
-                                        </span>
-                                    </p>
-                                    {has_api_type
-                                        .then(|| {
-                                            view! {
-                                                <label class="block space-y-1 text-sm sm:max-w-xs">
-                                                    <span class="text-muted-foreground">
-                                                        {locale.get("nodes.api_type").to_owned()}
-                                                    </span>
-                                                    <select
-                                                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                                        prop:value=move || api_type.get()
-                                                        on:change=move |ev| {
-                                                            set_api_type.set(event_target_value(&ev));
-                                                        }
-                                                    >
-                                                        {API_TYPES
-                                                            .into_iter()
-                                                            .map(|value| {
-                                                                view! { <option value=value>{value}</option> }
-                                                            })
-                                                            .collect_view()}
-                                                    </select>
-                                                </label>
-                                            }
-                                        })}
-                                    <label class="block space-y-1 text-sm">
-                                        <span class="text-muted-foreground">
-                                            {locale.get("nodes.base_url").to_owned()}
-                                        </span>
-                                        <input
-                                            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                                            prop:value=move || base_url.get()
-                                            on:input=move |ev| set_base_url.set(event_target_value(&ev))
-                                        />
-                                        <span class="block text-xs text-muted-foreground">
-                                            {locale.get("nodes.base_url_required").to_owned()}
-                                        </span>
-                                    </label>
-                                    <div class="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            class="rounded-md bg-primary px-3 py-2 text-sm font-medium \
-                                                   text-primary-foreground disabled:opacity-50"
-                                            disabled=move || save_state.get().is_saving()
-                                            on:click=move |_| save()
-                                        >
-                                            {locale.get("nodes.save").to_owned()}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="rounded-md border border-border px-3 py-2 text-sm \
-                                                   font-medium transition-colors hover:bg-accent"
-                                            on:click=move |_| set_editing.set(false)
-                                        >
-                                            {locale.get("nodes.cancel").to_owned()}
-                                        </button>
-                                    </div>
-                                </div>
-                            </td>
-                        </tr>
-                    }
-                })
-        }}
-        {move || {
-            save_state
-                .get()
-                .message()
-                .map(|message| {
-                    view! {
-                        <tr>
-                            <td colspan="6" class="px-3 pb-2 text-sm text-destructive">{message}</td>
-                        </tr>
-                    }
-                })
-        }}
+                <DialogDismiss />
+            </DialogHeader>
+            <DialogContent class="space-y-3">
+                <p class="text-sm text-foreground">{row.name.clone()}</p>
+                <Readback value=row.base_url.clone() />
+                {move || {
+                    save_state
+                        .get()
+                        .message()
+                        .map(|message| view! { <ErrorNote message=message /> })
+                }}
+            </DialogContent>
+            <DialogFooter>
+                <Button
+                    label=t!("nodes.cancel")
+                    variant=ButtonVariant::Outline
+                    size=ButtonSize::Sm
+                    on_click=Callback::new(move |()| set_target.set(None))
+                />
+                <Button
+                    label=t!("nodes.delete")
+                    variant=ButtonVariant::Destructive
+                    size=ButtonSize::Sm
+                    disabled=Signal::derive(move || save_state.get().is_saving())
+                    busy=Signal::derive(move || save_state.get().is_saving())
+                    on_click=Callback::new(move |()| remove())
+                />
+            </DialogFooter>
+        </Dialog>
+    }
+}
+
+/// The node's endpoint, shown read-only in a confirmation so the operator can check which one it is.
+#[component]
+fn Readback(value: String) -> impl IntoView {
+    view! {
+        <Mono
+            value=value
+            class="block rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs"
+        />
     }
 }
 #[cfg(test)]

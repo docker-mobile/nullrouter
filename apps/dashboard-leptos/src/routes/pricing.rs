@@ -16,7 +16,13 @@ use leptos::prelude::*;
 
 use crate::api::{Hydrate, Method, Save, encode, load_with, request_detailed, submit_reporting};
 use crate::routes::types::{PriceFields, PriceRow, encode_query, price_rows};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Button, ButtonSize, ButtonVariant, Card, CardContent, CardHeader, CardTitle, Dialog,
+    DialogContent, DialogDescription, DialogDismiss, DialogFooter, DialogHeader, DialogTitle,
+    ErrorNote, Field, Icon, IconName, Input, PageBody, PageHeader, Panel, Table, TableCell,
+    TableEmpty, TableFrame, TableHead, TableHeaderCell, TableRow, button_class,
+};
+use crate::t;
 
 /// The flattened table.
 ///
@@ -88,8 +94,11 @@ fn patch_body(provider: &str, model: &str, fields: &PriceFields) -> Option<Strin
 
 #[component]
 pub fn Pricing() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (rows, set_rows) = signal(Hydrate::<PriceRows>::Loading);
+    // The "price a model that has no row yet" form is a dialog off the page action rather than a
+    // permanent card above the table: it is used once per new model, and a form that is empty 99% of
+    // the time pushed the rates themselves below the fold.
+    let (adding, set_adding) = signal(false);
     let reload = move || {
         set_rows.set(Hydrate::Loading);
         load_with("/api/pricing", set_rows, price_rows);
@@ -97,16 +106,41 @@ pub fn Pricing() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.pricing").to_owned()
-            description=locale.get("pricing.description").to_owned()
-        />
-        <AddOverride reload=reload />
-        <Panel
-            state=rows
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: PriceRows| view! { <PriceTable rows=data reload=reload /> }
-        />
+        <PageHeader title=t!("nav.pricing") description=t!("pricing.description")>
+            <Button
+                label=t!("pricing.add")
+                size=ButtonSize::Sm
+                on_click=Callback::new(move |()| set_adding.set(true))
+            />
+        </PageHeader>
+        <PageBody>
+            <Dialog
+                open=Signal::derive(move || adding.get())
+                on_open_change=Callback::new(move |next| set_adding.set(next))
+            >
+                <DialogHeader>
+                    <div class="min-w-0 space-y-1">
+                        <DialogTitle>{t!("pricing.add")}</DialogTitle>
+                        <DialogDescription>{t!("pricing.add_hint")}</DialogDescription>
+                    </div>
+                    <DialogDismiss label=t!("pricing.cancel") />
+                </DialogHeader>
+                <AddOverride set_adding=set_adding reload=reload />
+            </Dialog>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("pricing.rates")}</CardTitle>
+                </CardHeader>
+                <CardContent class="px-0 pb-0">
+                    <Panel
+                        state=rows
+                        on_retry=Callback::new(move |()| reload())
+                        children=move |data: PriceRows| { view! { <PriceTable rows=data reload=reload /> } }
+                    />
+                </CardContent>
+            </Card>
+        </PageBody>
     }
 }
 
@@ -115,8 +149,10 @@ pub fn Pricing() -> impl IntoView {
 /// The same `PATCH` the row editor uses. Kept separate because a provider and model that are not
 /// listed yet have no row to edit, and pricing one is otherwise impossible from here.
 #[component]
-fn AddOverride(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+fn AddOverride(
+    set_adding: WriteSignal<bool>,
+    reload: impl Fn() + Copy + 'static + Send + Sync,
+) -> impl IntoView {
     let (provider, set_provider) = signal(String::new());
     let (model, set_model) = signal(String::new());
     let (input, set_input) = signal(String::new());
@@ -124,9 +160,9 @@ fn AddOverride(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoVie
     let (save, set_save) = signal(Save::Idle);
 
     // Owned before the closure: `Locale` is not `Copy`, and the view below still needs it.
-    let rate_invalid = StoredValue::new(locale.get("pricing.rate_invalid").to_owned());
-    let nothing_entered = StoredValue::new(locale.get("pricing.nothing_entered").to_owned());
-    let encode_failed = StoredValue::new(locale.get("pricing.encode_failed").to_owned());
+    let rate_invalid = StoredValue::new(t!("pricing.rate_invalid"));
+    let nothing_entered = StoredValue::new(t!("pricing.nothing_entered"));
+    let encode_failed = StoredValue::new(t!("pricing.encode_failed"));
 
     let apply = move || {
         let provider_name = provider.get().trim().to_owned();
@@ -157,49 +193,64 @@ fn AddOverride(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoVie
                 set_model.set(String::new());
                 set_input.set(String::new());
                 set_output.set(String::new());
+                set_adding.set(false);
                 reload();
             },
         );
     };
 
+    let close = move || set_adding.set(false);
+
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4 mb-4">
-            <p class="text-sm text-muted-foreground">{locale.get("pricing.add_hint").to_owned()}</p>
-            <div class="grid gap-3 sm:grid-cols-4">
-                <TextField
-                    label=locale.get("pricing.col_provider").to_owned()
-                    value=provider
-                    set=set_provider
-                />
-                <TextField
-                    label=locale.get("pricing.col_model").to_owned()
-                    value=model
-                    set=set_model
-                />
-                <RateField
-                    label=locale.get("pricing.col_input").to_owned()
-                    value=input
-                    set=set_input
-                />
-                <RateField
-                    label=locale.get("pricing.col_output").to_owned()
-                    value=output
-                    set=set_output
-                />
+        <DialogContent class="space-y-3">
+            <div class="grid gap-3 sm:grid-cols-2">
+                <Field label=t!("pricing.col_provider") required=true>
+                    <Input
+                        value=Signal::derive(move || provider.get())
+                        on_input=Callback::new(move |value| set_provider.set(value))
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("pricing.col_model") required=true>
+                    <Input
+                        value=Signal::derive(move || model.get())
+                        on_input=Callback::new(move |value| set_model.set(value))
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("pricing.col_input")>
+                    <Input
+                        value=Signal::derive(move || input.get())
+                        on_input=Callback::new(move |value| set_input.set(value))
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("pricing.col_output")>
+                    <Input
+                        value=Signal::derive(move || output.get())
+                        on_input=Callback::new(move |value| set_output.set(value))
+                        class="font-mono"
+                    />
+                </Field>
             </div>
-            <button
-                type="button"
-                class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled=move || {
+            <SaveMessage save=save />
+        </DialogContent>
+        <DialogFooter>
+            <Button
+                label=t!("pricing.cancel")
+                variant=ButtonVariant::Outline
+                on_click=Callback::new(move |()| close())
+            />
+            <Button
+                label=t!("pricing.add")
+                disabled=Signal::derive(move || {
                     save.get().is_saving() || provider.get().trim().is_empty()
                         || model.get().trim().is_empty()
-                }
-                on:click=move |_| apply()
-            >
-                {locale.get("pricing.add").to_owned()}
-            </button>
-            <SaveMessage save=save />
-        </section>
+                })
+                busy=Signal::derive(move || save.get().is_saving())
+                on_click=Callback::new(move |()| apply())
+            />
+        </DialogFooter>
     }
 }
 
@@ -210,45 +261,8 @@ fn SaveMessage(save: ReadSignal<Save>) -> impl IntoView {
         {move || {
             save.get()
                 .message()
-                .map(|message| {
-                    view! { <p class="text-sm text-destructive" role="alert">{message}</p> }
-                })
+                .map(|message| view! { <ErrorNote message=message /> })
         }}
-    }
-}
-
-#[component]
-fn TextField(label: String, value: ReadSignal<String>, set: WriteSignal<String>) -> impl IntoView {
-    view! {
-        <label class="space-y-1 text-sm">
-            <span class="text-muted-foreground">{label}</span>
-            <input
-                type="text"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                prop:value=move || value.get()
-                on:input=move |ev| set.set(event_target_value(&ev))
-            />
-        </label>
-    }
-}
-
-/// A rate input.
-///
-/// `inputmode="decimal"` rather than `type="number"`, whose spinners and browser-specific
-/// validation get in the way of a field that is legitimately blank most of the time.
-#[component]
-fn RateField(label: String, value: ReadSignal<String>, set: WriteSignal<String>) -> impl IntoView {
-    view! {
-        <label class="space-y-1 text-sm">
-            <span class="text-muted-foreground">{label}</span>
-            <input
-                type="text"
-                inputmode="decimal"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                prop:value=move || value.get()
-                on:input=move |ev| set.set(event_target_value(&ev))
-            />
-        </label>
     }
 }
 
@@ -257,50 +271,49 @@ fn PriceTable(
     rows: Vec<PriceRow>,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("pricing.empty").to_owned()}</p>
+            <TableFrame class="rounded-none border-0">
+                <Table>
+                    <TableEmpty message=t!("pricing.empty") columns=8 />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame class="rounded-none border-0">
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pricing.col_provider").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pricing.col_model").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pricing.col_input").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pricing.col_output").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pricing.col_cached").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pricing.col_reasoning").to_owned()}
-                        </th>
-                        <th class="text-right font-medium px-3 py-2">
-                            {locale.get("pricing.col_cache_creation").to_owned()}
-                        </th>
-                        <th class="px-3 py-2"></th>
+                        <TableHeaderCell>{t!("pricing.col_provider")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("pricing.col_model")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">
+                            {t!("pricing.col_input")}
+                        </TableHeaderCell>
+                        <TableHeaderCell class="text-right">
+                            {t!("pricing.col_output")}
+                        </TableHeaderCell>
+                        <TableHeaderCell class="text-right">
+                            {t!("pricing.col_cached")}
+                        </TableHeaderCell>
+                        <TableHeaderCell class="text-right">
+                            {t!("pricing.col_reasoning")}
+                        </TableHeaderCell>
+                        <TableHeaderCell class="text-right">
+                            {t!("pricing.col_cache_creation")}
+                        </TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("table.actions")}</TableHeaderCell>
                     </tr>
-                </thead>
+                </TableHead>
                 <tbody>
                     {rows
                         .into_iter()
                         .map(|row| view! { <PriceRowView row=row reload=reload /> })
                         .collect_view()}
                 </tbody>
-            </table>
-        </div>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
@@ -308,7 +321,6 @@ fn PriceTable(
 /// One priced model, with an inline editor and a reset.
 #[component]
 fn PriceRowView(row: PriceRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (editing, set_editing) = signal(false);
     let (save, set_save) = signal(Save::Idle);
 
@@ -321,10 +333,8 @@ fn PriceRowView(row: PriceRow, reload: impl Fn() + Copy + 'static + Send + Sync)
     let provider = StoredValue::new(row.provider.clone());
     let model = StoredValue::new(row.model.clone());
     let stored = StoredValue::new(row.fields);
-    let rate_invalid = StoredValue::new(locale.get("pricing.rate_invalid").to_owned());
-    let encode_failed = StoredValue::new(locale.get("pricing.encode_failed").to_owned());
-    let label_edit = locale.get("pricing.edit").to_owned();
-    let label_cancel = locale.get("pricing.cancel").to_owned();
+    let rate_invalid = StoredValue::new(t!("pricing.rate_invalid"));
+    let encode_failed = StoredValue::new(t!("pricing.encode_failed"));
 
     let apply = move || {
         if save.get().is_saving() {
@@ -376,50 +386,54 @@ fn PriceRowView(row: PriceRow, reload: impl Fn() + Copy + 'static + Send + Sync)
         );
     };
 
+    let reset_hint = t!("pricing.reset_hint");
+
     view! {
-        <tr class="border-t border-border align-top">
-            <td class="px-3 py-2 text-muted-foreground">{row.provider}</td>
-            <td class="px-3 py-2 font-mono text-xs">{row.model}</td>
+        <TableRow hoverable=false class="align-top">
+            <TableCell class="text-muted-foreground">{row.provider}</TableCell>
+            <TableCell class="font-mono text-xs">{row.model}</TableCell>
             {move || {
                 if editing.get() {
                     view! {
-                        <td class="px-3 py-2"><RateCell value=input set=set_input /></td>
-                        <td class="px-3 py-2"><RateCell value=output set=set_output /></td>
-                        <td class="px-3 py-2"><RateCell value=cached set=set_cached /></td>
-                        <td class="px-3 py-2"><RateCell value=reasoning set=set_reasoning /></td>
-                        <td class="px-3 py-2">
-                            <RateCell value=cache_creation set=set_cache_creation />
-                        </td>
+                        <RateCell value=input set=set_input />
+                        <RateCell value=output set=set_output />
+                        <RateCell value=cached set=set_cached />
+                        <RateCell value=reasoning set=set_reasoning />
+                        <RateCell value=cache_creation set=set_cache_creation />
                     }
                         .into_any()
                 } else {
                     let fields = stored.get_value();
                     view! {
-                        <td class="px-3 py-2 text-right font-mono text-xs">
-                            {rate_label(fields.input)}
-                        </td>
-                        <td class="px-3 py-2 text-right font-mono text-xs">
-                            {rate_label(fields.output)}
-                        </td>
-                        <td class="px-3 py-2 text-right font-mono text-xs">
-                            {rate_label(fields.cached)}
-                        </td>
-                        <td class="px-3 py-2 text-right font-mono text-xs">
-                            {rate_label(fields.reasoning)}
-                        </td>
-                        <td class="px-3 py-2 text-right font-mono text-xs">
-                            {rate_label(fields.cache_creation)}
-                        </td>
+                        <RateCellText value=rate_label(fields.input) />
+                        <RateCellText value=rate_label(fields.output) />
+                        <RateCellText value=rate_label(fields.cached) />
+                        <RateCellText value=rate_label(fields.reasoning) />
+                        <RateCellText value=rate_label(fields.cache_creation) />
                     }
                         .into_any()
                 }
             }}
-            <td class="px-3 py-2 text-right whitespace-nowrap">
-                <div class="flex items-center justify-end gap-3">
-                    <SaveButton editing=editing save=save on_click=Callback::new(move |()| apply()) />
+            <TableCell class="whitespace-nowrap text-right">
+                <div class="flex items-center justify-end gap-1">
+                    {move || {
+                        editing
+                            .get()
+                            .then(|| {
+                                view! {
+                                    <Button
+                                        label=t!("pricing.save")
+                                        size=ButtonSize::Sm
+                                        disabled=Signal::derive(move || save.get().is_saving())
+                                        busy=Signal::derive(move || save.get().is_saving())
+                                        on_click=Callback::new(move |()| apply())
+                                    />
+                                }
+                            })
+                    }}
                     <button
                         type="button"
-                        class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
+                        class=button_class(ButtonVariant::Ghost, ButtonSize::Sm)
                         disabled=move || save.get().is_saving()
                         on:click=move |_| {
                             // Reopening restores the stored rates, discarding an abandoned edit and
@@ -437,75 +451,57 @@ fn PriceRowView(row: PriceRow, reload: impl Fn() + Copy + 'static + Send + Sync)
                         }
                     >
                         {move || {
-                            if editing.get() { label_cancel.clone() } else { label_edit.clone() }
+                            if editing.get() {
+                                t!("pricing.cancel")
+                            } else {
+                                t!("pricing.edit")
+                            }
                         }}
                     </button>
                     <button
                         type="button"
-                        class="text-sm text-muted-foreground underline-offset-4 hover:underline disabled:opacity-50"
+                        class=button_class(ButtonVariant::Ghost, ButtonSize::Sm)
                         disabled=move || save.get().is_saving()
                         on:click=move |_| reset()
-                        title=locale.get("pricing.reset_hint").to_owned()
+                        title=reset_hint.clone()
                     >
-                        {locale.get("pricing.reset").to_owned()}
+                        <Icon name=IconName::Refresh class="size-3.5" />
+                        {t!("pricing.reset")}
                     </button>
                 </div>
                 {move || {
                     save.get()
                         .message()
                         .map(|message| {
-                            view! {
-                                <p class="mt-1 text-xs text-destructive whitespace-normal text-right">
-                                    {message}
-                                </p>
-                            }
+                            view! { <ErrorNote message=message class="mt-1 justify-end text-xs" /> }
                         })
                 }}
-            </td>
-        </tr>
+            </TableCell>
+        </TableRow>
     }
 }
 
-/// Shown only while the row is open for editing.
+/// One rate as a table cell, in the read state.
 #[component]
-fn SaveButton(
-    editing: ReadSignal<bool>,
-    save: ReadSignal<Save>,
-    on_click: Callback<()>,
-) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let label = locale.get("pricing.save").to_owned();
-    view! {
-        {move || {
-            let label = label.clone();
-            editing
-                .get()
-                .then(|| {
-                    view! {
-                        <button
-                            type="button"
-                            class="text-sm font-medium underline-offset-4 hover:underline disabled:opacity-50"
-                            disabled=move || save.get().is_saving()
-                            on:click=move |_| on_click.run(())
-                        >
-                            {label}
-                        </button>
-                    }
-                })
-        }}
-    }
+fn RateCellText(#[prop(into)] value: String) -> impl IntoView {
+    view! { <TableCell class="text-right font-mono text-xs">{value}</TableCell> }
 }
 
+/// One rate as a table cell, in the edit state.
+///
+/// `inputmode="decimal"` rather than `type="number"`, whose spinners and browser-specific
+/// validation get in the way of a field that is legitimately blank most of the time.
 #[component]
 fn RateCell(value: ReadSignal<String>, set: WriteSignal<String>) -> impl IntoView {
     view! {
-        <input
-            type="text"
-            inputmode="decimal"
-            class="w-20 rounded-md border border-input bg-background px-2 py-1 text-right text-xs font-mono"
-            prop:value=move || value.get()
-            on:input=move |ev| set.set(event_target_value(&ev))
-        />
+        <TableCell class="text-right">
+            <Input
+                value=Signal::derive(move || value.get())
+                on_input=Callback::new(move |next| set.set(next))
+                aria_label=t!("pricing.rate")
+                class="h-8 w-24 text-right font-mono text-xs"
+            />
+        </TableCell>
     }
 }
 

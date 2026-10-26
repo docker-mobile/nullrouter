@@ -74,7 +74,10 @@ async fn login_shell_mounts_the_wasm_bundle() -> TestResult {
     assert!(login.contains(r#"await init("/pkg/dashboard_leptos_bg.wasm");"#));
     assert!(login.contains(r#"<link rel="modulepreload" href="/pkg/dashboard_leptos.js">"#));
     assert!(login.contains("<title>nullrouter Login</title>"));
-    assert!(login.contains(r#"<link rel="stylesheet" href="/assets/dashboard.css">"#));
+    // The stylesheet is linked once, directly. `dashboard.css` exists and is still served, but it is an
+    // `@import` of `app.css`, so linking it added a blocking round trip after the first stylesheet had
+    // already been parsed.
+    assert!(login.contains(r#"<link rel="stylesheet" href="/assets/dashboard/app.css">"#));
     Ok(())
 }
 

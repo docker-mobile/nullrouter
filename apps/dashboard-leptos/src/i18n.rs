@@ -18,16 +18,37 @@
 
 use leptos::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Which locale the dashboard resolved to.
+///
+/// Render one value for a `t!` placeholder.
+///
+/// A free function rather than an `AsRef<str>` call inside the macro: `($value).as_ref()` leaves the trait
+/// unconstrained, so `as_ref()` on a `String` is ambiguous between `AsRef<str>` and `AsRef<[u8]>` and the
+/// macro fails with "type annotations needed" at every call site rather than here.
+pub fn placeholder_text<T>(value: T) -> String
+where
+    T: AsRef<str>,
+{
+    value.as_ref().to_owned()
+}
+
+/// A cheap-cloning message handle.
+///
+/// The table is behind an `Arc`, so a clone is a refcount bump rather than a copy of 600 strings. That
+/// matters because every `view!` macro that reads a message inside a closure has to own the locale, and
+/// the previous plain `HashMap` made that a deep clone per closure.
+///
+/// With an `Arc` those contortions go away: capture it, clone it, read from it anywhere. `Arc` rather
+/// than `Rc` because the locale goes into Leptos context, and context values are required to be
+/// `Send + Sync`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-// Cheap to clone: the table is small and every nested view! closure that needs
-// a message has to own a copy. Copy would be nicer, but HashMap is not Copy.
 pub struct Locale {
     /// IETF language tag, e.g. `"en-US"`.
     pub tag: String,
-    /// Message table, keyed by `"section.key"`.
-    messages: HashMap<String, String>,
+    /// Message table, keyed by `"section.key"`. Shared between clones.
+    messages: Arc<HashMap<String, String>>,
 }
 
 impl Locale {
@@ -58,7 +79,7 @@ impl Locale {
     pub fn embedded() -> Self {
         Self::parse("en-US".to_owned(), EMBEDDED_EN_US).unwrap_or_else(|_| Self {
             tag: "en-US".to_owned(),
-            messages: HashMap::new(),
+            messages: Arc::new(HashMap::new()),
         })
     }
 
@@ -68,7 +89,10 @@ impl Locale {
     fn parse(tag: String, json: &str) -> Result<Self, String> {
         let messages: HashMap<String, String> =
             serde_json::from_str(json).map_err(|error| format!("locale parse failed: {error}"))?;
-        Ok(Self { tag, messages })
+        Ok(Self {
+            tag,
+            messages: Arc::new(messages),
+        })
     }
 }
 
@@ -186,6 +210,77 @@ pub fn resolve_tag(requested: &str) -> &'static str {
     }
 
     "en-US"
+}
+
+/// Look a message up at the point of render.
+///
+/// # Why this exists
+///
+/// `view!` in Leptos 0.8 moves every variable it references into the closures it generates. A non-`Copy`
+/// value like a `String` or a `Locale` read inside a view is therefore *consumed* by it: a second use in
+/// the same tree, or a use after the tree, is a compile error. The previous form of every call site was
+///
+/// ```text
+/// let locale = use_locale();
+/// let heading = locale.get("nav.keys").to_owned();   // hoisted, because …
+/// view! { <PageHeader title=heading /> … }            // … this moves `locale`
+/// ```
+///
+/// which means every page carried a block of `let` bindings whose only purpose was to satisfy the macro.
+/// On a page with twenty labels that is twenty lines of ceremony, and a page that adds a label later has to
+/// remember to add the binding or get a confusing error about a value moved into a closure.
+///
+/// `t!("nav.keys")` re-reads the locale from context where it is used, so it captures nothing and can be
+/// used as many times as a view needs. The cost is a context lookup and a refcount bump per call, against a
+/// `HashMap` lookup and a `String` clone for the message itself -- the same work the hoisted form did, once.
+///
+/// A key must be a literal: the `i18n-gen` tool finds keys by scanning the source for them, and a key built
+/// at runtime would be invisible to it and silently untranslated.
+#[macro_export]
+macro_rules! t {
+    // A plain lookup. The key has to be a literal here because [`Locale::get`] borrows from the table
+    // and the caller needs an owned copy.
+    ($key:literal) => {
+        $crate::i18n::use_locale().get($key).to_owned()
+    };
+    // Placeholder substitution, with the placeholder written as a bare name:
+    // `t!("users.delete_confirm", name => account.username)`.
+    //
+    // `stringify!` is applied here rather than delegating, because a `macro_rules!` fragment cannot be
+    // produced by an expression in the arguments of a forwarding call.
+    ($key:literal, $($name:ident => $value:expr),+ $(,)?) => {{
+        let owned: ::std::vec::Vec<(&str, ::std::string::String)> = ::std::vec![
+            $((
+                ::std::stringify!($name),
+                $crate::i18n::placeholder_text($value),
+            )),+
+        ];
+        let borrowed: ::std::vec::Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect();
+        $crate::i18n::use_locale().fmt($key, &borrowed)
+    }};
+    // The same thing with the placeholder written as a string:
+    // `t!("pxpipe.event_count", "count" => events.to_string())`.
+    //
+    // Both spellings are accepted because both read naturally and neither is wrong, and forcing one would
+    // mean editing every call site to a preference rather than to a rule. The string form also reaches
+    // placeholders whose name is not a valid identifier.
+    //
+    // The value is widened through `AsRef<str>` rather than required to be a `&str`, because it is almost
+    // always a `String` field that the call site cannot easily borrow across a `view!` closure. The *key*
+    // stays a literal, which is what keeps the i18n key scanner able to find it.
+    ($key:literal, $($name:literal => $value:expr),+ $(,)?) => {{
+        let owned: ::std::vec::Vec<(&str, ::std::string::String)> = ::std::vec![
+            $(($name, $crate::i18n::placeholder_text($value))),+
+        ];
+        let borrowed: ::std::vec::Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect();
+        $crate::i18n::use_locale().fmt($key, &borrowed)
+    }};
 }
 
 /// Put the compiled-in English catalogue into context, synchronously.
@@ -414,7 +509,7 @@ mod tests {
     fn missing_keys_fall_back_to_themselves() {
         let locale = Locale {
             tag: "en-US".to_owned(),
-            messages: [].into(),
+            messages: std::sync::Arc::new([].into()),
         };
         assert_eq!(locale.get("missing.key"), "missing.key");
     }
@@ -423,7 +518,7 @@ mod tests {
     fn present_keys_return_their_messages() {
         let locale = Locale {
             tag: "en-US".to_owned(),
-            messages: [("app.title".to_owned(), "Router".to_owned())].into(),
+            messages: std::sync::Arc::new([("app.title".to_owned(), "Router".to_owned())].into()),
         };
         assert_eq!(locale.get("app.title"), "Router");
     }
@@ -432,7 +527,9 @@ mod tests {
     fn fmt_replaces_placeholders() {
         let locale = Locale {
             tag: "en-US".to_owned(),
-            messages: [("greeting".to_owned(), "Hello, {name}!".to_owned())].into(),
+            messages: std::sync::Arc::new(
+                [("greeting".to_owned(), "Hello, {name}!".to_owned())].into(),
+            ),
         };
         assert_eq!(
             locale.fmt("greeting", &[("name", "Alice")]),
@@ -444,11 +541,13 @@ mod tests {
     fn fmt_handles_multiple_replacements() {
         let locale = Locale {
             tag: "en-US".to_owned(),
-            messages: [(
-                "status".to_owned(),
-                "{count} items in {container}".to_owned(),
-            )]
-            .into(),
+            messages: std::sync::Arc::new(
+                [(
+                    "status".to_owned(),
+                    "{count} items in {container}".to_owned(),
+                )]
+                .into(),
+            ),
         };
         assert_eq!(
             locale.fmt("status", &[("count", "5"), ("container", "queue")]),
@@ -460,7 +559,7 @@ mod tests {
     fn missing_keys_in_fmt_still_fall_back_to_the_key() {
         let locale = Locale {
             tag: "en-US".to_owned(),
-            messages: [].into(),
+            messages: std::sync::Arc::new([].into()),
         };
         assert_eq!(locale.fmt("missing.key", &[("x", "y")]), "missing.key");
     }

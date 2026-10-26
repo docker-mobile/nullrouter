@@ -26,7 +26,13 @@ use serde::Serialize;
 
 use crate::api::{Hydrate, Method, Save, decode, encode, load, request_detailed, submit_reporting};
 use crate::routes::types::{ProviderRow, ProvidersList, display_name, encode_query};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Alert, AlertDescription, AlertVariant, Badge, BadgeVariant, Button, ButtonSize, ButtonVariant,
+    Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorNote, Field, Icon, IconName, Input,
+    PageBody, PageHeader, Panel, Select, StatusDot, StatusTone, Table, TableCell, TableEmpty,
+    TableFrame, TableHead, TableHeaderCell, TableRow, button_class,
+};
+use crate::t;
 
 /// Categories in the order they are shown. Anything the registry reports outside this list falls
 /// under "Other" rather than being dropped, so a new upstream category cannot hide a provider.
@@ -37,7 +43,6 @@ const KEYLESS_PROVIDER: &str = "ollama-local";
 
 #[component]
 pub fn Providers() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (list, set_list) = signal(Hydrate::<ProvidersList>::Loading);
     let (query, set_query) = signal(String::new());
     let reload = move || {
@@ -47,33 +52,33 @@ pub fn Providers() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.providers").to_owned()
-            description=locale.get("providers.description").to_owned()
-        />
-        <Panel
-            state=list
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: ProvidersList| {
-                view! { <Catalogue connections=data.connections query=query /> }
-            }
-        />
-        <div class="mt-4">
-            <input
-                type="search"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                prop:value=move || query.get()
-                on:input=move |ev| set_query.set(event_target_value(&ev))
-                placeholder=locale.get("providers.search_placeholder").to_owned()
+        <PageHeader title=t!("nav.providers") description=t!("providers.description") />
+        <PageBody>
+            // The filter sits above the panel rather than inside it, so typing does not re-mount the
+            // catalogue and the caret never jumps while the list re-renders under it.
+            <div class="max-w-sm">
+                <Input
+                    value=Signal::derive(move || query.get())
+                    on_input=Callback::new(move |value| set_query.set(value))
+                    input_type="search"
+                    placeholder=t!("providers.search_placeholder")
+                    aria_label=t!("providers.search_placeholder")
+                />
+            </div>
+            <Panel
+                state=list
+                on_retry=Callback::new(move |()| reload())
+                children=move |data: ProvidersList| {
+                    view! { <Catalogue connections=data.connections query=query /> }
+                }
             />
-        </div>
+        </PageBody>
     }
 }
 
 /// Every provider, grouped by category, with a connection count on the ones that have any.
 #[component]
 fn Catalogue(connections: Vec<ProviderRow>, query: ReadSignal<String>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     // Counted once rather than per tile: the list is short but the grid is 117 wide.
     let counts = StoredValue::new(connection_counts(&connections));
     // Providers with a stored connection but no registry entry still get a tile. Otherwise a custom
@@ -90,47 +95,56 @@ fn Catalogue(connections: Vec<ProviderRow>, query: ReadSignal<String>) -> impl I
         ids
     };
     let extra = StoredValue::new(extra);
-    let empty_label = locale.get("providers.search_none").to_owned();
 
     view! {
-        <div class="space-y-6">
-            {move || {
-                let needle = query.get().trim().to_lowercase();
-                let mut sections: Vec<(String, Vec<Tile>)> = Vec::new();
-                for category in CATEGORY_ORDER.iter().chain(std::iter::once(&"other")) {
-                    let tiles = tiles_for(category, &needle, &counts.get_value(), &extra.get_value());
-                    if !tiles.is_empty() {
-                        sections.push((category_label(category), tiles));
-                    }
+        {move || {
+            let needle = query.get().trim().to_lowercase();
+            let mut sections: Vec<(String, Vec<Tile>)> = Vec::new();
+            for category in CATEGORY_ORDER.iter().chain(std::iter::once(&"other")) {
+                let tiles = tiles_for(category, &needle, &counts.get_value(), &extra.get_value());
+                if !tiles.is_empty() {
+                    sections.push((category_label(category), tiles));
                 }
-                if sections.is_empty() {
-                    let label = empty_label.clone();
-                    return view! {
-                        <p class="text-sm text-muted-foreground">{label}</p>
-                    }
-                        .into_any();
+            }
+            if sections.is_empty() {
+                return view! {
+                    <Card>
+                        <EmptyState
+                            title=t!("providers.search_none")
+                            icon=IconName::Search
+                        />
+                    </Card>
                 }
-                view! {
+                    .into_any();
+            }
+            view! {
+                <div class="space-y-4">
                     {sections
                         .into_iter()
                         .map(|(label, tiles)| {
+                            let total = tiles.len().to_string();
                             view! {
-                                <section class="space-y-2">
-                                    <h2 class="text-sm font-medium text-muted-foreground">{label}</h2>
-                                    <ul class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                        {tiles
-                                            .into_iter()
-                                            .map(|tile| view! { <ProviderTile tile=tile /> })
-                                            .collect_view()}
-                                    </ul>
-                                </section>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>{label}</CardTitle>
+                                        <Badge variant=BadgeVariant::Secondary>{total}</Badge>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul class="grid gap-x-3 gap-y-0.5 sm:grid-cols-2 2xl:grid-cols-3">
+                                            {tiles
+                                                .into_iter()
+                                                .map(|tile| view! { <ProviderTile tile=tile /> })
+                                                .collect_view()}
+                                        </ul>
+                                    </CardContent>
+                                </Card>
                             }
                         })
                         .collect_view()}
-                }
-                    .into_any()
-            }}
-        </div>
+                </div>
+            }
+                .into_any()
+        }}
     }
 }
 
@@ -194,46 +208,42 @@ fn tiles_for(
 }
 
 fn category_label(category: &str) -> String {
-    let locale = crate::i18n::use_locale();
-    // Literal keys rather than a lookup table: `i18n-gen` finds keys by scanning for `get("`, so a
-    // key reaching the call through a variable never lands in the locale files.
+    // Literal keys rather than a lookup table: `i18n-gen` finds keys by scanning the source for
+    // `t!("`, so a key reaching the macro through a variable never lands in the locale files.
     match category {
-        "apikey" => locale.get("providers.category_apikey").to_owned(),
-        "oauth" => locale.get("providers.category_oauth").to_owned(),
-        "freeTier" => locale.get("providers.category_freeTier").to_owned(),
-        "free" => locale.get("providers.category_free").to_owned(),
-        "webCookie" => locale.get("providers.category_webCookie").to_owned(),
-        _ => locale.get("providers.category_other").to_owned(),
+        "apikey" => t!("providers.category_apikey"),
+        "oauth" => t!("providers.category_oauth"),
+        "freeTier" => t!("providers.category_freeTier"),
+        "free" => t!("providers.category_free"),
+        "webCookie" => t!("providers.category_webCookie"),
+        _ => t!("providers.category_other"),
     }
 }
 
 #[component]
 fn ProviderTile(tile: Tile) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let href = format!("/dashboard/providers/{}", tile.id);
     let count = tile.connections;
     let badge = (count > 0).then(|| {
         let value = count.to_string();
-        locale.fmt("providers.connections_count", &[("count", &value)])
+        crate::i18n::use_locale().fmt("providers.connections_count", &[("count", &value)])
     });
     view! {
-        <li>
+        <li class="min-w-0">
             <a
                 href=href
-                class="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                class="group flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm \
+                       outline-none transition-colors hover:bg-accent \
+                       focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-                <span class="min-w-0">
-                    <span class="block truncate">{tile.name}</span>
-                    <code class="block truncate text-xs text-muted-foreground">{tile.id}</code>
-                </span>
+                <span class="min-w-0 flex-1 truncate">{tile.name}</span>
                 {badge
                     .map(|label| {
-                        view! {
-                            <span class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                                {label}
-                            </span>
-                        }
+                        view! { <Badge variant=BadgeVariant::Success>{label}</Badge> }
                     })}
+                <code class="shrink-0 truncate font-mono text-[0.6875rem] text-muted-foreground">
+                    {tile.id}
+                </code>
             </a>
         </li>
     }
@@ -287,7 +297,6 @@ struct ProbeOutcome {
 #[component]
 pub fn Provider() -> impl IntoView {
     let params = use_params_map();
-    let locale = crate::i18n::use_locale();
     let (list, set_list) = signal(Hydrate::<ProvidersList>::Loading);
     let reload = move || {
         set_list.set(Hydrate::Loading);
@@ -304,52 +313,57 @@ pub fn Provider() -> impl IntoView {
             let id = provider_id();
             let entry = registry::entry(&id);
             let title = entry.map_or_else(|| id.clone(), display_name);
-            let back = locale.get("providers.back").to_owned();
-            let description = locale.get("providers.detail_description").to_owned();
-            let unknown_note = entry
-                .is_none()
-                .then(|| locale.get("providers.unknown_provider").to_owned());
+            let unknown = entry.is_none();
             let for_form = id.clone();
             let for_list = id.clone();
             view! {
-                <a
-                    href="/dashboard/providers"
-                    class="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
-                >
-                    "← "
-                    {back}
-                </a>
-                <PageHeader title=title description=description />
-                {unknown_note
-                    .map(|note| {
-                        view! {
-                            <p class="mb-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                                {note}
-                            </p>
-                        }
-                    })}
-                <RegistryFacts id=id.clone() />
-                <AddConnection provider=for_form reload=reload />
-                <section class="mt-4 space-y-2">
-                    <h2 class="text-sm font-medium text-muted-foreground">
-                        {locale.get("providers.connections").to_owned()}
-                    </h2>
-                    <Panel
-                        state=list
-                        on_retry=Callback::new(move |()| reload())
-                        children={
-                            let provider = for_list;
-                            move |data: ProvidersList| {
-                                let rows: Vec<ProviderRow> = data
-                                    .connections
-                                    .into_iter()
-                                    .filter(|row| row.provider == provider)
-                                    .collect();
-                                view! { <ConnectionTable rows=rows reload=reload /> }
+                <PageHeader title=title description=t!("providers.detail_description")>
+                    // The way back is a page action rather than a stray link above the heading: the
+                    // heading is the first thing on the page, as it is on every other route.
+                    <a
+                        href="/dashboard/providers"
+                        class=button_class(ButtonVariant::Outline, ButtonSize::Sm)
+                    >
+                        <Icon name=IconName::ChevronRight class="size-3.5 rotate-180" />
+                        {t!("providers.back")}
+                    </a>
+                </PageHeader>
+                <PageBody>
+                    {unknown
+                        .then(|| {
+                            view! {
+                                <Alert variant=AlertVariant::Muted>
+                                    <AlertDescription>
+                                        {t!("providers.unknown_provider")}
+                                    </AlertDescription>
+                                </Alert>
                             }
-                        }
-                    />
-                </section>
+                        })}
+                    <RegistryFacts id=id.clone() />
+                    <AddConnection provider=for_form reload=reload />
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>{t!("providers.connections")}</CardTitle>
+                        </CardHeader>
+                        <CardContent class="px-0 pb-0">
+                            <Panel
+                                state=list
+                                on_retry=Callback::new(move |()| reload())
+                                children={
+                                    let provider = for_list;
+                                    move |data: ProvidersList| {
+                                        let rows: Vec<ProviderRow> = data
+                                            .connections
+                                            .into_iter()
+                                            .filter(|row| row.provider == provider)
+                                            .collect();
+                                        view! { <ConnectionTable rows=rows reload=reload /> }
+                                    }
+                                }
+                            />
+                        </CardContent>
+                    </Card>
+                </PageBody>
             }
         }}
     }
@@ -361,7 +375,6 @@ pub fn Provider() -> impl IntoView {
 /// the endpoint the runtime will call, the header the key goes in, and how many models are known.
 #[component]
 fn RegistryFacts(id: String) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let Some(entry) = registry::entry(&id) else {
         return view! { <div></div> }.into_any();
     };
@@ -382,66 +395,74 @@ fn RegistryFacts(id: String) -> impl IntoView {
     let models = entry.models.len();
     let models_label = (models > 0).then(|| {
         let count = models.to_string();
-        locale.fmt("providers.models_known", &[("count", &count)])
+        crate::i18n::use_locale().fmt("providers.models_known", &[("count", &count)])
     });
 
     view! {
-        <dl class="mb-4 grid gap-3 rounded-lg border border-border bg-card p-4 text-sm sm:grid-cols-2">
-            {endpoint
-                .map(|url| {
-                    view! {
-                        <div class="min-w-0 space-y-0.5">
-                            <dt class="text-xs text-muted-foreground">
-                                {locale.get("providers.docs_endpoint").to_owned()}
-                            </dt>
-                            <dd class="truncate font-mono text-xs">{url}</dd>
-                        </div>
-                    }
-                })}
-            {header
-                .map(|name| {
-                    view! {
-                        <div class="min-w-0 space-y-0.5">
-                            <dt class="text-xs text-muted-foreground">
-                                {locale.get("providers.auth_header").to_owned()}
-                            </dt>
-                            <dd class="truncate font-mono text-xs">{name}</dd>
-                        </div>
-                    }
-                })}
-            {models_label
-                .map(|label| {
-                    view! {
-                        <div class="space-y-0.5">
-                            <dt class="text-xs text-muted-foreground">
-                                {locale.get("providers.category_other").to_owned()}
-                            </dt>
-                            <dd>{label}</dd>
-                        </div>
-                    }
-                })}
-            {website
-                .map(|url| {
-                    let href = url.clone();
-                    view! {
-                        <div class="min-w-0 space-y-0.5">
-                            <dt class="text-xs text-muted-foreground">
-                                {locale.get("providers.website").to_owned()}
-                            </dt>
-                            <dd class="truncate">
-                                <a
-                                    href=href
-                                    target="_blank"
-                                    rel="noreferrer noopener"
-                                    class="text-xs underline-offset-4 hover:underline"
-                                >
-                                    {url}
-                                </a>
-                            </dd>
-                        </div>
-                    }
-                })}
-        </dl>
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("providers.registry")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {endpoint
+                        .map(|url| {
+                            view! {
+                                <div class="min-w-0 space-y-0.5">
+                                    <dt class="text-xs text-muted-foreground">
+                                        {t!("providers.docs_endpoint")}
+                                    </dt>
+                                    <dd class="truncate font-mono text-xs">{url}</dd>
+                                </div>
+                            }
+                        })}
+                    {header
+                        .map(|name| {
+                            view! {
+                                <div class="min-w-0 space-y-0.5">
+                                    <dt class="text-xs text-muted-foreground">
+                                        {t!("providers.auth_header")}
+                                    </dt>
+                                    <dd class="truncate font-mono text-xs">{name}</dd>
+                                </div>
+                            }
+                        })}
+                    {models_label
+                        .map(|label| {
+                            view! {
+                                <div class="min-w-0 space-y-0.5">
+                                    <dt class="text-xs text-muted-foreground">
+                                        {t!("providers.models")}
+                                    </dt>
+                                    <dd class="truncate text-sm">{label}</dd>
+                                </div>
+                            }
+                        })}
+                    {website
+                        .map(|url| {
+                            let href = url.clone();
+                            view! {
+                                <div class="min-w-0 space-y-0.5">
+                                    <dt class="text-xs text-muted-foreground">
+                                        {t!("providers.website")}
+                                    </dt>
+                                    <dd class="truncate">
+                                        <a
+                                            href=href
+                                            target="_blank"
+                                            rel="noreferrer noopener"
+                                            class="inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+                                        >
+                                            {url}
+                                            <Icon name=IconName::ExternalLink class="size-3" />
+                                        </a>
+                                    </dd>
+                                </div>
+                            }
+                        })}
+                </dl>
+            </CardContent>
+        </Card>
     }
     .into_any()
 }
@@ -452,7 +473,6 @@ fn AddConnection(
     provider: String,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (name, set_name) = signal(String::new());
     let (key, set_key) = signal(String::new());
     let (model, set_model) = signal(String::new());
@@ -477,10 +497,12 @@ fn AddConnection(
         set_region.set(default);
     }
     let has_regions = !regions.is_empty();
+    // Cloned once for the `Select`, whose options signal is re-read on every render and therefore
+    // cannot take the list by move.
+    let region_options = regions;
 
     let provider_id = StoredValue::new(provider);
-    let encode_failed = StoredValue::new(locale.get("providers.encode_failed").to_owned());
-    let label_add = locale.get("providers.add_connection").to_owned();
+    let encode_failed = StoredValue::new(t!("providers.encode_failed"));
 
     let create = move || {
         let label = name.get().trim().to_owned();
@@ -530,125 +552,105 @@ fn AddConnection(
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("providers.add_connection").to_owned()}
-            </h2>
-            {is_oauth
-                .then(|| {
-                    view! {
-                        <p class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                            {locale.get("providers.oauth_hint").to_owned()}
-                        </p>
-                    }
-                })}
-            <div class="grid gap-3 sm:grid-cols-2">
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("providers.field_name").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || name.get()
-                        on:input=move |ev| set_name.set(event_target_value(&ev))
-                        placeholder=locale.get("providers.name_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("providers.field_api_key").to_owned()}
-                    </span>
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("providers.add_connection")}</CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-3">
+                {is_oauth
+                    .then(|| {
+                        view! {
+                            <Alert variant=AlertVariant::Warning>
+                                <AlertDescription>{t!("providers.oauth_hint")}</AlertDescription>
+                            </Alert>
+                        }
+                    })}
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <Field label=t!("providers.field_name") required=true>
+                        <Input
+                            value=Signal::derive(move || name.get())
+                            on_input=Callback::new(move |value| set_name.set(value))
+                            placeholder=t!("providers.name_placeholder")
+                        />
+                    </Field>
                     {if keyless {
                         view! {
-                            <p class="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                                {locale.get("providers.no_key_needed").to_owned()}
-                            </p>
+                            <Field
+                                label=t!("providers.field_api_key")
+                                description=t!("providers.no_key_needed")
+                            />
                         }
                             .into_any()
                     } else {
                         view! {
-                            <input
-                                type="password"
-                                autocomplete="off"
-                                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                                prop:value=move || key.get()
-                                on:input=move |ev| set_key.set(event_target_value(&ev))
-                                placeholder=locale.get("providers.api_key_placeholder").to_owned()
-                            />
+                            <Field label=t!("providers.field_api_key") required=true>
+                                <Input
+                                    value=Signal::derive(move || key.get())
+                                    on_input=Callback::new(move |value| set_key.set(value))
+                                    input_type="password"
+                                    autocomplete="off"
+                                    placeholder=t!("providers.api_key_placeholder")
+                                    class="font-mono"
+                                />
+                            </Field>
                         }
                             .into_any()
                     }}
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("providers.field_default_model").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                        prop:value=move || model.get()
-                        on:input=move |ev| set_model.set(event_target_value(&ev))
-                        placeholder=locale.get("providers.default_model_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("providers.field_priority").to_owned()}
-                    </span>
-                    <input
-                        type="number"
-                        min="1"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || priority.get()
-                        on:input=move |ev| set_priority.set(event_target_value(&ev))
-                        placeholder=locale.get("providers.priority_placeholder").to_owned()
-                    />
-                </label>
-                {has_regions
-                    .then(|| {
-                        view! {
-                            <label class="space-y-1 text-sm">
-                                <span class="text-muted-foreground">
-                                    {locale.get("providers.field_region").to_owned()}
-                                </span>
-                                <select
-                                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                    prop:value=move || region.get()
-                                    on:change=move |ev| set_region.set(event_target_value(&ev))
-                                >
-                                    {regions
-                                        .clone()
-                                        .into_iter()
-                                        .map(|value| {
-                                            let label = value.clone();
-                                            view! { <option value=value>{label}</option> }
+                    <Field label=t!("providers.field_default_model")>
+                        <Input
+                            value=Signal::derive(move || model.get())
+                            on_input=Callback::new(move |value| set_model.set(value))
+                            placeholder=t!("providers.default_model_placeholder")
+                            class="font-mono"
+                        />
+                    </Field>
+                    <Field label=t!("providers.field_priority")>
+                        <Input
+                            value=Signal::derive(move || priority.get())
+                            on_input=Callback::new(move |value| set_priority.set(value))
+                            input_type="number"
+                            placeholder=t!("providers.priority_placeholder")
+                        />
+                    </Field>
+                    {has_regions
+                        .then(|| {
+                            view! {
+                                <Field label=t!("providers.field_region")>
+                                    <Select
+                                        value=Signal::derive(move || region.get())
+                                        options=Signal::derive(move || {
+                                            region_options
+                                                .iter()
+                                                .map(|value| (value.clone(), value.clone()))
+                                                .collect()
                                         })
-                                        .collect_view()}
-                                </select>
-                            </label>
-                        }
-                    })}
-            </div>
-            <button
-                type="button"
-                class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled=move || {
-                    save.get().is_saving() || name.get().trim().is_empty()
-                        || (!keyless && key.get().trim().is_empty())
-                }
-                on:click=move |_| create()
-            >
-                {label_add}
-            </button>
-            {move || {
-                save.get()
-                    .message()
-                    .map(|message| {
-                        view! { <p class="text-sm text-destructive">{message}</p> }
+                                        on_change=Callback::new(move |value| set_region.set(value))
+                                        aria_label=t!("providers.field_region")
+                                    />
+                                </Field>
+                            }
+                        })}
+                </div>
+            </CardContent>
+            <div class="flex items-center justify-between gap-3 border-t border-border bg-muted/30 px-5 py-3">
+                <div class="min-w-0">
+                    {move || {
+                        save.get()
+                            .message()
+                            .map(|message| view! { <ErrorNote message=message /> })
+                    }}
+                </div>
+                <Button
+                    label=t!("providers.add_connection")
+                    disabled=Signal::derive(move || {
+                        save.get().is_saving() || name.get().trim().is_empty()
+                            || (!keyless && key.get().trim().is_empty())
                     })
-            }}
-        </section>
+                    busy=Signal::derive(move || save.get().is_saving())
+                    on_click=Callback::new(move |()| create())
+                />
+            </div>
+        </Card>
     }
 }
 
@@ -658,44 +660,37 @@ fn ConnectionTable(
     rows: Vec<ProviderRow>,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">
-                {locale.get("providers.detail_empty").to_owned()}
-            </p>
+            <TableFrame class="rounded-none border-0">
+                <Table>
+                    <TableEmpty message=t!("providers.detail_empty") columns=4 />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame class="rounded-none border-0">
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("providers.col_name").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("providers.col_auth").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("providers.col_status").to_owned()}
-                        </th>
-                        <th class="px-3 py-2 text-right">
-                            <span class="sr-only">
-                                {locale.get("providers.col_actions").to_owned()}
-                            </span>
-                        </th>
+                        <TableHeaderCell>{t!("providers.col_name")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("providers.col_auth")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("providers.col_status")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">
+                            {t!("providers.col_actions")}
+                        </TableHeaderCell>
                     </tr>
-                </thead>
+                </TableHead>
                 <tbody>
                     {rows
                         .into_iter()
                         .map(|row| view! { <ConnectionRow row=row reload=reload /> })
                         .collect_view()}
                 </tbody>
-            </table>
-        </div>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
@@ -706,22 +701,18 @@ fn ConnectionRow(
     row: ProviderRow,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (save, set_save) = signal(Save::Idle);
     let (test, set_test) = signal(Save::Idle);
     let (result, set_result) = signal(None::<ProbeOutcome>);
 
     let active = row.is_active;
     let id = StoredValue::new(row.id.clone());
-    let encode_failed = StoredValue::new(locale.get("providers.encode_failed").to_owned());
+    let encode_failed = StoredValue::new(t!("providers.encode_failed"));
     let label_toggle = if active {
-        locale.get("providers.disable").to_owned()
+        t!("providers.disable")
     } else {
-        locale.get("providers.enable").to_owned()
+        t!("providers.enable")
     };
-    let label_delete = locale.get("providers.delete").to_owned();
-    let label_test = locale.get("providers.test").to_owned();
-    let label_testing = locale.get("providers.testing").to_owned();
 
     let toggle = move || {
         if save.get().is_saving() {
@@ -768,67 +759,67 @@ fn ConnectionRow(
     };
 
     view! {
-        <tr class="border-t border-border align-top">
-            <td class="px-3 py-2">
-                <span class="block">{row.name}</span>
-                <code class="block text-xs text-muted-foreground">{row.id}</code>
-            </td>
-            <td class="px-3 py-2 text-muted-foreground">{row.auth_type}</td>
-            <td class="px-3 py-2">
-                {if active {
-                    locale.get("state.enabled").to_owned()
+        <TableRow hoverable=false>
+            <TableCell>
+                <span class="block font-medium">{row.name}</span>
+                <code class="block font-mono text-xs text-muted-foreground">{row.id}</code>
+            </TableCell>
+            <TableCell class="text-muted-foreground">{row.auth_type}</TableCell>
+            <TableCell>
+                <Badge variant=if active {
+                    BadgeVariant::Success
                 } else {
-                    locale.get("state.disabled").to_owned()
-                }}
+                    BadgeVariant::Secondary
+                }>{if active { t!("state.enabled") } else { t!("state.disabled") }}</Badge>
                 <TestOutcome test=test result=result />
                 {move || {
                     save.get()
                         .message()
-                        .map(|message| {
-                            view! { <p class="text-xs text-destructive">{message}</p> }
-                        })
+                        .map(|message| view! { <ErrorNote message=message class="mt-1 text-xs" /> })
                 }}
-            </td>
-            <td class="px-3 py-2 text-right whitespace-nowrap space-x-3">
-                <button
-                    type="button"
-                    class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-                    disabled=move || test.get().is_saving()
-                    on:click=move |_| probe()
-                >
+            </TableCell>
+            <TableCell class="whitespace-nowrap text-right">
+                <div class="flex items-center justify-end gap-1">
+                    // Rebuilt on each render rather than given a fixed label: the wording has to
+                    // follow the in-flight state, and `Button` reads its label once at construction.
                     {move || {
-                        if test.get().is_saving() {
-                            label_testing.clone()
-                        } else {
-                            label_test.clone()
+                        view! {
+                            <Button
+                                label=if test.get().is_saving() {
+                                    t!("providers.testing")
+                                } else {
+                                    t!("providers.test")
+                                }
+                                variant=ButtonVariant::Ghost
+                                size=ButtonSize::Sm
+                                disabled=Signal::derive(move || test.get().is_saving())
+                                on_click=Callback::new(move |()| probe())
+                            />
                         }
                     }}
-                </button>
-                <button
-                    type="button"
-                    class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-                    disabled=move || save.get().is_saving()
-                    on:click=move |_| toggle()
-                >
-                    {label_toggle}
-                </button>
-                <button
-                    type="button"
-                    class="text-sm text-destructive underline-offset-4 hover:underline disabled:opacity-50"
-                    disabled=move || save.get().is_saving()
-                    on:click=move |_| remove()
-                >
-                    {label_delete}
-                </button>
-            </td>
-        </tr>
+                    <Button
+                        label=label_toggle
+                        variant=ButtonVariant::Ghost
+                        size=ButtonSize::Sm
+                        disabled=Signal::derive(move || save.get().is_saving())
+                        on_click=Callback::new(move |()| toggle())
+                    />
+                    <Button
+                        label=t!("providers.delete")
+                        variant=ButtonVariant::Destructive
+                        size=ButtonSize::Sm
+                        disabled=Signal::derive(move || save.get().is_saving())
+                        on_click=Callback::new(move |()| remove())
+                    />
+                </div>
+            </TableCell>
+        </TableRow>
     }
 }
 
 /// What a finished probe says.
 #[component]
 fn TestOutcome(test: ReadSignal<Save>, result: ReadSignal<Option<ProbeOutcome>>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     view! {
         {move || {
             result
@@ -836,11 +827,12 @@ fn TestOutcome(test: ReadSignal<Save>, result: ReadSignal<Option<ProbeOutcome>>)
                 .map(|outcome| {
                     if outcome.success {
                         let millis = outcome.latency_ms.to_string();
-                        let latency = locale.fmt("models.test_latency", &[("ms", &millis)]);
+                        let latency = crate::i18n::use_locale()
+                            .fmt("models.test_latency", &[("ms", &millis)]);
                         view! {
-                            <p class="text-xs text-success">
-                                {locale.get("providers.test_ok").to_owned()}
-                                {format!(" · {latency}")}
+                            <p class="mt-1 flex flex-wrap items-center gap-1.5">
+                                <StatusDot label=t!("providers.test_ok") tone=StatusTone::Success />
+                                <span class="font-mono text-xs text-muted-foreground">{latency}</span>
                             </p>
                         }
                             .into_any()
@@ -853,21 +845,16 @@ fn TestOutcome(test: ReadSignal<Save>, result: ReadSignal<Option<ProbeOutcome>>)
                             }
                             (Some(error), None) if !error.is_empty() => error,
                             (_, Some(status)) => format!("{status}"),
-                            _ => locale.get("providers.test_failed").to_owned(),
+                            _ => t!("providers.test_failed"),
                         };
-                        view! {
-                            <p class="text-xs text-destructive whitespace-normal break-words">
-                                {detail}
-                            </p>
-                        }
-                            .into_any()
+                        view! { <ErrorNote message=detail class="mt-1 text-xs" /> }.into_any()
                     }
                 })
         }}
         {move || {
             test.get()
                 .message()
-                .map(|message| view! { <p class="text-xs text-destructive">{message}</p> })
+                .map(|message| view! { <ErrorNote message=message class="mt-1 text-xs" /> })
         }}
     }
 }

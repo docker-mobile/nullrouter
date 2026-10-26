@@ -17,13 +17,29 @@
 //!
 //! The list is fetched with `?includeUsage=true`, which adds `boundConnectionCount` to each row.
 //! That is what lets the panel say *why* a delete will be refused before it is attempted.
+//!
+//! # Why a card per pool
+//!
+//! A pool carries six values an operator reads together -- URL, type, state, test status, bound
+//! connections, last error -- and two of them are long strings. Squeezed into table cells those
+//! wrapped into four lines each and the actions column became a stack of links. One card per pool
+//! gives the URL the width of the card, keeps the state badge beside the name, and puts the write
+//! actions in a footer where they do not compete with the values. The list is small (a handful of
+//! outbound proxies), so a grid of cards is also the right density.
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Hydrate, Method, Save, encode, load, request_detailed, submit_reporting};
 use crate::routes::types::timestamp_label;
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Alert, AlertDescription, AlertTitle, AlertVariant, Badge, BadgeVariant, Button, ButtonSize,
+    ButtonVariant, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Checkbox,
+    Dialog, DialogContent, DialogDescription, DialogDismiss, DialogFooter, DialogHeader,
+    DialogTitle, EmptyState, ErrorNote, Field, Icon, IconName, Input, Mono, PageBody, PageHeader,
+    Panel, Select,
+};
+use crate::t;
 
 /// `GET /api/proxy-pools?includeUsage=true`.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -91,8 +107,8 @@ const POOL_TYPES: [&str; 4] = ["http", "vercel", "cloudflare", "deno"];
 
 #[component]
 pub fn ProxyPools() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (list, set_list) = signal(Hydrate::<PoolsList>::Loading);
+    let (creating, set_creating) = signal(false);
     let reload = move || {
         set_list.set(Hydrate::Loading);
         load("/api/proxy-pools?includeUsage=true", set_list);
@@ -100,24 +116,82 @@ pub fn ProxyPools() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.proxy_pools").to_owned()
-            description=locale.get("pools.description").to_owned()
-        />
-        <CreateForm reload=reload />
-        <Panel
-            state=list
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: PoolsList| view! { <PoolTable rows=data.proxy_pools reload=reload /> }
-        />
+        <PageHeader title=t!("nav.proxy_pools") description=t!("pools.description")>
+            <Button
+                label=t!("pools.create")
+                size=ButtonSize::Sm
+                on_click=Callback::new(move |()| set_creating.set(true))
+            />
+        </PageHeader>
 
-        <DeploySection reload=reload />
+        <PageBody>
+            // Stated, not offered: the test route answers 501 on this build, so a pool's health is
+            // whatever the store last recorded rather than something this panel can go and measure.
+            <Alert variant=AlertVariant::Muted>
+                <AlertTitle>{t!("pools.test_unsupported_title")}</AlertTitle>
+                <AlertDescription>{t!("pools.test_unsupported")}</AlertDescription>
+            </Alert>
+
+            <Panel
+                state=list
+                on_retry=Callback::new(move |()| reload())
+                children=move |data: PoolsList| {
+                    view! { <PoolList rows=data.proxy_pools reload=reload set_creating=set_creating /> }
+                }
+            />
+
+            <DeploySection reload=reload />
+        </PageBody>
+
+        <CreateDialog open=creating set_open=set_creating reload=reload />
     }
 }
+
+/// The pools, as a grid of cards, or the reason there are none.
+#[component]
+fn PoolList(
+    rows: Vec<PoolRow>,
+    reload: impl Fn() + Copy + 'static + Send + Sync,
+    set_creating: WriteSignal<bool>,
+) -> impl IntoView {
+    if rows.is_empty() {
+        return view! {
+            <Card>
+                <EmptyState
+                    title=t!("pools.empty")
+                    description=t!("pools.empty_hint")
+                    icon=IconName::Network
+                >
+                    <Button
+                        label=t!("pools.create")
+                        size=ButtonSize::Sm
+                        variant=ButtonVariant::Outline
+                        on_click=Callback::new(move |()| set_creating.set(true))
+                    />
+                </EmptyState>
+            </Card>
+        }
+        .into_any();
+    }
+
+    view! {
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {rows
+                .into_iter()
+                .map(|row| view! { <PoolCard row=row reload=reload /> })
+                .collect_view()}
+        </div>
+    }
+    .into_any()
+}
+
 /// Create a pool by hand, for a proxy that already exists somewhere.
 #[component]
-fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+fn CreateDialog(
+    open: ReadSignal<bool>,
+    set_open: WriteSignal<bool>,
+    reload: impl Fn() + Copy + 'static + Send + Sync,
+) -> impl IntoView {
     let (name, set_name) = signal(String::new());
     let (url, set_url) = signal(String::new());
     let (no_proxy, set_no_proxy) = signal(String::new());
@@ -129,9 +203,16 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
         save.get().is_saving() || name.get().trim().is_empty() || url.get().trim().is_empty()
     };
 
-    // Owned up front: `Locale` is not `Copy`, so a `move` closure that read it would leave nothing
-    // for the view below.
-    let encode_failed = locale.get("pools.encode_failed").to_owned();
+    let encode_failed = StoredValue::new(t!("pools.encode_failed"));
+
+    // The four values the store keeps. Anything else is normalised to `http` server-side, so the
+    // panel offers exactly these rather than a field whose contents would be replaced.
+    let type_options = Signal::derive(|| {
+        POOL_TYPES
+            .into_iter()
+            .map(|value| (value.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>()
+    });
 
     let submit = move || {
         let (label, target, bypass) = (name.get(), url.get(), no_proxy.get());
@@ -146,7 +227,7 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
             proxy_type: &kind.get(),
             strict_proxy: strict.get(),
         }) else {
-            set_save.set(Save::Refused(encode_failed.clone()));
+            set_save.set(Save::Refused(encode_failed.get_value()));
             return;
         };
 
@@ -158,165 +239,112 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
                 set_url.set(String::new());
                 set_no_proxy.set(String::new());
                 set_strict.set(false);
+                set_open.set(false);
                 reload();
             },
         );
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4 mb-4">
-            <p class="text-sm text-muted-foreground">{locale.get("pools.create_hint").to_owned()}</p>
-            <div class="grid gap-3 sm:grid-cols-2">
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">{locale.get("pools.name").to_owned()}</span>
-                    <input
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || name.get()
-                        on:input=move |ev| set_name.set(event_target_value(&ev))
-                        placeholder=locale.get("pools.name_placeholder").to_owned()
+        <Dialog
+            open=Signal::derive(move || open.get())
+            on_open_change=Callback::new(move |next: bool| set_open.set(next))
+        >
+            <DialogHeader>
+                <div class="space-y-1">
+                    <DialogTitle>{t!("pools.create")}</DialogTitle>
+                    <DialogDescription>{t!("pools.create_hint")}</DialogDescription>
+                </div>
+                <DialogDismiss />
+            </DialogHeader>
+            <DialogContent class="space-y-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <Field label=t!("pools.name") required=true>
+                        <Input
+                            value=Signal::derive(move || name.get())
+                            on_input=Callback::new(move |value| set_name.set(value))
+                            placeholder=t!("pools.name_placeholder")
+                            autocomplete="off"
+                        />
+                    </Field>
+                    <Field label=t!("pools.url") required=true>
+                        <Input
+                            value=Signal::derive(move || url.get())
+                            on_input=Callback::new(move |value| set_url.set(value))
+                            placeholder=t!("pools.url_placeholder")
+                            autocomplete="off"
+                            class="font-mono"
+                        />
+                    </Field>
+                    <Field label=t!("pools.no_proxy")>
+                        <Input
+                            value=Signal::derive(move || no_proxy.get())
+                            on_input=Callback::new(move |value| set_no_proxy.set(value))
+                            placeholder=t!("pools.no_proxy_placeholder")
+                            autocomplete="off"
+                            class="font-mono"
+                        />
+                    </Field>
+                    <Field label=t!("pools.type")>
+                        <Select
+                            value=Signal::derive(move || kind.get())
+                            options=type_options
+                            on_change=Callback::new(move |chosen| set_kind.set(chosen))
+                            aria_label=t!("pools.type")
+                        />
+                    </Field>
+                </div>
+                <div class="space-y-1">
+                    <Checkbox
+                        checked=Signal::derive(move || strict.get())
+                        on_change=Callback::new(move |next| set_strict.set(next))
+                        label=t!("pools.strict")
                     />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">{locale.get("pools.url").to_owned()}</span>
-                    <input
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                        prop:value=move || url.get()
-                        on:input=move |ev| set_url.set(event_target_value(&ev))
-                        placeholder=locale.get("pools.url_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("pools.no_proxy").to_owned()}
-                    </span>
-                    <input
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                        prop:value=move || no_proxy.get()
-                        on:input=move |ev| set_no_proxy.set(event_target_value(&ev))
-                        placeholder=locale.get("pools.no_proxy_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">{locale.get("pools.type").to_owned()}</span>
-                    <select
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || kind.get()
-                        on:change=move |ev| set_kind.set(event_target_value(&ev))
-                    >
-                        {POOL_TYPES
-                            .into_iter()
-                            .map(|option| {
-                                view! { <option value=option>{option}</option> }
-                            })
-                            .collect_view()}
-                    </select>
-                </label>
-            </div>
-            <label class="flex items-start gap-2 text-sm">
-                <input
-                    type="checkbox"
-                    class="size-4 mt-0.5"
-                    prop:checked=move || strict.get()
-                    on:change=move |ev| set_strict.set(event_target_checked(&ev))
+                    <p class="text-xs leading-relaxed text-muted-foreground">
+                        {t!("pools.strict_hint")}
+                    </p>
+                </div>
+                {move || {
+                    save.get().message().map(|message| view! { <ErrorNote message=message /> })
+                }}
+            </DialogContent>
+            <DialogFooter>
+                <Button
+                    label=t!("pools.cancel")
+                    variant=ButtonVariant::Outline
+                    size=ButtonSize::Sm
+                    on_click=Callback::new(move |()| set_open.set(false))
                 />
-                <span>
-                    {locale.get("pools.strict").to_owned()}
-                    <span class="block text-muted-foreground">
-                        {locale.get("pools.strict_hint").to_owned()}
-                    </span>
-                </span>
-            </label>
-            <button
-                type="button"
-                class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled=incomplete
-                on:click=move |_| submit()
-            >
-                {locale.get("pools.create").to_owned()}
-            </button>
-            {move || {
-                save.get()
-                    .message()
-                    .map(|message| view! { <p class="text-sm text-destructive">{message}</p> })
-            }}
-        </section>
+                <Button
+                    label=t!("pools.create")
+                    size=ButtonSize::Sm
+                    disabled=Signal::derive(incomplete)
+                    busy=Signal::derive(move || save.get().is_saving())
+                    on_click=Callback::new(move |()| submit())
+                />
+            </DialogFooter>
+        </Dialog>
     }
 }
 
-#[component]
-fn PoolTable(
-    rows: Vec<PoolRow>,
-    reload: impl Fn() + Copy + 'static + Send + Sync,
-) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    if rows.is_empty() {
-        return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("pools.empty").to_owned()}</p>
-        }
-        .into_any();
-    }
-    view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
-                    <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pools.col_name").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pools.col_url").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pools.col_type").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pools.col_status").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pools.col_bound").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("pools.col_updated").to_owned()}
-                        </th>
-                        <th class="px-3 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows
-                        .into_iter()
-                        .map(|row| view! { <PoolLine row=row reload=reload /> })
-                        .collect_view()}
-                </tbody>
-            </table>
-        </div>
-    }
-    .into_any()
-}
 /// One pool, with the two writes the store accepts for it.
 ///
 /// Delete is armed by a first click rather than fired by it. The 409 makes the dangerous case
 /// (a pool a connection depends on) safe, but an unbound pool deletes immediately and there is no
 /// undo, so the bound count is shown next to the confirm.
 #[component]
-fn PoolLine(row: PoolRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+fn PoolCard(row: PoolRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
     let (save, set_save) = signal(Save::Idle);
     let (armed, set_armed) = signal(false);
+    let (testing, set_testing) = signal(false);
+    let (test_feedback, set_test_feedback) = signal(Option::<String>::None);
 
     let active = row.is_active;
     let bound = row.bound_connection_count;
-    // Stored rather than captured: delete is invoked from inside a reactive closure, which rebuilds
-    // its handler on every run and so needs a `Copy` closure.
+    // Stored rather than captured: the writes below are invoked from inside reactive closures, which
+    // rebuild their handlers on every run and so need a `Copy` closure.
     let id = StoredValue::new(row.id.clone());
-    let encode_failed = StoredValue::new(locale.get("pools.encode_failed").to_owned());
-
-    // Owned before the delete control's reactive closure would move the non-`Copy` locale.
-    let label_delete = locale.get("pools.delete").to_owned();
-    let label_confirm_delete = locale.get("pools.confirm_delete").to_owned();
-    let label_cancel = locale.get("pools.cancel").to_owned();
-
-    let (testing, set_testing) = signal(false);
-    let (test_feedback, set_test_feedback) = signal(Option::<String>::None);
+    let encode_failed = StoredValue::new(t!("pools.encode_failed"));
 
     let test_action = move || {
         set_testing.set(true);
@@ -378,151 +406,164 @@ fn PoolLine(row: PoolRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> i
         );
     };
 
+    let no_proxy = (!row.no_proxy.is_empty()).then(|| row.no_proxy.clone());
+    let strict = row.strict_proxy;
+    let last_error = row.last_error.clone().filter(|message| !message.is_empty());
+
     view! {
-        <tr class="border-t border-border align-top">
-            <td class="px-3 py-2">
-                <div class="space-y-0.5">
-                    <span>{row.name}</span>
-                    {(!row.no_proxy.is_empty())
-                        .then(|| {
-                            view! {
-                                <p class="font-mono text-xs text-muted-foreground">
-                                    {format!("{}: {}", locale.get("pools.no_proxy"), row.no_proxy)}
-                                </p>
-                            }
-                        })}
-                    {row.strict_proxy
-                        .then(|| {
-                            view! {
-                                <p class="text-xs text-muted-foreground">
-                                    {locale.get("pools.strict").to_owned()}
-                                </p>
-                            }
-                        })}
+        <Card>
+            <CardHeader>
+                <div class="min-w-0 space-y-1">
+                    <CardTitle class="truncate">{row.name.clone()}</CardTitle>
+                    <CardDescription class="truncate font-mono">{row.proxy_url.clone()}</CardDescription>
                 </div>
-            </td>
-            <td class="px-3 py-2 font-mono text-xs break-all">{row.proxy_url}</td>
-            <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{row.proxy_type}</td>
-            <td class="px-3 py-2">
-                <div class="flex items-center gap-2">
-                    <span class=if active {
-                        "size-1.5 rounded-full bg-success"
-                    } else {
-                        "size-1.5 rounded-full bg-muted-foreground/40"
-                    } />
-                    <span>
-                        {if active {
-                            locale.get("state.enabled").to_owned()
-                        } else {
-                            locale.get("state.disabled").to_owned()
-                        }}
-                    </span>
-                </div>
-                <p class="font-mono text-xs text-muted-foreground">{row.test_status}</p>
-                {row.last_error
-                    .filter(|message| !message.is_empty())
-                    .map(|message| {
-                        view! { <p class="text-xs text-destructive">{message}</p> }
-                    })}
-            </td>
-            <td class="px-3 py-2 tabular-nums">{bound.to_string()}</td>
-            <td class="px-3 py-2 text-xs text-muted-foreground">
-                {timestamp_label(&row.updated_at)}
-            </td>
-            <td class="px-3 py-2 text-right">
-                <div class="flex flex-col items-end gap-1.5">
-                    <button
-                        type="button"
-                        class="text-sm text-primary underline-offset-4 hover:underline disabled:opacity-50"
-                        disabled=move || testing.get() || save.get().is_saving()
-                        on:click=move |_| test_action()
-                    >
-                        {if testing.get() {
-                            locale.get("pools.testing").to_owned()
-                        } else {
-                            locale.get("pools.test").to_owned()
-                        }}
-                    </button>
-                    {move || test_feedback.get().map(|msg| view! {
-                        <span class="text-xs text-muted-foreground">{msg}</span>
-                    })}
-                    <button
-                        type="button"
-                        class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-                        disabled=move || save.get().is_saving()
-                        on:click=move |_| toggle()
-                    >
-                        {if active {
-                            locale.get("pools.disable").to_owned()
-                        } else {
-                            locale.get("pools.enable").to_owned()
-                        }}
-                    </button>
-                    {move || {
-                        let (confirm, cancel, delete) = (
-                            label_confirm_delete.clone(),
-                            label_cancel.clone(),
-                            label_delete.clone(),
-                        );
-                        if armed.get() {
+                <Badge variant=if active { BadgeVariant::Success } else { BadgeVariant::Secondary }>
+                    {if active { t!("state.enabled") } else { t!("state.disabled") }}
+                </Badge>
+            </CardHeader>
+
+            <CardContent class="space-y-2.5">
+                <dl class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                    <div class="flex items-center gap-1.5">
+                        <dt class="text-muted-foreground">{t!("pools.col_type")}</dt>
+                        <dd class="font-mono text-foreground">{row.proxy_type.clone()}</dd>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <dt class="text-muted-foreground">{t!("pools.col_bound")}</dt>
+                        <dd class="font-mono tabular-nums text-foreground">
+                            {bound.to_string()}
+                        </dd>
+                    </div>
+                    <div class="col-span-2 flex items-center gap-1.5">
+                        <dt class="text-muted-foreground">{t!("pools.test_status")}</dt>
+                        <dd class="font-mono text-foreground">{row.test_status.clone()}</dd>
+                    </div>
+                    <div class="col-span-2 flex items-center gap-1.5">
+                        <dt class="text-muted-foreground">{t!("pools.col_updated")}</dt>
+                        <dd class="font-mono tabular-nums text-muted-foreground">
+                            {timestamp_label(&row.updated_at)}
+                        </dd>
+                    </div>
+                    {no_proxy
+                        .map(|list| {
                             view! {
-                                <div class="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        class="text-sm font-medium text-destructive underline-offset-4 \
-                                               hover:underline disabled:opacity-50"
-                                        disabled=move || save.get().is_saving()
-                                        on:click=move |_| remove()
-                                    >
-                                        {confirm}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="text-sm text-muted-foreground underline-offset-4 hover:underline"
-                                        on:click=move |_| set_armed.set(false)
-                                    >
-                                        {cancel}
-                                    </button>
+                                <div class="col-span-2 space-y-0.5">
+                                    <dt class="text-muted-foreground">{t!("pools.no_proxy")}</dt>
+                                    <dd>
+                                        <Mono value=list class="text-xs text-muted-foreground" />
+                                    </dd>
                                 </div>
                             }
-                                .into_any()
-                        } else {
-                            view! {
-                                <button
-                                    type="button"
-                                    class="text-sm text-destructive underline-offset-4 hover:underline"
-                                    on:click=move |_| set_armed.set(true)
-                                >
-                                    {delete}
-                                </button>
-                            }
-                                .into_any()
+                        })}
+                </dl>
+
+                {strict
+                    .then(|| {
+                        view! {
+                            <div class="flex items-center gap-1.5 text-xs text-foreground">
+                                <Icon name=IconName::ShieldCheck class="size-3.5 text-muted-foreground" />
+                                {t!("pools.strict")}
+                            </div>
+                        }
+                    })}
+
+                {last_error
+                    .map(|message| view! { <ErrorNote message=message /> })}
+
+                {move || test_feedback.get().map(|feedback| view! {
+                    <p class="font-mono text-xs text-muted-foreground">{feedback}</p>
+                })}
+
+                // Named before the delete is attempted: the store refuses while anything is bound,
+                // and the count in the list above is the reason. A paragraph rather than a badge --
+                // the sentence is the whole point of the warning and a badge does not wrap.
+                {(bound > 0)
+                    .then(|| {
+                        view! {
+                            <p class="flex items-start gap-1.5 text-xs leading-relaxed text-warning-emphasis">
+                                <Icon
+                                    name=IconName::Alert
+                                    class="mt-px size-3.5 shrink-0 text-warning"
+                                />
+                                <span>{t!("pools.bound_warning")}</span>
+                            </p>
+                        }
+                    })}
+
+                {move || {
+                    save.get().message().map(|message| view! { <ErrorNote message=message /> })
+                }}
+            </CardContent>
+
+            <CardFooter class="flex-wrap">
+                <div class="flex flex-wrap items-center gap-2">
+                    // Rebuilt inside a closure because `Button::label` is an `Option<String>`, not a
+                    // signal: the "Testing…" wording has to be chosen on each render, not once at mount.
+                    {move || {
+                        view! {
+                            <Button
+                                label=if testing.get() {
+                                    t!("pools.testing")
+                                } else {
+                                    t!("pools.test")
+                                }
+                                variant=ButtonVariant::Outline
+                                size=ButtonSize::Sm
+                                disabled=Signal::derive(move || {
+                                    testing.get() || save.get().is_saving()
+                                })
+                                on_click=Callback::new(move |()| test_action())
+                            />
                         }
                     }}
-                    // Named before the delete is attempted: the store refuses while anything is
-                    // bound, and the count is the reason.
-                    {(bound > 0)
-                        .then(|| {
-                            view! {
-                                <p class="text-xs text-muted-foreground text-right">
-                                    {locale.fmt("pools.bound_warning", &[("count", &bound.to_string())])}
-                                </p>
-                            }
-                        })}
-                    {move || {
-                        save.get()
-                            .message()
-                            .map(|message| {
-                                view! {
-                                    <p class="text-xs text-destructive text-right">{message}</p>
-                                }
-                            })
-                    }}
+                    <Button
+                        label=if active { t!("pools.disable") } else { t!("pools.enable") }
+                        variant=ButtonVariant::Ghost
+                        size=ButtonSize::Sm
+                        disabled=Signal::derive(move || save.get().is_saving())
+                        on_click=Callback::new(move |()| toggle())
+                    />
                 </div>
-            </td>
-        </tr>
+
+                // The confirm replaces the delete rather than sitting beside it, so the destructive
+                // control is never one stray click away from a pool that cannot be restored.
+                {move || {
+                    if armed.get() {
+                        view! {
+                            <div class="flex items-center gap-2">
+                                <Button
+                                    label=t!("pools.confirm_delete")
+                                    variant=ButtonVariant::Destructive
+                                    size=ButtonSize::Sm
+                                    disabled=Signal::derive(move || save.get().is_saving())
+                                    on_click=Callback::new(move |()| remove())
+                                />
+                                <Button
+                                    label=t!("pools.cancel")
+                                    variant=ButtonVariant::Ghost
+                                    size=ButtonSize::Sm
+                                    on_click=Callback::new(move |()| set_armed.set(false))
+                                />
+                            </div>
+                        }
+                            .into_any()
+                    } else {
+                        view! {
+                            <Button
+                                label=t!("pools.delete")
+                                variant=ButtonVariant::Ghost
+                                size=ButtonSize::Sm
+                                on_click=Callback::new(move |()| set_armed.set(true))
+                            />
+                        }
+                            .into_any()
+                    }
+                }}
+            </CardFooter>
+        </Card>
     }
 }
+
 /// A relay platform, and the credentials its deploy needs.
 ///
 /// These three routes are the only ones on this panel that leave the machine: each authenticates to
@@ -546,6 +587,8 @@ impl Platform {
         }
     }
 
+    /// Test-only: see [`Platform::title_text`], which is the form `t!` can use.
+    #[cfg(test)]
     const fn title(self) -> &'static str {
         match self {
             Self::Cloudflare => "pools.deploy_cloudflare",
@@ -555,6 +598,9 @@ impl Platform {
     }
 
     /// The first field's label key. Not a secret for Cloudflare and Deno; the token for Vercel.
+    ///
+    /// Test-only, for the same reason as [`Platform::title`].
+    #[cfg(test)]
     const fn first_label(self) -> &'static str {
         match self {
             Self::Cloudflare => "pools.cf_account",
@@ -572,6 +618,37 @@ impl Platform {
         match self {
             Self::Cloudflare => Some("pools.cf_token"),
             Self::Deno => Some("pools.deno_token"),
+            Self::Vercel => None,
+        }
+    }
+
+    /// The title as a literal, for `t!`.
+    ///
+    /// [`Platform::title`] returns the key as a `&str` -- which the tests and the doc comment above
+    /// rely on -- but `t!` only accepts a literal, so the literal lives here as a second match over
+    /// the same variants. Both spellings are pinned together by the test at the bottom.
+    fn title_text(self) -> String {
+        match self {
+            Self::Cloudflare => t!("pools.deploy_cloudflare"),
+            Self::Deno => t!("pools.deploy_deno"),
+            Self::Vercel => t!("pools.deploy_vercel"),
+        }
+    }
+
+    /// The first field's label, for the same reason as [`Platform::title_text`].
+    fn first_label_text(self) -> String {
+        match self {
+            Self::Cloudflare => t!("pools.cf_account"),
+            Self::Deno => t!("pools.deno_org"),
+            Self::Vercel => t!("pools.vercel_token"),
+        }
+    }
+
+    /// The second field's label, when the platform has one.
+    fn second_label_text(self) -> Option<String> {
+        match self {
+            Self::Cloudflare => Some(t!("pools.cf_token")),
+            Self::Deno => Some(t!("pools.deno_token")),
             Self::Vercel => None,
         }
     }
@@ -636,20 +713,21 @@ fn deploy_body(
 }
 #[component]
 fn DeploySection(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     view! {
-        <section class="mt-6 space-y-3">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("pools.deploy").to_owned()}
-            </h2>
-            <p class="text-sm text-muted-foreground">{locale.get("pools.deploy_hint").to_owned()}</p>
+        <div class="space-y-3">
+            <div class="space-y-1">
+                <p class="text-sm font-medium text-foreground">{t!("pools.deploy")}</p>
+                <p class="text-xs leading-relaxed text-muted-foreground">
+                    {t!("pools.deploy_hint")}
+                </p>
+            </div>
             <div class="grid gap-4 lg:grid-cols-3">
                 {Platform::ALL
                     .into_iter()
                     .map(|platform| view! { <DeployCard platform=platform reload=reload /> })
                     .collect_view()}
             </div>
-        </section>
+        </div>
     }
 }
 
@@ -659,7 +737,6 @@ fn DeployCard(
     platform: Platform,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (first, set_first) = signal(String::new());
     let (second, set_second) = signal(String::new());
     let (project, set_project) = signal(String::new());
@@ -672,7 +749,7 @@ fn DeployCard(
             || first.get().trim().is_empty()
             || (needs_second && second.get().trim().is_empty())
     };
-    let encode_failed = locale.get("pools.encode_failed").to_owned();
+    let encode_failed = StoredValue::new(t!("pools.encode_failed"));
 
     let send = move || {
         let (one, two, name) = (first.get(), second.get(), project.get());
@@ -683,7 +760,7 @@ fn DeployCard(
             two.trim(),
             (!trimmed_project.is_empty()).then_some(trimmed_project),
         ) else {
-            set_save.set(Save::Refused(encode_failed.clone()));
+            set_save.set(Save::Refused(encode_failed.get_value()));
             return;
         };
 
@@ -710,100 +787,109 @@ fn DeployCard(
     } else {
         "text"
     };
-    // Both labels are owned before the closure below borrows the locale.
-    let deploying = locale.get("pools.deploying").to_owned();
-    let deploy_run = locale.get("pools.deploy_run").to_owned();
+    let second_label = platform.second_label_text();
+    let title = platform.title_text();
+    let first_label = platform.first_label_text();
 
     view! {
-        <div class="rounded-lg border border-border bg-card p-5 space-y-3">
-            <h3 class="text-sm font-medium">{locale.get(platform.title()).to_owned()}</h3>
-            <label class="block space-y-1 text-sm">
-                <span class="text-muted-foreground">
-                    {locale.get(platform.first_label()).to_owned()}
-                </span>
-                <input
-                    type=first_type
-                    autocomplete="off"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    prop:value=move || first.get()
-                    on:input=move |ev| set_first.set(event_target_value(&ev))
-                />
-            </label>
-            {platform
-                .second_label()
-                .map(|key| {
-                    view! {
-                        <label class="block space-y-1 text-sm">
-                            <span class="text-muted-foreground">{locale.get(key).to_owned()}</span>
-                            <input
-                                type="password"
-                                autocomplete="off"
-                                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                prop:value=move || second.get()
-                                on:input=move |ev| set_second.set(event_target_value(&ev))
-                            />
-                        </label>
-                    }
-                })}
-            <label class="block space-y-1 text-sm">
-                <span class="text-muted-foreground">
-                    {locale.get("pools.project_name").to_owned()}
-                </span>
-                <input
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    prop:value=move || project.get()
-                    on:input=move |ev| set_project.set(event_target_value(&ev))
-                    placeholder=locale.get("pools.project_placeholder").to_owned()
-                />
-            </label>
-            <button
-                type="button"
-                class="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium \
-                       text-primary-foreground disabled:opacity-50"
-                disabled=incomplete
-                on:click=move |_| send()
-            >
+        <Card>
+            <CardHeader>
+                <CardTitle>{title}</CardTitle>
+                <Icon name=IconName::Globe class="size-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent class="space-y-3">
+                <Field label=first_label>
+                    <Input
+                        input_type=first_type
+                        value=Signal::derive(move || first.get())
+                        on_input=Callback::new(move |value| set_first.set(value))
+                        autocomplete="off"
+                        class="font-mono"
+                    />
+                </Field>
+                {second_label
+                    .map(|label| {
+                        view! {
+                            <Field label=label>
+                                <Input
+                                    input_type="password"
+                                    value=Signal::derive(move || second.get())
+                                    on_input=Callback::new(move |value| set_second.set(value))
+                                    autocomplete="off"
+                                    class="font-mono"
+                                />
+                            </Field>
+                        }
+                    })}
+                <Field label=t!("pools.project_name")>
+                    <Input
+                        value=Signal::derive(move || project.get())
+                        on_input=Callback::new(move |value| set_project.set(value))
+                        placeholder=t!("pools.project_placeholder")
+                        autocomplete="off"
+                        class="font-mono"
+                    />
+                </Field>
+
                 {move || {
-                    if save.get().is_saving() {
-                        deploying.clone()
-                    } else {
-                        deploy_run.clone()
+                    save.get().message().map(|message| view! { <ErrorNote message=message /> })
+                }}
+
+                {move || {
+                    deployed
+                        .get()
+                        .map(|url| {
+                            if url.is_empty() {
+                                // A 201 with no `deployUrl` still created the pool; saying so beats
+                                // rendering an empty link.
+                                return view! {
+                                    <p class="text-[0.8125rem] text-foreground">
+                                        {t!("pools.deployed")}
+                                    </p>
+                                }
+                                    .into_any();
+                            }
+                            let href = url.clone();
+                            view! {
+                                <div class="space-y-1">
+                                    <p class="text-[0.8125rem] text-foreground">
+                                        {t!("pools.deployed")}
+                                    </p>
+                                    <a
+                                        href=href
+                                        target="_blank"
+                                        rel="noreferrer noopener"
+                                        class="block break-all font-mono text-xs text-muted-foreground \
+                                               underline-offset-4 hover:text-foreground hover:underline"
+                                    >
+                                        {url}
+                                    </a>
+                                </div>
+                            }
+                                .into_any()
+                        })
+                }}
+            </CardContent>
+            <CardFooter>
+                // `label` is an `Option<String>`, so the in-flight wording is chosen per render
+                // rather than passed as a signal.
+                {move || {
+                    view! {
+                        <Button
+                            label=if save.get().is_saving() {
+                                t!("pools.deploying")
+                            } else {
+                                t!("pools.deploy_run")
+                            }
+                            class="w-full"
+                            size=ButtonSize::Sm
+                            disabled=Signal::derive(incomplete)
+                            on_click=Callback::new(move |()| send())
+                        />
                     }
                 }}
-            </button>
-            {move || {
-                save.get()
-                    .message()
-                    .map(|message| view! { <p class="text-sm text-destructive">{message}</p> })
-            }}
-            {move || {
-                deployed
-                    .get()
-                    .map(|url| {
-                        let label = locale.get("pools.deployed").to_owned();
-                        if url.is_empty() {
-                            // A 201 with no `deployUrl` still created the pool; saying so beats
-                            // rendering an empty link.
-                            return view! { <p class="text-sm">{label}</p> }.into_any();
-                        }
-                        let href = url.clone();
-                        view! {
-                            <div class="space-y-1">
-                                <p class="text-sm">{label}</p>
-                                <a
-                                    href=href
-                                    target="_blank"
-                                    rel="noreferrer noopener"
-                                    class="block break-all font-mono text-xs underline-offset-4 hover:underline"
-                                >
-                                    {url}
-                                </a>
-                            </div>
-                        }
-                            .into_any()
-                    })
-            }}
-        </div>
+            </CardFooter>
+        </Card>
     }
 }
 
@@ -891,6 +977,44 @@ mod tests {
                 .skip(index + 1)
                 .find(|other| other.path() == platform.path());
             assert!(duplicate.is_none(), "{:?} is listed twice", platform.path());
+        }
+    }
+
+    /// The literal labels beside the key-returning ones.
+    ///
+    /// `t!` only accepts a literal, so [`Platform::title_text`] and its siblings re-state each key as
+    /// a literal match instead of looking one up. That is two places to keep in step, and this test is
+    /// what keeps them in step: the message each literal resolves to has to be the same one its key
+    /// does, which fails the moment a key is renamed in only one of the two matches.
+    #[test]
+    fn the_literal_label_matches_the_key_it_replaces() {
+        use leptos::prelude::*;
+
+        // `t!` reads the locale from context, so a context has to exist for this test to exercise the
+        // real path rather than a copy of it.
+        let owner = Owner::new();
+        owner.set();
+        crate::i18n::provide_embedded_locale();
+        let locale = crate::i18n::use_locale();
+
+        for platform in Platform::ALL {
+            assert_eq!(
+                platform.title_text(),
+                locale.get(platform.title()),
+                "{platform:?} title"
+            );
+            assert_eq!(
+                platform.first_label_text(),
+                locale.get(platform.first_label()),
+                "{platform:?} first field"
+            );
+            assert_eq!(
+                platform.second_label_text(),
+                platform
+                    .second_label()
+                    .map(|key| locale.get(key).to_owned()),
+                "{platform:?} second field"
+            );
         }
     }
 }

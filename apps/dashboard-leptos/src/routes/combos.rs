@@ -13,11 +13,15 @@ use leptos::prelude::*;
 
 use crate::api::{Hydrate, Method, Save, decode, encode, load, request_detailed, submit_reporting};
 use crate::routes::types::{ComboBody, ComboRow, CombosList, is_valid_combo_name, timestamp_label};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Card, CardContent, CardHeader,
+    CardTitle, EmptyState, ErrorNote, Field, Icon, IconName, Input, PageBody, PageHeader, Panel,
+    Textarea, button_class,
+};
+use crate::t;
 
 #[component]
 pub fn Combos() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (list, set_list) = signal(Hydrate::<CombosList>::Loading);
     let reload = move || {
         set_list.set(Hydrate::Loading);
@@ -26,16 +30,15 @@ pub fn Combos() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.combos").to_owned()
-            description=locale.get("combos.description").to_owned()
-        />
-        <CreateForm reload=reload />
-        <Panel
-            state=list
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: CombosList| view! { <ComboList rows=data.combos reload=reload /> }
-        />
+        <PageHeader title=t!("nav.combos") description=t!("combos.description") />
+        <PageBody>
+            <CreateForm reload=reload />
+            <Panel
+                state=list
+                on_retry=Callback::new(move |()| reload())
+                children=move |data: CombosList| { view! { <ComboList rows=data.combos reload=reload /> } }
+            />
+        </PageBody>
     }
 }
 
@@ -53,7 +56,6 @@ fn parse_models(raw: &str) -> Vec<String> {
 
 #[component]
 fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (name, set_name) = signal(String::new());
     let (models, set_models) = signal(String::new());
     let (kind, set_kind) = signal(String::new());
@@ -64,9 +66,9 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
         !value.trim().is_empty() && !is_valid_combo_name(value.trim())
     });
 
-    // Owned up front: `Locale` holds its message table and is not `Copy`, so a closure that moved it
-    // would leave nothing for the view below to read.
-    let encode_failed = locale.get("combos.encode_failed").to_owned();
+    // Owned up front: `Locale` holds its message table, `t!` re-reads it at each use, and the closure
+    // still needs its own copy for the refusal path.
+    let encode_failed = StoredValue::new(t!("combos.encode_failed"));
 
     let create = move || {
         let label = name.get().trim().to_owned();
@@ -80,7 +82,7 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
             models: parse_models(&models.get()),
         };
         let Ok(encoded) = encode(&body) else {
-            set_save.set(Save::Refused(encode_failed.clone()));
+            set_save.set(Save::Refused(encode_failed.get_value()));
             return;
         };
 
@@ -97,74 +99,85 @@ fn CreateForm(reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4 mb-4">
-            <p class="text-sm text-muted-foreground">{locale.get("combos.create_hint").to_owned()}</p>
-            <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,8rem)]">
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("combos.field_name").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || name.get()
-                        on:input=move |ev| set_name.set(event_target_value(&ev))
-                        placeholder=locale.get("combos.name_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("combos.field_models").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                        prop:value=move || models.get()
-                        on:input=move |ev| set_models.set(event_target_value(&ev))
-                        placeholder=locale.get("combos.models_placeholder").to_owned()
-                    />
-                </label>
-                <label class="space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("combos.field_kind").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        prop:value=move || kind.get()
-                        on:input=move |ev| set_kind.set(event_target_value(&ev))
-                        placeholder=locale.get("combos.kind_placeholder").to_owned()
-                    />
-                </label>
-            </div>
-            <div class="flex items-center gap-3">
-                <button
-                    type="button"
-                    class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                    disabled=move || {
-                        save.get().is_saving() || name.get().trim().is_empty()
-                            || invalid_name.get()
+        <Card>
+            <CardHeader>
+                <div class="space-y-1">
+                    <CardTitle>{t!("combos.create")}</CardTitle>
+                    <p class="text-xs leading-relaxed text-muted-foreground">
+                        {t!("combos.create_hint")}
+                    </p>
+                </div>
+            </CardHeader>
+            <CardContent class="space-y-3">
+                <form
+                    class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,8rem)]"
+                    on:submit=move |event| {
+                        event.prevent_default();
+                        create();
                     }
-                    on:click=move |_| create()
                 >
-                    {locale.get("combos.create").to_owned()}
-                </button>
-                <InvalidNameHint invalid=invalid_name />
-            </div>
-            <SaveMessage save=save />
-        </section>
+                    <Field label=t!("combos.field_name") required=true>
+                        <Input
+                            value=Signal::derive(move || name.get())
+                            on_input=Callback::new(move |value| set_name.set(value))
+                            placeholder=t!("combos.name_placeholder")
+                            invalid=Signal::derive(move || invalid_name.get())
+                        />
+                    </Field>
+                    <Field label=t!("combos.field_kind")>
+                        <Input
+                            value=Signal::derive(move || kind.get())
+                            on_input=Callback::new(move |value| set_kind.set(value))
+                            placeholder=t!("combos.kind_placeholder")
+                        />
+                    </Field>
+                    <Field
+                        label=t!("combos.field_models")
+                        class="sm:col-span-2"
+                        description=t!("combos.models_hint")
+                    >
+                        <Textarea
+                            value=Signal::derive(move || models.get())
+                            on_input=Callback::new(move |value| set_models.set(value))
+                            placeholder=t!("combos.models_placeholder")
+                            rows=2
+                            class="font-mono text-xs"
+                        />
+                    </Field>
+                    <div class="flex flex-wrap items-center gap-3 sm:col-span-2">
+                        <Button
+                            label=t!("combos.create")
+                            button_type="submit"
+                            disabled=Signal::derive(move || {
+                                save.get().is_saving() || name.get().trim().is_empty()
+                                    || invalid_name.get()
+                            })
+                            busy=Signal::derive(move || save.get().is_saving())
+                        />
+                        <InvalidNameHint invalid=invalid_name />
+                    </div>
+                </form>
+                <SaveMessage save=save />
+            </CardContent>
+        </Card>
     }
 }
 
 /// Says why the create button is disabled, rather than leaving it dead with no explanation.
 #[component]
 fn InvalidNameHint(invalid: Memo<bool>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let hint = locale.get("combos.name_invalid").to_owned();
     view! {
         {move || {
-            let hint = hint.clone();
-            invalid.get().then(|| view! { <p class="text-sm text-muted-foreground">{hint}</p> })
+            invalid
+                .get()
+                .then(|| {
+                    view! {
+                        <p class="flex items-center gap-1.5 text-xs text-warning">
+                            <Icon name=IconName::Alert class="size-3.5" />
+                            {t!("combos.name_invalid")}
+                        </p>
+                    }
+                })
         }}
     }
 }
@@ -176,9 +189,7 @@ fn SaveMessage(save: ReadSignal<Save>) -> impl IntoView {
         {move || {
             save.get()
                 .message()
-                .map(|message| {
-                    view! { <p class="text-sm text-destructive" role="alert">{message}</p> }
-                })
+                .map(|message| view! { <ErrorNote message=message /> })
         }}
     }
 }
@@ -188,15 +199,20 @@ fn ComboList(
     rows: Vec<ComboRow>,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("combos.empty").to_owned()}</p>
+            <Card>
+                <EmptyState
+                    title=t!("combos.empty")
+                    description=t!("combos.empty_hint")
+                    icon=IconName::Combine
+                />
+            </Card>
         }
         .into_any();
     }
     view! {
-        <div class="space-y-3">
+        <div class="grid gap-3 xl:grid-cols-2">
             {rows
                 .into_iter()
                 .map(|row| view! { <ComboCard row=row reload=reload /> })
@@ -212,7 +228,6 @@ fn ComboList(
 /// failed save leaves the entered values on screen to correct.
 #[component]
 fn ComboCard(row: ComboRow, reload: impl Fn() + Copy + 'static + Send + Sync) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (editing, set_editing) = signal(false);
     let (save, set_save) = signal(Save::Idle);
     let (name, set_name) = signal(row.name.clone());
@@ -226,8 +241,8 @@ fn ComboCard(row: ComboRow, reload: impl Fn() + Copy + 'static + Send + Sync) ->
     let stored_models = StoredValue::new(row.models.join(", "));
     // The chips are rebuilt whenever the editor closes, so the list has to outlive the view body.
     let members = StoredValue::new(row.models.clone());
-    let name_invalid = StoredValue::new(locale.get("combos.name_invalid").to_owned());
-    let encode_failed = StoredValue::new(locale.get("combos.encode_failed").to_owned());
+    let name_invalid = StoredValue::new(t!("combos.name_invalid"));
+    let encode_failed = StoredValue::new(t!("combos.encode_failed"));
 
     let submit_edit = move || {
         let label = name.get().trim().to_owned();
@@ -274,37 +289,44 @@ fn ComboCard(row: ComboRow, reload: impl Fn() + Copy + 'static + Send + Sync) ->
         );
     };
 
-    // Every label owned before the view, because the toggle below needs one inside a `move` closure
-    // and `Locale` is not `Copy`.
-    let label_edit = locale.get("combos.edit").to_owned();
-    let label_cancel = locale.get("combos.cancel").to_owned();
-    let label_delete = locale.get("combos.delete").to_owned();
-    let label_save = locale.get("combos.save").to_owned();
-    let label_name = locale.get("combos.field_name").to_owned();
-    let label_models = locale.get("combos.field_models").to_owned();
+    let title = row.name.clone();
+    let row_id = row.id.clone();
+    let meta_kind = row.kind.clone().filter(|kind| !kind.trim().is_empty());
     let updated = (!row.updated_at.is_empty()).then(|| {
         format!(
             "{} {}",
-            locale.get("combos.updated"),
+            t!("combos.updated"),
             timestamp_label(&row.updated_at)
         )
     });
+    let member_count = row.models.len().to_string();
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-4 space-y-3">
-            <div class="flex items-start justify-between gap-3">
+        <Card>
+            <CardHeader>
                 <div class="min-w-0 space-y-1">
-                    <p class="font-medium truncate">{row.name}</p>
-                    <p class="text-xs text-muted-foreground">
-                        <code>{row.id}</code>
-                        {row.kind.map(|kind| view! { <span>{format!(" · {kind}")}</span> })}
-                        {updated.map(|stamp| view! { <span>{format!(" · {stamp}")}</span> })}
-                    </p>
+                    <CardTitle class="truncate">{title}</CardTitle>
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <code class="font-mono text-[0.6875rem] text-muted-foreground">
+                            {row_id}
+                        </code>
+                        {meta_kind
+                            .map(|kind| view! { <Badge variant=BadgeVariant::Outline>{kind}</Badge> })}
+                        <Badge variant=BadgeVariant::Secondary>{member_count}</Badge>
+                        {updated
+                            .map(|stamp| {
+                                view! {
+                                    <span class="text-[0.6875rem] text-muted-foreground">
+                                        {stamp}
+                                    </span>
+                                }
+                            })}
+                    </div>
                 </div>
-                <div class="flex items-center gap-3 shrink-0">
+                <div class="flex shrink-0 items-center gap-1">
                     <button
                         type="button"
-                        class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
+                        class=button_class(ButtonVariant::Ghost, ButtonSize::Sm)
                         disabled=move || save.get().is_saving()
                         on:click=move |_| {
                             // Reopening discards an abandoned edit rather than resuming it, and
@@ -318,74 +340,78 @@ fn ComboCard(row: ComboRow, reload: impl Fn() + Copy + 'static + Send + Sync) ->
                         }
                     >
                         {move || {
-                            if editing.get() { label_cancel.clone() } else { label_edit.clone() }
+                            if editing.get() {
+                                t!("combos.cancel")
+                            } else {
+                                t!("combos.edit")
+                            }
                         }}
                     </button>
                     <button
                         type="button"
-                        class="text-sm text-destructive underline-offset-4 hover:underline disabled:opacity-50"
+                        class=button_class(ButtonVariant::Ghost, ButtonSize::Sm)
                         disabled=move || save.get().is_saving()
                         on:click=move |_| remove()
                     >
-                        {label_delete}
+                        <span class="text-destructive">{t!("combos.delete")}</span>
                     </button>
                 </div>
-            </div>
-
-            {move || {
-                if editing.get() {
-                    view! {
-                        <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] pt-1">
-                            <label class="space-y-1 text-sm">
-                                <span class="text-muted-foreground">{label_name.clone()}</span>
-                                <input
-                                    type="text"
-                                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                    prop:value=move || name.get()
-                                    on:input=move |ev| set_name.set(event_target_value(&ev))
-                                />
-                            </label>
-                            <label class="space-y-1 text-sm">
-                                <span class="text-muted-foreground">{label_models.clone()}</span>
-                                <input
-                                    type="text"
-                                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
-                                    prop:value=move || models.get()
-                                    on:input=move |ev| set_models.set(event_target_value(&ev))
-                                />
-                            </label>
-                            <button
-                                type="button"
-                                class="justify-self-start rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                                disabled=move || {
-                                    save.get().is_saving() || name.get().trim().is_empty()
+            </CardHeader>
+            <CardContent class="space-y-3">
+                {move || {
+                    if editing.get() {
+                        view! {
+                            <form
+                                class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]"
+                                on:submit=move |event| {
+                                    event.prevent_default();
+                                    submit_edit();
                                 }
-                                on:click=move |_| submit_edit()
                             >
-                                {label_save.clone()}
-                            </button>
-                        </div>
+                                <Field label=t!("combos.field_name") required=true>
+                                    <Input
+                                        value=Signal::derive(move || name.get())
+                                        on_input=Callback::new(move |value| set_name.set(value))
+                                    />
+                                </Field>
+                                <Field label=t!("combos.field_models")>
+                                    <Textarea
+                                        value=Signal::derive(move || models.get())
+                                        on_input=Callback::new(move |value| set_models.set(value))
+                                        rows=2
+                                        class="font-mono text-xs"
+                                    />
+                                </Field>
+                                <div class="sm:col-span-2">
+                                    <Button
+                                        label=t!("combos.save")
+                                        button_type="submit"
+                                        size=ButtonSize::Sm
+                                        disabled=Signal::derive(move || {
+                                            save.get().is_saving() || name.get().trim().is_empty()
+                                        })
+                                        busy=Signal::derive(move || save.get().is_saving())
+                                    />
+                                </div>
+                            </form>
+                        }
+                            .into_any()
+                    } else {
+                        view! { <ModelChips models=members.get_value() /> }.into_any()
                     }
-                        .into_any()
-                } else {
-                    view! { <ModelChips models=members.get_value() /> }.into_any()
-                }
-            }}
-
-            <SaveMessage save=save />
-        </section>
+                }}
+                <SaveMessage save=save />
+            </CardContent>
+        </Card>
     }
 }
 
 /// The combo's members. An empty combo says so rather than rendering a blank row.
 #[component]
 fn ModelChips(models: Vec<String>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if models.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">
-                {locale.get("combos.no_models").to_owned()}
-            </p>
+            <p class="text-sm text-muted-foreground">{t!("combos.no_models")}</p>
         }
         .into_any();
     }
@@ -393,13 +419,7 @@ fn ModelChips(models: Vec<String>) -> impl IntoView {
         <div class="flex flex-wrap gap-1">
             {models
                 .into_iter()
-                .map(|model| {
-                    view! {
-                        <code class="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                            {model}
-                        </code>
-                    }
-                })
+                .map(|model| view! { <Badge variant=BadgeVariant::Code>{model}</Badge> })
                 .collect_view()}
         </div>
     }

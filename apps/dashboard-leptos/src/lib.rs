@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod routes;
 pub mod shell;
 pub mod theme;
+pub mod ui;
 
 /// Mount the dashboard into the document body.
 ///

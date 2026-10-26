@@ -7,6 +7,15 @@
 //!
 //! The step buttons run the real engine and write their output into the pane it belongs in, so the
 //! panes stay a record of one request rather than eight independently edited scratchpads.
+//!
+//! # Layout
+//!
+//! Two cards, in the order the work happens: the panes an operator reads and edits, then the stages
+//! that rewrite them. The pane selector is a row of chips rather than a dropdown because choosing a
+//! pane is switching between eight views of the same subject, and a dropdown hides seven of them
+//! behind a click. What a stage resolved -- the identity it carried forward, the wire call it built --
+//! is rendered inline under the buttons instead of in its own card, because it describes the step that
+//! just ran rather than a separate subject.
 
 use std::collections::BTreeMap;
 
@@ -14,7 +23,13 @@ use leptos::prelude::*;
 use serde_json::Value;
 
 use crate::api::{Method, Save};
-use crate::routes::{PageHeader, write_reporting};
+use crate::routes::{
+    Alert, AlertDescription, AlertVariant, Button, ButtonSize, ButtonVariant, Card, CardContent,
+    CardDescription, CardHeader, CardTitle, ErrorNote, Field, Icon, IconName, Input, Mono,
+    PageBody, PageHeader, Separator, StatusDot, StatusTone, Textarea, button_class,
+    write_reporting,
+};
+use crate::t;
 
 /// The only file names `/api/translator/load` and `/save` accept.
 ///
@@ -248,7 +263,10 @@ pub fn Translator() -> impl IntoView {
         });
     };
 
-    // Owned up front: these are needed inside async blocks, where a borrow of the locale cannot go.
+    // Owned up front, and deliberately not `t!`: these five are carried into `spawn_local` bodies,
+    // where there is no reactive owner to read the locale from context. `t!` there would silently
+    // fall back to the embedded English catalogue and drop the reader's language. The render-time
+    // messages below all use `t!`; only the ones that outlive the render are resolved here.
     let msg_saved = locale.get("translator.saved").to_owned();
     let msg_unreadable = locale.get("translator.unreadable").to_owned();
     let msg_invalid = locale.get("translator.invalid_json").to_owned();
@@ -457,143 +475,141 @@ pub fn Translator() -> impl IntoView {
     };
 
     view! {
-        <PageHeader
-            title=locale.get("nav.translator").to_owned()
-            description=locale.get("translator.description").to_owned()
-        />
+        <PageHeader title=t!("nav.translator") description=t!("translator.description") />
 
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("translator.panes").to_owned()}
-            </h2>
-            <p class="text-sm text-muted-foreground">
-                {locale.get("translator.pane_hint").to_owned()}
-            </p>
-            <div class="flex flex-wrap gap-2">
-                {PANES
-                    .into_iter()
-                    .map(|name| view! { <PaneTab name=name selected=selected /> })
-                    .collect_view()}
-            </div>
-            <textarea
-                class="w-full h-64 rounded-md border border-input bg-background px-3 py-2 \
-                       font-mono text-xs"
-                spellcheck="false"
-                autocomplete="off"
-                prop:value=move || read_pane(selected.get())
-                on:input=move |ev| write_pane(selected.get(), event_target_value(&ev))
-            />
-            <div class="flex flex-wrap items-center gap-2">
-                <button
-                    type="button"
-                    class="rounded-md border border-border px-3 py-2 text-sm font-medium \
-                           transition-colors hover:bg-accent disabled:opacity-50"
-                    disabled=move || io.get().is_saving()
-                    on:click=move |_| load_pane()
-                >
-                    {locale.get("translator.load").to_owned()}
-                </button>
-                <button
-                    type="button"
-                    class="rounded-md bg-primary px-3 py-2 text-sm font-medium \
-                           text-primary-foreground disabled:opacity-50"
-                    disabled=move || io.get().is_saving()
-                    on:click=move |_| save_pane()
-                >
-                    {locale.get("translator.save").to_owned()}
-                </button>
-            </div>
-            <NoticeLine notice=io_notice />
-        </section>
+        <PageBody>
+            <Card>
+                <CardHeader>
+                    <div class="min-w-0 space-y-1">
+                        <CardTitle>{t!("translator.panes")}</CardTitle>
+                        <CardDescription>{t!("translator.pane_hint")}</CardDescription>
+                    </div>
+                </CardHeader>
+                <CardContent class="space-y-3">
+                    <div class="flex flex-wrap gap-1.5">
+                        {PANES
+                            .into_iter()
+                            .map(|name| view! { <PaneTab name=name selected=selected /> })
+                            .collect_view()}
+                    </div>
+                    // `spellcheck="false"` on the wrapper rather than the field: the attribute
+                    // inherits into descendants, and a JSON pane covered in red squiggles is harder
+                    // to read than one that is not. The `Textarea` component exposes only the props
+                    // this layer supports, so the inherited form is what sets it.
+                    <div spellcheck="false">
+                        <Textarea
+                            value=Signal::derive(move || read_pane(selected.get()))
+                            on_input=Callback::new(move |value| write_pane(selected.get(), value))
+                            aria_label=t!("translator.panes")
+                            rows=14
+                            class="font-mono text-xs"
+                        />
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Button
+                            label=t!("translator.load")
+                            variant=ButtonVariant::Outline
+                            size=ButtonSize::Sm
+                            disabled=Signal::derive(move || io.get().is_saving())
+                            on_click=Callback::new(move |()| load_pane())
+                        />
+                        <Button
+                            label=t!("translator.save")
+                            size=ButtonSize::Sm
+                            disabled=Signal::derive(move || io.get().is_saving())
+                            busy=Signal::derive(move || io.get().is_saving())
+                            on_click=Callback::new(move |()| save_pane())
+                        />
+                    </div>
+                    <NoticeLine notice=io_notice />
+                </CardContent>
+            </Card>
 
-        <section class="mt-4 rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("translator.steps").to_owned()}
-            </h2>
-            <p class="text-sm text-muted-foreground">
-                {locale.get("translator.step_hint").to_owned()}
-            </p>
+            <Card>
+                <CardHeader>
+                    <div class="min-w-0 space-y-1">
+                        <CardTitle>{t!("translator.steps")}</CardTitle>
+                        <CardDescription>{t!("translator.step_hint")}</CardDescription>
+                    </div>
+                </CardHeader>
+                <CardContent class="space-y-3">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <Field label=t!("translator.provider")>
+                            <Input
+                                value=Signal::derive(move || provider.get())
+                                on_input=Callback::new(move |value| set_provider.set(value))
+                                class="font-mono text-xs"
+                            />
+                        </Field>
+                        <Field label=t!("translator.model")>
+                            <Input
+                                value=Signal::derive(move || model.get())
+                                on_input=Callback::new(move |value| set_model.set(value))
+                                class="font-mono text-xs"
+                            />
+                        </Field>
+                    </div>
 
-            <div class="grid gap-3 sm:grid-cols-2">
-                <label class="block space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("translator.provider").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 \
-                               font-mono text-xs"
-                        prop:value=move || provider.get()
-                        on:input=move |ev| set_provider.set(event_target_value(&ev))
-                    />
-                </label>
-                <label class="block space-y-1 text-sm">
-                    <span class="text-muted-foreground">
-                        {locale.get("translator.model").to_owned()}
-                    </span>
-                    <input
-                        type="text"
-                        class="w-full rounded-md border border-input bg-background px-3 py-2 \
-                               font-mono text-xs"
-                        prop:value=move || model.get()
-                        on:input=move |ev| set_model.set(event_target_value(&ev))
-                    />
-                </label>
-            </div>
+                    <div class="flex flex-wrap gap-2">
+                        <StepButton
+                            label=t!("translator.identify")
+                            busy=busy
+                            on_run=Callback::new(move |()| run_identify())
+                        />
+                        <StepButton
+                            label=t!("translator.to_openai")
+                            busy=busy
+                            on_run=Callback::new(move |()| to_openai())
+                        />
+                        <StepButton
+                            label=t!("translator.to_target")
+                            busy=busy
+                            on_run=Callback::new(move |()| to_target())
+                        />
+                        <StepButton
+                            label=t!("translator.to_client")
+                            busy=busy
+                            on_run=Callback::new(move |()| to_client())
+                        />
+                    </div>
 
-            <div class="flex flex-wrap gap-2">
-                <StepButton
-                    label=locale.get("translator.identify").to_owned()
-                    busy=busy
-                    on_run=Callback::new(move |()| run_identify())
-                />
-                <StepButton
-                    label=locale.get("translator.to_openai").to_owned()
-                    busy=busy
-                    on_run=Callback::new(move |()| to_openai())
-                />
-                <StepButton
-                    label=locale.get("translator.to_target").to_owned()
-                    busy=busy
-                    on_run=Callback::new(move |()| to_target())
-                />
-                <StepButton
-                    label=locale.get("translator.to_client").to_owned()
-                    busy=busy
-                    on_run=Callback::new(move |()| to_client())
-                />
-            </div>
+                    <NoticeLine notice=step_notice />
+                    {move || identity.get().map(|resolved| view! { <IdentityView resolved=resolved /> })}
+                    {move || wire.get().map(|resolved| view! { <WireView resolved=resolved /> })}
 
-            <NoticeLine notice=step_notice />
-            {move || identity.get().map(|resolved| view! { <IdentityView resolved=resolved /> })}
-            {move || wire.get().map(|resolved| view! { <WireView resolved=resolved /> })}
-
-            // Documented rather than offered as a button. `/api/translator/send` answers 501
-            // unconditionally in this port, and a control that cannot ever succeed is the same false
-            // promise as a retry offered on a 404.
-            <p class="text-xs text-muted-foreground">
-                {locale.get("translator.send_unsupported").to_owned()}
-            </p>
-        </section>
+                    <Separator />
+                    // Documented rather than offered as a button. `/api/translator/send` answers 501
+                    // unconditionally in this port, and a control that cannot ever succeed is the same false
+                    // promise as a retry offered on a 404.
+                    <p class="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
+                        <Icon name=IconName::Info class="mt-px size-3.5 shrink-0" />
+                        <span>{t!("translator.send_unsupported")}</span>
+                    </p>
+                </CardContent>
+            </Card>
+        </PageBody>
     }
 }
 
 /// One pane in the selector. The name is the label: it is what the router calls the file.
+///
+/// A `button_class` chip rather than [`Button`]: the selected variant has to be chosen from a signal on
+/// every render, and `Button` takes its `variant` as a plain prop, so the selected chip could not be
+/// expressed with it without a second component per state.
 #[component]
 fn PaneTab(name: &'static str, selected: RwSignal<&'static str>) -> impl IntoView {
+    let class = move || {
+        let variant = if selected.get() == name {
+            ButtonVariant::Secondary
+        } else {
+            ButtonVariant::Ghost
+        };
+        format!("{} font-mono", button_class(variant, ButtonSize::Sm))
+    };
     view! {
         <button
             type="button"
-            class=move || {
-                let state = if selected.get() == name {
-                    "border-primary bg-accent"
-                } else {
-                    "border-border hover:bg-accent/60"
-                };
-                format!(
-                    "{state} rounded-md border px-2.5 py-1.5 font-mono text-xs transition-colors"
-                )
-            }
+            class=class
             aria-pressed=move || (selected.get() == name).to_string()
             on:click=move |_| selected.set(name)
         >
@@ -602,22 +618,25 @@ fn PaneTab(name: &'static str, selected: RwSignal<&'static str>) -> impl IntoVie
     }
 }
 
+/// One stage action. Disabled for the duration of any stage, because the stages share the panes.
 #[component]
 fn StepButton(label: String, busy: ReadSignal<Save>, on_run: Callback<()>) -> impl IntoView {
     view! {
-        <button
-            type="button"
-            class="rounded-md border border-border px-3 py-2 text-sm font-medium \
-                   transition-colors hover:bg-accent disabled:opacity-50"
-            disabled=move || busy.get().is_saving()
-            on:click=move |_| on_run.run(())
-        >
-            {label}
-        </button>
+        <Button
+            label=label
+            variant=ButtonVariant::Outline
+            size=ButtonSize::Sm
+            busy=Signal::derive(move || busy.get().is_saving())
+            on_click=on_run
+        />
     }
 }
 
 /// The last thing an action reported, in the server's own words.
+///
+/// A failure is an [`ErrorNote`] and a success a [`StatusDot`], because those two cases are read
+/// differently: a save that failed has to be unmissable, and a save that worked needs to be
+/// acknowledged without competing with the pane beside it.
 #[component]
 fn NoticeLine(notice: ReadSignal<Option<Notice>>) -> impl IntoView {
     view! {
@@ -625,92 +644,89 @@ fn NoticeLine(notice: ReadSignal<Option<Notice>>) -> impl IntoView {
             notice
                 .get()
                 .map(|shown| {
-                    let class = if shown.ok {
-                        "text-sm text-foreground"
+                    if shown.ok {
+                        view! {
+                            <StatusDot label=shown.text tone=StatusTone::Success />
+                        }
+                            .into_any()
                     } else {
-                        "text-sm text-destructive"
-                    };
-                    let role = if shown.ok { "status" } else { "alert" };
-                    view! {
-                        <p class=class role=role>
-                            {shown.text}
-                        </p>
+                        view! { <ErrorNote message=shown.text /> }.into_any()
                     }
                 })
         }}
     }
 }
 
+/// One label/value pair inside a resolved stage.
+///
+/// Named `Detail` because [`Field`] is the form control wrapper and both are used on this page.
 #[component]
-fn Field(label: String, value: String) -> impl IntoView {
+fn Detail(#[prop(into)] label: String, #[prop(into)] value: String) -> impl IntoView {
     view! {
         <div class="min-w-0">
-            <dt class="text-xs text-muted-foreground">{label}</dt>
-            <dd class="font-mono text-xs break-all">{value}</dd>
+            <dt class="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">{label}</dt>
+            <dd class="break-all font-mono text-xs text-foreground">{value}</dd>
         </div>
     }
 }
 
 #[component]
 fn IdentityView(resolved: Identity) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     view! {
-        <dl class="grid gap-3 sm:grid-cols-4 rounded-md border border-border p-3">
-            <Field label=locale.get("translator.provider").to_owned() value=resolved.provider />
-            <Field label=locale.get("translator.model").to_owned() value=resolved.model />
-            <Field
-                label=locale.get("translator.source_format").to_owned()
-                value=resolved.source_format
-            />
-            <Field
-                label=locale.get("translator.target_format").to_owned()
-                value=resolved.target_format
-            />
-        </dl>
+        <div class="space-y-2">
+            <Separator />
+            <dl class="grid gap-3 sm:grid-cols-4">
+                <Detail label=t!("translator.provider") value=resolved.provider />
+                <Detail label=t!("translator.model") value=resolved.model />
+                <Detail label=t!("translator.source_format") value=resolved.source_format />
+                <Detail label=t!("translator.target_format") value=resolved.target_format />
+            </dl>
+        </div>
     }
 }
 
 /// Step 3's outbound call: where the request would go, and what it would carry.
 #[component]
 fn WireView(resolved: Wire) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let headers = resolved.headers.unwrap_or_default();
     let tools = resolved.tool_name_map;
 
     view! {
-        <div class="space-y-3 rounded-md border border-border p-3">
+        <div class="space-y-3">
+            <Separator />
             {resolved
                 .connection_error
                 .map(|error| {
                     view! {
                         // The router's sentence, not a rephrasing: it names the provider it could
                         // not find an active connection for.
-                        <p class="text-sm text-destructive" role="alert">
-                            {error}
-                        </p>
+                        <ErrorNote message=error />
                     }
                 })}
             {resolved
                 .url
                 .map(|url| {
                     view! {
-                        <dl>
-                            <Field label=locale.get("translator.url").to_owned() value=url />
-                        </dl>
+                        <div class="flex items-baseline justify-between gap-3">
+                            <span class="shrink-0 text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
+                                {t!("translator.url")}
+                            </span>
+                            <Mono value=url class="text-xs" />
+                        </div>
                     }
                 })}
             {(!headers.is_empty())
                 .then(|| {
                     view! {
-                        <div class="space-y-1">
-                            <p class="text-xs text-muted-foreground">
-                                {locale.get("translator.headers").to_owned()}
+                        <div class="space-y-1.5">
+                            <p class="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
+                                {t!("translator.headers")}
                             </p>
                             <dl class="grid gap-2 sm:grid-cols-2">
                                 {headers
                                     .into_iter()
                                     .map(|(name, value)| {
-                                        view! { <Field label=name value=value /> }
+                                        view! { <Detail label=name value=value /> }
                                     })
                                     .collect_view()}
                             </dl>
@@ -720,22 +736,22 @@ fn WireView(resolved: Wire) -> impl IntoView {
             {(!tools.is_empty())
                 .then(|| {
                     view! {
-                        <div class="space-y-1">
-                            <p class="text-xs text-muted-foreground">
-                                {locale.get("translator.tool_map").to_owned()}
+                        <div class="space-y-1.5">
+                            <p class="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
+                                {t!("translator.tool_map")}
                             </p>
                             <dl class="grid gap-2 sm:grid-cols-2">
                                 {tools
                                     .into_iter()
-                                    .map(|(from, to)| view! { <Field label=from value=to /> })
+                                    .map(|(from, to)| view! { <Detail label=from value=to /> })
                                     .collect_view()}
                             </dl>
                         </div>
                     }
                 })}
-            <p class="text-xs text-muted-foreground">
-                {locale.get("translator.redacted_note").to_owned()}
-            </p>
+            <Alert variant=AlertVariant::Muted>
+                <AlertDescription>{t!("translator.redacted_note")}</AlertDescription>
+            </Alert>
         </div>
     }
 }

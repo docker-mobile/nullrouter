@@ -17,11 +17,16 @@ use crate::routes::types::{
     Availability, CustomModels, DisabledModels, ModelAliases, ModelRow, ModelTestBody,
     ModelTestResult, ModelsList, encode_query,
 };
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Card, CardContent, CardHeader,
+    CardTitle, ErrorNote, Field, Icon, IconName, Input, PageBody, PageHeader, Panel, StatusDot,
+    StatusTone, Table, TableCell, TableEmpty, TableFrame, TableHead, TableHeaderCell, TableRow,
+    button_class,
+};
+use crate::t;
 
 #[component]
 pub fn Models() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (catalogue, set_catalogue) = signal(Hydrate::<ModelsList>::Loading);
     let (availability, set_availability) = signal(Hydrate::<Availability>::Loading);
     let (disabled, set_disabled) = signal(Hydrate::<DisabledModels>::Loading);
@@ -43,101 +48,116 @@ pub fn Models() -> impl IntoView {
     reload();
 
     view! {
-        <PageHeader
-            title=locale.get("nav.models").to_owned()
-            description=locale.get("models.description").to_owned()
-        />
-        <Panel
-            state=catalogue
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: ModelsList| view! { <Catalogue rows=data.models /> }
-        />
-        <div class="grid gap-4 md:grid-cols-2 mt-6">
-            <Section title=locale.get("models.availability").to_owned()>
-                <Panel
-                    state=availability
-                    on_retry=Callback::new(move |()| reload())
-                    children=|data: Availability| view! { <AvailabilityBody data=data /> }
-                />
-            </Section>
-            <Section title=locale.get("models.disabled").to_owned()>
-                <Panel
-                    state=disabled
-                    on_retry=Callback::new(move |()| reload())
-                    children=move |data: DisabledModels| {
-                        view! { <DisabledBody data=data reload=reload /> }
-                    }
-                />
-            </Section>
-        </div>
-        <div class="grid gap-4 md:grid-cols-2 mt-4">
-            <Section title=locale.get("models.custom").to_owned()>
-                <Panel
-                    state=custom
-                    on_retry=Callback::new(move |()| reload())
-                    children=move |data: CustomModels| {
-                        view! { <CustomBody data=data reload=reload /> }
-                    }
-                />
-            </Section>
-            <Section title=locale.get("models.aliases").to_owned()>
-                <Panel
-                    state=aliases
-                    on_retry=Callback::new(move |()| reload())
-                    children=move |data: ModelAliases| {
-                        view! { <AliasBody data=data reload=reload /> }
-                    }
-                />
-            </Section>
-        </div>
-    }
-}
+        <PageHeader title=t!("nav.models") description=t!("models.description") />
+        <PageBody>
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("models.catalogue")}</CardTitle>
+                </CardHeader>
+                <CardContent class="px-0 pb-0">
+                    <Panel
+                        state=catalogue
+                        on_retry=Callback::new(move |()| reload())
+                        children=move |data: ModelsList| view! { <Catalogue rows=data.models /> }
+                    />
+                </CardContent>
+            </Card>
 
-#[component]
-fn Section(title: String, children: Children) -> impl IntoView {
-    view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-3">
-            <h2 class="text-sm font-medium text-muted-foreground">{title}</h2>
-            {children()}
-        </section>
+            <div class="grid gap-4 md:grid-cols-2">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("models.availability")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=availability
+                            on_retry=Callback::new(move |()| reload())
+                            children=|data: Availability| view! { <AvailabilityBody data=data /> }
+                        />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("models.disabled")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=disabled
+                            on_retry=Callback::new(move |()| reload())
+                            children=move |data: DisabledModels| {
+                                view! { <DisabledBody data=data reload=reload /> }
+                            }
+                        />
+                    </CardContent>
+                </Card>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("models.custom")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=custom
+                            on_retry=Callback::new(move |()| reload())
+                            children=move |data: CustomModels| {
+                                view! { <CustomBody data=data reload=reload /> }
+                            }
+                        />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{t!("models.aliases")}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Panel
+                            state=aliases
+                            on_retry=Callback::new(move |()| reload())
+                            children=move |data: ModelAliases| {
+                                view! { <AliasBody data=data reload=reload /> }
+                            }
+                        />
+                    </CardContent>
+                </Card>
+            </div>
+        </PageBody>
     }
 }
 
 /// Every model the router can route to, with a reachability test per row.
 #[component]
 fn Catalogue(rows: Vec<ModelRow>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("models.empty").to_owned()}</p>
+            <TableFrame class="rounded-none border-0">
+                <Table>
+                    <TableEmpty message=t!("models.empty") columns=5 />
+                </Table>
+            </TableFrame>
         }
         .into_any();
     }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame class="rounded-none border-0">
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("models.col_model").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("models.col_provider").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("models.col_alias").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("models.col_caps").to_owned()}
-                        </th>
-                        <th class="px-3 py-2"></th>
+                        <TableHeaderCell>{t!("models.col_model")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("models.col_provider")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("models.col_alias")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("models.col_caps")}</TableHeaderCell>
+                        <TableHeaderCell class="text-right">{t!("table.actions")}</TableHeaderCell>
                     </tr>
-                </thead>
+                </TableHead>
                 <tbody>
                     {rows.into_iter().map(|row| view! { <ModelEntry row=row /> }).collect_view()}
                 </tbody>
-            </table>
-        </div>
+            </Table>
+        </TableFrame>
     }
     .into_any()
 }
@@ -148,34 +168,30 @@ fn Catalogue(rows: Vec<ModelRow>) -> impl IntoView {
 /// request has to carry, and two providers here offer the same model under different prefixes.
 #[component]
 fn ModelEntry(row: ModelRow) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (test, set_test) = signal(Save::Idle);
     let (result, set_result) = signal(None::<ModelTestResult>);
     let target = row.full_model.clone();
     // An alias equal to the model name is the catalogue's default, not a configured shorthand.
     let alias = (row.alias != row.model).then_some(row.alias);
-    // Owned before the button's closure takes them: `Locale` holds its table and is not `Copy`.
-    let label_test = locale.get("models.test").to_owned();
-    let label_testing = locale.get("models.testing").to_owned();
 
     view! {
-        <tr class="border-t border-border align-top">
-            <td class="px-3 py-2 font-mono text-xs">{row.full_model}</td>
-            <td class="px-3 py-2 text-muted-foreground">{row.provider}</td>
-            <td class="px-3 py-2 font-mono text-xs text-muted-foreground">
+        <TableRow hoverable=false>
+            <TableCell class="font-mono text-xs">{row.full_model}</TableCell>
+            <TableCell class="text-muted-foreground">{row.provider}</TableCell>
+            <TableCell class="font-mono text-xs text-muted-foreground">
                 {alias.unwrap_or_else(|| "—".to_owned())}
-            </td>
-            <td class="px-3 py-2">
+            </TableCell>
+            <TableCell>
                 <Caps
                     vision=row.caps.vision
                     search=row.caps.search
                     reasoning=row.caps.reasoning
                 />
-            </td>
-            <td class="px-3 py-2 text-right whitespace-nowrap">
+            </TableCell>
+            <TableCell class="whitespace-nowrap text-right">
                 <button
                     type="button"
-                    class="text-sm underline-offset-4 hover:underline disabled:opacity-50"
+                    class=button_class(ButtonVariant::Ghost, ButtonSize::Sm)
                     disabled=move || test.get().is_saving()
                     on:click=move |_| {
                         let Ok(body) = encode(&ModelTestBody { model: &target, kind: "llm" }) else {
@@ -194,15 +210,15 @@ fn ModelEntry(row: ModelRow) -> impl IntoView {
                 >
                     {move || {
                         if test.get().is_saving() {
-                            label_testing.clone()
+                            t!("models.testing")
                         } else {
-                            label_test.clone()
+                            t!("models.test")
                         }
                     }}
                 </button>
                 <TestOutcome test=test result=result />
-            </td>
-        </tr>
+            </TableCell>
+        </TableRow>
     }
 }
 
@@ -215,42 +231,39 @@ fn TestOutcome(
     test: ReadSignal<Save>,
     result: ReadSignal<Option<ModelTestResult>>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     view! {
         {move || {
             test.get()
                 .message()
-                .map(|message| {
-                    view! { <p class="mt-1 text-xs text-destructive text-right">{message}</p> }
-                })
+                .map(|message| view! { <ErrorNote message=message class="mt-1 text-xs" /> })
         }}
         {move || {
             result
                 .get()
                 .map(|outcome| {
                     let millis = outcome.latency_ms.to_string();
-                    let latency = locale.fmt("models.test_latency", &[("ms", &millis)]);
+                    let latency = crate::i18n::use_locale()
+                        .fmt("models.test_latency", &[("ms", &millis)]);
                     if outcome.ok {
                         view! {
-                            <p class="mt-1 text-xs text-right text-muted-foreground">
-                                <span class="text-success">
-                                    {locale.get("models.test_ok").to_owned()}
-                                </span>
-                                {format!(" · {latency}")}
+                            <p class="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+                                <StatusDot label=t!("models.test_ok") tone=StatusTone::Success />
+                                <span class="font-mono text-xs text-muted-foreground">{latency}</span>
                             </p>
                         }
                             .into_any()
                     } else {
                         // The provider's own wording. "Failed" tells nobody what to change.
                         let detail = if outcome.error.is_empty() {
-                            locale.get("models.test_failed").to_owned()
+                            t!("models.test_failed")
                         } else {
                             outcome.error
                         };
                         view! {
-                            <p class="mt-1 text-xs text-destructive text-right max-w-64 ml-auto whitespace-normal break-words">
-                                {detail}
-                            </p>
+                            <ErrorNote
+                                message=detail
+                                class="mt-1 max-w-64 justify-end text-right text-xs"
+                            />
                         }
                             .into_any()
                     }
@@ -265,19 +278,18 @@ fn TestOutcome(
 /// all three false, and a row of three dim badges reads as a rendering fault.
 ///
 /// Each label is looked up by a literal key rather than through a table of key strings. `i18n-gen`
-/// finds keys by scanning for `get("` in the source, so a key reaching the lookup through a variable
+/// finds keys by scanning for `t!("` in the source, so a key reaching the lookup through a variable
 /// is invisible to it and never lands in the locale files -- which shows up as a raw key on screen.
 #[component]
 fn Caps(vision: bool, search: bool, reasoning: bool) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let present: Vec<String> = [
-        (vision, locale.get("models.cap_vision")),
-        (search, locale.get("models.cap_search")),
-        (reasoning, locale.get("models.cap_reasoning")),
+        (vision, t!("models.cap_vision")),
+        (search, t!("models.cap_search")),
+        (reasoning, t!("models.cap_reasoning")),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
-    .map(|(_, label)| label.to_owned())
+    .map(|(_, label)| label)
     .collect();
 
     if present.is_empty() {
@@ -287,13 +299,7 @@ fn Caps(vision: bool, search: bool, reasoning: bool) -> impl IntoView {
         <div class="flex flex-wrap gap-1">
             {present
                 .into_iter()
-                .map(|label| {
-                    view! {
-                        <span class="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                            {label}
-                        </span>
-                    }
-                })
+                .map(|label| view! { <Badge variant=BadgeVariant::Outline>{label}</Badge> })
                 .collect_view()}
         </div>
     }
@@ -303,30 +309,42 @@ fn Caps(vision: bool, search: bool, reasoning: bool) -> impl IntoView {
 /// Models the router is currently refusing to route to.
 #[component]
 fn AvailabilityBody(data: Availability) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
+    let count = data.unavailable_count.to_string();
     if data.models.is_empty() {
         // The count is shown even with no rows: a non-zero count beside an empty list means the
         // router is holding models back without saying which, which is worth seeing rather than
         // rendering as "all clear".
-        let label = if data.unavailable_count == 0 {
-            locale.get("models.availability_none").to_owned()
+        return if data.unavailable_count == 0 {
+            view! {
+                <p class="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Icon name=IconName::Check class="size-4 text-success" />
+                    {t!("models.availability_none")}
+                </p>
+            }
+            .into_any()
         } else {
-            let count = data.unavailable_count.to_string();
-            locale.fmt("models.availability_count", &[("count", &count)])
+            view! {
+                <p class="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Icon name=IconName::Alert class="size-4 text-warning" />
+                    {crate::i18n::use_locale()
+                        .fmt("models.availability_count", &[("count", &count)])}
+                </p>
+            }
+            .into_any()
         };
-        return view! { <p class="text-sm text-muted-foreground">{label}</p> }.into_any();
     }
     view! {
-        <ul class="space-y-1 text-sm">
+        <ul class="divide-y divide-border/70">
             {data
                 .models
                 .into_iter()
                 .map(|row| {
                     view! {
-                        <li class="flex items-center justify-between gap-3">
-                            <span class="font-mono text-xs truncate">
+                        <li class="flex items-center justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+                            <code class="min-w-0 truncate font-mono text-xs">
                                 {format!("{}/{}", row.provider, row.model)}
-                            </span>
+                            </code>
+                            <Badge variant=BadgeVariant::Warning>{t!("models.unavailable")}</Badge>
                         </li>
                     }
                 })
@@ -347,16 +365,12 @@ fn DisabledBody(
     data: DisabledModels,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (provider, set_provider) = signal(String::new());
     let (id, set_id) = signal(String::new());
     let (save, set_save) = signal(Save::Idle);
     // In a `StoredValue` rather than a plain `String`: the closure below and the rows in the view both
     // need this text, and a `String` moved into the closure leaves nothing for the view to read.
-    let encode_failed = StoredValue::new(locale.get("models.encode_failed").to_owned());
-    let label_disable = locale.get("models.disable").to_owned();
-    let label_enable = locale.get("models.enable").to_owned();
-    let label_enable_all = locale.get("models.enable_all").to_owned();
+    let encode_failed = StoredValue::new(t!("models.encode_failed"));
     let current = StoredValue::new(data.disabled.clone());
 
     let disable = move || {
@@ -387,17 +401,15 @@ fn DisabledBody(
     };
 
     view! {
-        <div class="space-y-4">
+        <div class="space-y-3">
             {if data.disabled.is_empty() {
                 view! {
-                    <p class="text-sm text-muted-foreground">
-                        {locale.get("models.disabled_none").to_owned()}
-                    </p>
+                    <p class="text-sm text-muted-foreground">{t!("models.disabled_none")}</p>
                 }
                     .into_any()
             } else {
                 view! {
-                    <dl class="space-y-2 text-sm">
+                    <dl class="space-y-3">
                         {data
                             .disabled
                             .into_iter()
@@ -407,8 +419,6 @@ fn DisabledBody(
                                         provider=provider_alias
                                         ids=ids
                                         reload=reload
-                                        enable_label=label_enable.clone()
-                                        enable_all_label=label_enable_all.clone()
                                         encode_failed=encode_failed.get_value()
                                     />
                                 }
@@ -418,33 +428,42 @@ fn DisabledBody(
                 }
                     .into_any()
             }}
-            <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                    prop:value=move || provider.get()
-                    on:input=move |ev| set_provider.set(event_target_value(&ev))
-                    placeholder=locale.get("models.provider_placeholder").to_owned()
-                />
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                    prop:value=move || id.get()
-                    on:input=move |ev| set_id.set(event_target_value(&ev))
-                    placeholder=locale.get("models.model_placeholder").to_owned()
-                />
-                <button
-                    type="button"
-                    class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                    disabled=move || {
+
+            <form
+                class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                on:submit=move |event| {
+                    event.prevent_default();
+                    disable();
+                }
+            >
+                <Field label=t!("models.provider_placeholder")>
+                    <Input
+                        value=Signal::derive(move || provider.get())
+                        on_input=Callback::new(move |value| set_provider.set(value))
+                        placeholder=t!("models.provider_placeholder")
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("models.model_placeholder")>
+                    <Input
+                        value=Signal::derive(move || id.get())
+                        on_input=Callback::new(move |value| set_id.set(value))
+                        placeholder=t!("models.model_placeholder")
+                        class="font-mono"
+                    />
+                </Field>
+                <Button
+                    label=t!("models.disable")
+                    variant=ButtonVariant::Outline
+                    button_type="submit"
+                    disabled=Signal::derive(move || {
                         save.get().is_saving() || provider.get().trim().is_empty()
                             || id.get().trim().is_empty()
-                    }
-                    on:click=move |_| disable()
-                >
-                    {label_disable}
-                </button>
-            </div>
+                    })
+                    busy=Signal::derive(move || save.get().is_saving())
+                    class="sm:mb-0.5"
+                />
+            </form>
             <SaveLine save=save />
         </div>
     }
@@ -456,8 +475,6 @@ fn DisabledProvider(
     provider: String,
     ids: Vec<String>,
     reload: impl Fn() + Copy + 'static + Send + Sync,
-    enable_label: String,
-    enable_all_label: String,
     encode_failed: String,
 ) -> impl IntoView {
     let (save, set_save) = signal(Save::Idle);
@@ -480,17 +497,16 @@ fn DisabledProvider(
     };
 
     view! {
-        <div class="space-y-1">
-            <dt class="flex items-center justify-between gap-3 text-muted-foreground">
-                <span>{provider}</span>
-                <button
-                    type="button"
-                    class="text-xs underline-offset-4 hover:underline disabled:opacity-50"
-                    disabled=move || save.get().is_saving()
-                    on:click=move |_| enable_all()
-                >
-                    {enable_all_label}
-                </button>
+        <div class="space-y-1.5">
+            <dt class="flex items-center justify-between gap-3">
+                <code class="min-w-0 truncate font-mono text-xs text-foreground">{provider}</code>
+                <Button
+                    label=t!("models.enable_all")
+                    variant=ButtonVariant::Ghost
+                    size=ButtonSize::Sm
+                    disabled=Signal::derive(move || save.get().is_saving())
+                    on_click=Callback::new(move |()| enable_all())
+                />
             </dt>
             <dd class="flex flex-wrap gap-1">
                 {ids
@@ -502,7 +518,6 @@ fn DisabledProvider(
                                 remaining=remaining.get_value()
                                 id=id
                                 reload=reload
-                                enable_label=enable_label.clone()
                                 encode_failed=encode_failed.clone()
                             />
                         }
@@ -521,7 +536,6 @@ fn DisabledId(
     remaining: Vec<String>,
     id: String,
     reload: impl Fn() + Copy + 'static + Send + Sync,
-    enable_label: String,
     encode_failed: String,
 ) -> impl IntoView {
     let (save, set_save) = signal(Save::Idle);
@@ -554,15 +568,20 @@ fn DisabledId(
         );
     };
     view! {
-        <span class="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs">
-            <code>{id}</code>
+        <span class="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 \
+                     py-0.5 pr-1 pl-1.5 text-xs">
+            <code class="font-mono">{id}</code>
             <button
                 type="button"
-                class="underline-offset-4 hover:underline disabled:opacity-50"
+                class="rounded px-1 text-[0.6875rem] text-muted-foreground outline-none \
+                       transition-colors hover:bg-accent hover:text-foreground \
+                       focus-visible:ring-[3px] focus-visible:ring-ring/50 \
+                       disabled:pointer-events-none disabled:opacity-50"
+                aria-label=t!("models.enable")
                 disabled=move || save.get().is_saving()
                 on:click=move |_| enable()
             >
-                {enable_label}
+                <Icon name=IconName::X class="size-3" />
             </button>
         </span>
     }
@@ -574,15 +593,12 @@ fn CustomBody(
     data: CustomModels,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (provider, set_provider) = signal(String::new());
     let (id, set_id) = signal(String::new());
     let (name, set_name) = signal(String::new());
     let (kind, set_kind) = signal(String::new());
     let (save, set_save) = signal(Save::Idle);
-    let encode_failed = locale.get("models.encode_failed").to_owned();
-    let label_add = locale.get("models.add_custom").to_owned();
-    let label_remove = locale.get("models.remove").to_owned();
+    let encode_failed = t!("models.encode_failed");
 
     let add = move || {
         let alias = provider.get().trim().to_owned();
@@ -617,75 +633,77 @@ fn CustomBody(
     };
 
     view! {
-        <div class="space-y-4">
+        <div class="space-y-3">
             {if data.models.is_empty() {
                 view! {
-                    <p class="text-sm text-muted-foreground">
-                        {locale.get("models.custom_none").to_owned()}
-                    </p>
+                    <p class="text-sm text-muted-foreground">{t!("models.custom_none")}</p>
                 }
                     .into_any()
             } else {
                 view! {
-                    <ul class="space-y-1 text-sm">
+                    <ul class="divide-y divide-border/70">
                         {data
                             .models
                             .into_iter()
                             .map(|entry| {
-                                view! {
-                                    <CustomRow
-                                        entry=entry
-                                        reload=reload
-                                        remove_label=label_remove.clone()
-                                    />
-                                }
+                                view! { <CustomRow entry=entry reload=reload /> }
                             })
                             .collect_view()}
                     </ul>
                 }
                     .into_any()
             }}
-            <div class="grid gap-2 sm:grid-cols-2">
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                    prop:value=move || provider.get()
-                    on:input=move |ev| set_provider.set(event_target_value(&ev))
-                    placeholder=locale.get("models.provider_placeholder").to_owned()
-                />
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                    prop:value=move || id.get()
-                    on:input=move |ev| set_id.set(event_target_value(&ev))
-                    placeholder=locale.get("models.model_placeholder").to_owned()
-                />
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    prop:value=move || name.get()
-                    on:input=move |ev| set_name.set(event_target_value(&ev))
-                    placeholder=locale.get("models.custom_name_placeholder").to_owned()
-                />
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    prop:value=move || kind.get()
-                    on:input=move |ev| set_kind.set(event_target_value(&ev))
-                    placeholder=locale.get("models.custom_type_placeholder").to_owned()
-                />
-            </div>
-            <button
-                type="button"
-                class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled=move || {
-                    save.get().is_saving() || provider.get().trim().is_empty()
-                        || id.get().trim().is_empty()
+
+            <form
+                class="grid gap-2 sm:grid-cols-2"
+                on:submit=move |event| {
+                    event.prevent_default();
+                    add();
                 }
-                on:click=move |_| add()
             >
-                {label_add}
-            </button>
+                <Field label=t!("models.provider_placeholder")>
+                    <Input
+                        value=Signal::derive(move || provider.get())
+                        on_input=Callback::new(move |value| set_provider.set(value))
+                        placeholder=t!("models.provider_placeholder")
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("models.model_placeholder")>
+                    <Input
+                        value=Signal::derive(move || id.get())
+                        on_input=Callback::new(move |value| set_id.set(value))
+                        placeholder=t!("models.model_placeholder")
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("models.custom_name")>
+                    <Input
+                        value=Signal::derive(move || name.get())
+                        on_input=Callback::new(move |value| set_name.set(value))
+                        placeholder=t!("models.custom_name_placeholder")
+                    />
+                </Field>
+                <Field label=t!("models.custom_type")>
+                    <Input
+                        value=Signal::derive(move || kind.get())
+                        on_input=Callback::new(move |value| set_kind.set(value))
+                        placeholder=t!("models.custom_type_placeholder")
+                    />
+                </Field>
+                <div class="sm:col-span-2">
+                    <Button
+                        label=t!("models.add_custom")
+                        variant=ButtonVariant::Outline
+                        button_type="submit"
+                        disabled=Signal::derive(move || {
+                            save.get().is_saving() || provider.get().trim().is_empty()
+                                || id.get().trim().is_empty()
+                        })
+                        busy=Signal::derive(move || save.get().is_saving())
+                    />
+                </div>
+            </form>
             <SaveLine save=save />
         </div>
     }
@@ -696,7 +714,6 @@ fn CustomBody(
 fn CustomRow(
     entry: crate::routes::types::CustomModel,
     reload: impl Fn() + Copy + 'static + Send + Sync,
-    remove_label: String,
 ) -> impl IntoView {
     let (save, set_save) = signal(Save::Idle);
     let name = if entry.name.is_empty() {
@@ -722,19 +739,18 @@ fn CustomRow(
         );
     };
     view! {
-        <li class="flex items-center justify-between gap-3">
-            <span class="truncate">{name}</span>
-            <span class="shrink-0 flex items-center gap-2 text-xs text-muted-foreground">
-                <code>{entry.provider_alias}</code>
-                {(!kind.is_empty()).then(|| view! { <span>{kind}</span> })}
-                <button
-                    type="button"
-                    class="underline-offset-4 hover:underline disabled:opacity-50"
-                    disabled=move || save.get().is_saving()
-                    on:click=move |_| remove()
-                >
-                    {remove_label}
-                </button>
+        <li class="flex items-center justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+            <span class="min-w-0 truncate text-sm">{name}</span>
+            <span class="flex shrink-0 items-center gap-1.5">
+                <Badge variant=BadgeVariant::Code>{entry.provider_alias}</Badge>
+                {(!kind.is_empty()).then(|| view! { <Badge variant=BadgeVariant::Outline>{kind}</Badge> })}
+                <Button
+                    label=t!("models.remove")
+                    variant=ButtonVariant::Ghost
+                    size=ButtonSize::Sm
+                    disabled=Signal::derive(move || save.get().is_saving())
+                    on_click=Callback::new(move |()| remove())
+                />
             </span>
         </li>
         <SaveLine save=save />
@@ -747,13 +763,10 @@ fn AliasBody(
     data: ModelAliases,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (alias, set_alias) = signal(String::new());
     let (model, set_model) = signal(String::new());
     let (save, set_save) = signal(Save::Idle);
-    let encode_failed = locale.get("models.encode_failed").to_owned();
-    let label_set = locale.get("models.set_alias").to_owned();
-    let label_remove = locale.get("models.remove").to_owned();
+    let encode_failed = t!("models.encode_failed");
 
     let set = move || {
         let name = alias.get().trim().to_owned();
@@ -780,62 +793,62 @@ fn AliasBody(
     };
 
     view! {
-        <div class="space-y-4">
+        <div class="space-y-3">
             {if data.aliases.is_empty() {
                 view! {
-                    <p class="text-sm text-muted-foreground">
-                        {locale.get("models.aliases_none").to_owned()}
-                    </p>
+                    <p class="text-sm text-muted-foreground">{t!("models.aliases_none")}</p>
                 }
                     .into_any()
             } else {
                 view! {
-                    <ul class="space-y-1 text-sm">
+                    <ul class="divide-y divide-border/70">
                         {data
                             .aliases
                             .into_iter()
                             .map(|(name, target)| {
-                                view! {
-                                    <AliasRow
-                                        alias=name
-                                        model=target
-                                        reload=reload
-                                        remove_label=label_remove.clone()
-                                    />
-                                }
+                                view! { <AliasRow alias=name model=target reload=reload /> }
                             })
                             .collect_view()}
                     </ul>
                 }
                     .into_any()
             }}
-            <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                    prop:value=move || alias.get()
-                    on:input=move |ev| set_alias.set(event_target_value(&ev))
-                    placeholder=locale.get("models.alias_placeholder").to_owned()
-                />
-                <input
-                    type="text"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-xs"
-                    prop:value=move || model.get()
-                    on:input=move |ev| set_model.set(event_target_value(&ev))
-                    placeholder=locale.get("models.model_placeholder").to_owned()
-                />
-                <button
-                    type="button"
-                    class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                    disabled=move || {
+
+            <form
+                class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                on:submit=move |event| {
+                    event.prevent_default();
+                    set();
+                }
+            >
+                <Field label=t!("models.alias_placeholder")>
+                    <Input
+                        value=Signal::derive(move || alias.get())
+                        on_input=Callback::new(move |value| set_alias.set(value))
+                        placeholder=t!("models.alias_placeholder")
+                        class="font-mono"
+                    />
+                </Field>
+                <Field label=t!("models.model_placeholder")>
+                    <Input
+                        value=Signal::derive(move || model.get())
+                        on_input=Callback::new(move |value| set_model.set(value))
+                        placeholder=t!("models.model_placeholder")
+                        class="font-mono"
+                    />
+                </Field>
+                <Button
+                    label=t!("models.set_alias")
+                    variant=ButtonVariant::Outline
+                    button_type="submit"
+                    disabled=Signal::derive(move || {
                         save.get().is_saving() || alias.get().trim().is_empty()
                             || model.get().trim().is_empty()
-                    }
-                    on:click=move |_| set()
-                >
-                    {label_set}
-                </button>
-            </div>
+                    })
+                    busy=Signal::derive(move || save.get().is_saving())
+                    class="sm:mb-0.5"
+                />
+            </form>
             <SaveLine save=save />
         </div>
     }
@@ -847,7 +860,6 @@ fn AliasRow(
     alias: String,
     model: String,
     reload: impl Fn() + Copy + 'static + Send + Sync,
-    remove_label: String,
 ) -> impl IntoView {
     let (save, set_save) = signal(Save::Idle);
     let path = format!("/api/models/alias?alias={}", encode_query(&alias));
@@ -863,17 +875,17 @@ fn AliasRow(
         );
     };
     view! {
-        <li class="flex items-center justify-between gap-3">
-            <span class="font-mono text-xs truncate">{alias}</span>
-            <span class="shrink-0 flex items-center gap-2 text-xs text-muted-foreground">
-                <code>{model}</code>
+        <li class="flex items-center justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
+            <code class="min-w-0 truncate font-mono text-xs">{alias}</code>
+            <span class="flex shrink-0 items-center gap-1.5">
+                <Badge variant=BadgeVariant::Code>{model}</Badge>
                 <button
                     type="button"
-                    class="underline-offset-4 hover:underline disabled:opacity-50"
+                    class=button_class(ButtonVariant::Ghost, ButtonSize::Sm)
                     disabled=move || save.get().is_saving()
                     on:click=move |_| remove()
                 >
-                    {remove_label}
+                    {t!("models.remove")}
                 </button>
             </span>
         </li>
@@ -891,9 +903,7 @@ fn SaveLine(save: ReadSignal<Save>) -> impl IntoView {
         {move || {
             save.get()
                 .message()
-                .map(|message| {
-                    view! { <p class="text-xs text-destructive">{message}</p> }
-                })
+                .map(|message| view! { <ErrorNote message=message class="text-xs" /> })
         }}
     }
 }

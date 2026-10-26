@@ -70,11 +70,6 @@ console_error_panic_hook = "0.1"
 http = "1"
 leptos = { version = "=0.8.14", default-features = false, features = ["csr"] }
 leptos_router = { version = "=0.8.10", default-features = false }
-# The dashboard's component layer. `default-features = false` is load-bearing: the default
-# `all-components` feature pulls in `performance-audit`, whose `statistical` -> `num 0.1` ->
-# `rustc-serialize` chain does not compile on any current rustc (E0046). Components are enabled
-# one by one in the dashboard manifest instead.
-leptos-shadcn-ui = { version = "0.9", default-features = false }
 mime_guess = "2"
 nullrouter-contracts = { path = "crates/contracts" }
 nullrouter-logship = { path = "crates/logship" }

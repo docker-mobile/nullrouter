@@ -3,10 +3,14 @@ use nullrouter_dashboard_host::DashboardConfig;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-const FONT_ASSETS: [&str; 2] = [
-    "/assets/fonts/inter-latin.woff2",
-    "/assets/fonts/material-symbols-g016.woff2",
-];
+/// The fonts the shell preloads.
+///
+/// `inter-latin.woff2` is the interface face and the stylesheet has a matching `@font-face` for it. The
+/// Material Symbols icon fonts used to be listed here; the dashboard now draws every icon as inline SVG
+/// geometry from `apps/dashboard-leptos/src/ui/icon.rs`, so nothing references those files and preloading
+/// them was a 33 KB request for a font no element set. They remain on disk because deleting a binary asset
+/// is outside what this change is for.
+const FONT_ASSETS: [&str; 1] = ["/assets/fonts/inter-latin.woff2"];
 
 #[actix_web::test]
 async fn dashboard_shell_preloads_and_serves_local_fonts() -> TestResult {
@@ -24,7 +28,7 @@ async fn dashboard_shell_preloads_and_serves_local_fonts() -> TestResult {
     let html = to_bytes(html_response.into_body()).await?;
     let html = std::str::from_utf8(&html)?;
 
-    // Then: both fonts are preloaded and served as nonempty WOFF2 assets.
+    // Then: each font is preloaded and served as a nonempty WOFF2 asset.
     for font in FONT_ASSETS {
         assert!(
             html.contains(&format!(

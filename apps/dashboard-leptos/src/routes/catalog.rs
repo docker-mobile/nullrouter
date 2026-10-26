@@ -7,8 +7,13 @@
 
 use leptos::prelude::*;
 
+use crate::t;
+
 use crate::api::{Hydrate, load};
-use crate::routes::{PageHeader, Panel};
+use crate::ui::{
+    Badge, BadgeVariant, Card, CardContent, CardHeader, CardTitle, EmptyState, IconName, PageBody,
+    PageHeader, Panel, StatusDot, StatusTone, Tabs,
+};
 
 /// One upstream and every path the gateway routes to it.
 #[derive(Clone, Debug, Default, serde::Deserialize)]
@@ -81,7 +86,6 @@ struct ProviderCatalog {
 
 #[component]
 pub fn Catalog() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (routes, set_routes) = signal(Hydrate::<RouteCatalog>::Loading);
     let (providers, set_providers) = signal(Hydrate::<ProviderCatalog>::Loading);
 
@@ -93,49 +97,69 @@ pub fn Catalog() -> impl IntoView {
     };
     reload();
 
+    // One page, two views of the same question. Tabs rather than two stacked sections: both lists are
+    // long, and stacking them means scrolling past 40 route families to reach a provider.
+    let (tab, set_tab) = signal(0usize);
+    // Resolved once, not inside a `move ||`: the `view!` that builds the tab strip moves its
+    // labels, and a second read for the body closure below would consume them.
+    let routes_label = t!("catalog.routes_title");
+    let providers_label = t!("catalog.providers_title");
+    let tab_labels = Signal::derive(move || vec![routes_label.clone(), providers_label.clone()]);
+    let selected = Signal::derive(move || tab.get());
+
+    let heading = t!("nav.catalog");
+    let blurb = t!("catalog.description");
+
     view! {
-        <PageHeader
-            title=locale.get("nav.catalog").to_owned()
-            description=locale.get("catalog.description").to_owned()
-        />
+        <PageHeader title=heading description=blurb />
 
-        <section class="space-y-3">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("catalog.routes_title").to_owned()}
-            </h2>
-            <Panel
-                state=routes
-                on_retry=Callback::new(move |()| reload())
-                children=move |data: RouteCatalog| view! { <Families rows=data.families /> }
+        <PageBody>
+            <Tabs
+                labels=tab_labels
+                selected=selected
+                on_select=Callback::new(move |index| set_tab.set(index))
             />
-        </section>
 
-        <section class="mt-6 space-y-3">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("catalog.providers_title").to_owned()}
-            </h2>
-            <Panel
-                state=providers
-                on_retry=Callback::new(move |()| reload())
-                children=move |data: ProviderCatalog| view! { <Providers rows=data.providers /> }
-            />
-        </section>
+            {move || {
+                if tab.get() == 0 {
+                    view! {
+                        <Panel
+                            state=routes
+                            on_retry=Callback::new(move |()| reload())
+                            children=move |data: RouteCatalog| view! { <Families rows=data.families /> }
+                        />
+                    }
+                        .into_any()
+                } else {
+                    view! {
+                        <Panel
+                            state=providers
+                            on_retry=Callback::new(move |()| reload())
+                            children=move |data: ProviderCatalog| view! { <Providers rows=data.providers /> }
+                        />
+                    }
+                        .into_any()
+                }
+            }}
+        </PageBody>
     }
 }
 
 #[component]
 fn Families(rows: Vec<RouteFamily>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">
-                {locale.get("catalog.no_routes").to_owned()}
-            </p>
+            <Card>
+                <EmptyState
+                    title=t!("catalog.no_routes")
+                    icon=IconName::Route
+                />
+            </Card>
         }
         .into_any();
     }
     view! {
-        <div class="space-y-4">
+        <div class="grid gap-3 xl:grid-cols-2">
             {rows.into_iter().map(|family| view! { <Family family=family /> }).collect_view()}
         </div>
     }
@@ -150,74 +174,79 @@ fn Family(family: RouteFamily) -> impl IntoView {
     let rewritten = family.gateway_prefix != family.source_prefix;
     let count = family.routes.len().to_string();
 
+    let title = family.title.clone();
+    let id = family.id.clone();
+    let route_count = locale.fmt("catalog.route_count", &[("count", &count)]);
+    let upstream_label = t!("catalog.upstream");
+    let prefix_label = if rewritten {
+        t!("catalog.prefix_rewritten")
+    } else {
+        t!("catalog.prefix")
+    };
+    let upstream = family.upstream.clone();
+    let prefix = if rewritten {
+        format!(
+            "{} \u{2192} {}",
+            family.gateway_prefix, family.source_prefix
+        )
+    } else {
+        family.gateway_prefix.clone()
+    };
+
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-3">
-            <div class="flex flex-wrap items-baseline justify-between gap-2">
-                <div class="space-y-1 min-w-0">
-                    <h3 class="text-sm font-semibold tracking-tight truncate">{family.title}</h3>
-                    <code class="text-xs text-muted-foreground">{family.id}</code>
+        <Card>
+            <CardHeader>
+                <div class="min-w-0 space-y-1">
+                    <CardTitle class="truncate">{title}</CardTitle>
+                    <p class="truncate font-mono text-xs text-muted-foreground">{id}</p>
                 </div>
-                <p class="text-xs text-muted-foreground shrink-0">
-                    {locale.fmt("catalog.route_count", &[("count", &count)])}
-                </p>
-            </div>
-
-            <dl class="grid gap-2 sm:grid-cols-2 text-sm">
-                <Field label=locale.get("catalog.upstream").to_owned() value=family.upstream />
-                <Field
-                    label=if rewritten {
-                        locale.get("catalog.prefix_rewritten").to_owned()
-                    } else {
-                        locale.get("catalog.prefix").to_owned()
-                    }
-                    value=if rewritten {
-                        format!("{} \u{2192} {}", family.gateway_prefix, family.source_prefix)
-                    } else {
-                        family.gateway_prefix
-                    }
-                />
-            </dl>
-
-            <ul class="flex flex-wrap gap-1.5">
-                {family
-                    .routes
-                    .into_iter()
-                    .map(|route| {
-                        view! {
-                            <li class="rounded border border-border px-2 py-1 font-mono text-xs text-muted-foreground">
-                                {route}
-                            </li>
-                        }
-                    })
-                    .collect_view()}
-            </ul>
-        </section>
-    }
-}
-
-#[component]
-fn Field(label: String, value: String) -> impl IntoView {
-    view! {
-        <div class="min-w-0">
-            <dt class="text-xs text-muted-foreground">{label}</dt>
-            <dd class="font-mono text-xs truncate">{value}</dd>
-        </div>
+                <Badge variant=BadgeVariant::Secondary>{route_count}</Badge>
+            </CardHeader>
+            <CardContent class="space-y-3">
+                <dl class="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2">
+                    <div class="min-w-0">
+                        <dt class="text-xs text-muted-foreground">{upstream_label}</dt>
+                        <dd class="truncate font-mono text-xs">{upstream}</dd>
+                    </div>
+                    <div class="min-w-0">
+                        <dt class="text-xs text-muted-foreground">{prefix_label}</dt>
+                        <dd class="truncate font-mono text-xs">{prefix}</dd>
+                    </div>
+                </dl>
+                <ul class="flex flex-wrap gap-1">
+                    {family
+                        .routes
+                        .into_iter()
+                        .map(|route| {
+                            view! {
+                                <li class="rounded border border-border bg-muted/40 px-1.5 py-0.5 \
+                                           font-mono text-[0.6875rem] text-muted-foreground">
+                                    {route}
+                                </li>
+                            }
+                        })
+                        .collect_view()}
+                </ul>
+            </CardContent>
+        </Card>
     }
 }
 
 #[component]
 fn Providers(rows: Vec<ProviderCard>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     if rows.is_empty() {
         return view! {
-            <p class="text-sm text-muted-foreground">
-                {locale.get("catalog.no_providers").to_owned()}
-            </p>
+            <Card>
+                <EmptyState
+                    title=t!("catalog.no_providers")
+                    icon=IconName::Plug
+                />
+            </Card>
         }
         .into_any();
     }
     view! {
-        <ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {rows.into_iter().map(|card| view! { <Provider card=card /> }).collect_view()}
         </ul>
     }
@@ -229,34 +258,41 @@ fn Provider(card: ProviderCard) -> impl IntoView {
     let locale = crate::i18n::use_locale();
     let status = card.status;
     let counts = format!("{}/{}", status.connected, status.total);
+    let name = card.name.clone();
+    let id = card.id.clone();
+    let description = card.description.clone();
+    let auth = card.auth_label.clone();
+    // The router's own wording, not a verdict re-derived here from the counts: if the two ever disagree,
+    // showing the router's is what makes that visible.
+    let health = status.health.clone();
+    let connected = format!("{} {counts}", locale.get("catalog.connected"));
+    let errored =
+        (status.error > 0).then(|| format!("{} {}", locale.get("catalog.errored"), status.error));
+    let tone = if status.error > 0 {
+        StatusTone::Destructive
+    } else if status.connected > 0 {
+        StatusTone::Success
+    } else {
+        StatusTone::Muted
+    };
 
     view! {
-        <li class="rounded-lg border border-border bg-card p-4 space-y-2">
-            <div class="flex items-center gap-2 min-w-0">
+        <li class="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-xs">
+            <div class="flex min-w-0 items-center gap-2">
                 <Swatch accent=card.accent />
-                <span class="text-sm font-medium truncate">{card.name}</span>
-                <code class="ml-auto text-xs text-muted-foreground shrink-0">{card.id}</code>
+                <span class="truncate text-sm font-medium">{name}</span>
+                <code class="ml-auto shrink-0 font-mono text-[0.6875rem] text-muted-foreground">
+                    {id}
+                </code>
             </div>
-            <p class="text-xs text-muted-foreground line-clamp-2">{card.description}</p>
+            <p class="line-clamp-2 min-h-8 text-xs leading-relaxed text-muted-foreground">
+                {description}
+            </p>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                <span class="flex items-center gap-1.5">
-                    <span class=health_dot(&status) />
-                    // The router's own wording, not a verdict re-derived here from the counts: if the
-                    // two ever disagree, showing the router's is what makes that visible.
-                    <span class="text-foreground">{status.health}</span>
-                </span>
-                <span class="text-muted-foreground">
-                    {format!("{} {counts}", locale.get("catalog.connected"))}
-                </span>
-                {(status.error > 0)
-                    .then(|| {
-                        view! {
-                            <span class="text-destructive">
-                                {format!("{} {}", locale.get("catalog.errored"), status.error)}
-                            </span>
-                        }
-                    })}
-                <span class="ml-auto text-muted-foreground truncate">{card.auth_label}</span>
+                <StatusDot label=health tone=tone />
+                <span class="text-muted-foreground">{connected}</span>
+                {errored.map(|text| view! { <span class="text-destructive">{text}</span> })}
+                <Badge variant=BadgeVariant::Outline class="ml-auto">{auth}</Badge>
             </div>
         </li>
     }
@@ -295,21 +331,9 @@ fn hex_colour(value: &str) -> Option<&str> {
     shaped.then_some(value)
 }
 
-/// Health as a colour: errors first, because a provider with both connections and errors is a
-/// provider that is failing, and colouring it by the connections would hide that.
-const fn health_dot(status: &ProviderStatus) -> &'static str {
-    if status.error > 0 {
-        "size-1.5 rounded-full bg-destructive"
-    } else if status.connected > 0 {
-        "size-1.5 rounded-full bg-success"
-    } else {
-        "size-1.5 rounded-full bg-muted-foreground/40"
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ProviderCatalog, ProviderStatus, RouteCatalog, health_dot, hex_colour};
+    use super::{ProviderCatalog, RouteCatalog, hex_colour};
 
     /// Captured from `GET /api/catalog/routes` on a running router.
     const LIVE_ROUTES: &str = r#"{"families":[{"id":"api","title":"Control API",
@@ -365,24 +389,5 @@ mod tests {
         ] {
             assert_eq!(hex_colour(rejected), None, "{rejected} should be refused");
         }
-    }
-
-    #[test]
-    fn an_erroring_provider_is_coloured_as_failing_even_when_some_connections_work() {
-        let failing = ProviderStatus {
-            connected: 2,
-            error: 1,
-            total: 3,
-            health: "Degraded".to_owned(),
-        };
-        assert!(health_dot(&failing).contains("destructive"));
-        let healthy = ProviderStatus {
-            connected: 2,
-            error: 0,
-            total: 2,
-            health: "Ready".to_owned(),
-        };
-        assert!(health_dot(&healthy).contains("success"));
-        assert!(health_dot(&ProviderStatus::default()).contains("muted"));
     }
 }

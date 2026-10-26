@@ -12,12 +12,26 @@
 //! reducing exposure needs no ceremony.
 //!
 //! `POST /api/tunnel/operations/{id}` is deliberately not wired -- see [`OperationsCard`].
+//!
+//! # Layout
+//!
+//! The caution that both providers publish this dashboard comes first, above either provider, because
+//! it applies to both and a warning inside a card is read as a warning about that card. Each provider
+//! is a [`Card`] whose header carries its supervisor state and whose footer carries its controls, so
+//! the read and the write on one provider are never confused with the other's. The two things this
+//! page only reports -- the host environment and the operation catalog -- follow as single cards.
 
 use leptos::prelude::*;
 use serde::Deserialize;
 
 use crate::api::{ApiError, Hydrate, Save, encode, load};
-use crate::routes::{PageHeader, Panel};
+use crate::routes::{
+    Alert, AlertDescription, AlertTitle, AlertVariant, Badge, BadgeVariant, Button, ButtonVariant,
+    Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, ErrorNote, Field, Input,
+    Mono, PageBody, PageHeader, Panel, StatusDot, StatusTone, Table, TableCell, TableEmpty,
+    TableFrame, TableHead, TableHeaderCell, TableRow,
+};
+use crate::t;
 
 /// `GET /api/tunnel/status`.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -238,7 +252,6 @@ fn run(
 
 #[component]
 pub fn Tunnel() -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (status, set_status) = signal(Hydrate::<TunnelStatus>::Loading);
     let (check, set_check) = signal(Hydrate::<TailscaleCheck>::Loading);
     let (operations, set_operations) = signal(Hydrate::<Operations>::Loading);
@@ -256,42 +269,48 @@ pub fn Tunnel() -> impl IntoView {
     };
     reload_all();
 
-    let host_only = locale.get("tunnel.host_only").to_owned();
-
     view! {
-        <PageHeader
-            title=locale.get("nav.tunnel").to_owned()
-            description=locale.get("tunnel.description").to_owned()
-        />
+        <PageHeader title=t!("nav.tunnel") description=t!("tunnel.description") />
 
-        // A 403 here means the request did not come from the host. That is the one failure on this
-        // panel whose remedy is not guessable from the generic message, so it gets named.
-        {move || {
-            (status.get().failure() == Some(ApiError::Status(403)))
-                .then(|| {
+        <PageBody>
+            // The caution sits above both providers, not inside one: a warning rendered inside the
+            // Cloudflare card reads as a warning about Cloudflare, and `tunnel.public_warning` is
+            // true of either provider.
+            <Alert variant=AlertVariant::Warning>
+                <AlertTitle>{t!("tunnel.exposure_title")}</AlertTitle>
+                <AlertDescription>{t!("tunnel.public_warning")}</AlertDescription>
+            </Alert>
+
+            // A 403 here means the request did not come from the host. That is the one failure on this
+            // panel whose remedy is not guessable from the generic message, so it gets named.
+            {move || {
+                (status.get().failure() == Some(ApiError::Status(403)))
+                    .then(|| {
+                        view! {
+                            <Alert variant=AlertVariant::Warning>
+                                <AlertTitle>{t!("tunnel.host_only_title")}</AlertTitle>
+                                <AlertDescription>{t!("tunnel.host_only")}</AlertDescription>
+                            </Alert>
+                        }
+                    })
+            }}
+
+            <Panel
+                state=status
+                on_retry=Callback::new(move |()| reload())
+                children=move |data: TunnelStatus| {
                     view! {
-                        <p class="mb-4 rounded-lg border border-warning/40 bg-warning/5 p-4 text-sm">
-                            {host_only.clone()}
-                        </p>
+                        <div class="space-y-4">
+                            <div class="grid gap-4 lg:grid-cols-2">
+                                <CloudflareCard state=data.tunnel reload=reload />
+                                <TailscaleCard state=data.tailscale reload=reload />
+                            </div>
+                            <InstallNote download=data.download />
+                        </div>
                     }
-                })
-        }}
-
-        <Panel
-            state=status
-            on_retry=Callback::new(move |()| reload())
-            children=move |data: TunnelStatus| {
-                view! {
-                    <div class="grid gap-4 lg:grid-cols-2">
-                        <CloudflareCard state=data.tunnel reload=reload />
-                        <TailscaleCard state=data.tailscale reload=reload />
-                    </div>
-                    <InstallNote download=data.download />
                 }
-            }
-        />
+            />
 
-        <div class="mt-4 grid gap-4">
             <Panel
                 state=check
                 on_retry=Callback::new(move |()| reload_all())
@@ -302,7 +321,7 @@ pub fn Tunnel() -> impl IntoView {
                 on_retry=Callback::new(move |()| reload_all())
                 children=|data: Operations| view! { <OperationsCard data=data /> }
             />
-        </div>
+        </PageBody>
     }
 }
 /// Cloudflare: the quick tunnel, the named tunnel, and the supervisor's view of the child.
@@ -311,13 +330,21 @@ fn CloudflareCard(
     state: CloudflareState,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (save, set_save) = signal(Save::Idle);
     let (result, set_result) = signal(None::<MutationResult>);
     let (token, set_token) = signal(String::new());
 
     let installed = state.installed;
     let running = state.running;
+    let exposed = state.enabled;
+    // Read out of the struct up front: `view!` moves whatever it names, and each field below is used
+    // once in the tree but would otherwise be borrowed through `state` from inside a closure.
+    let supervisor = state.state.clone();
+    let url = state.url.clone();
+    let last_error = state.last_error.clone().filter(|error| !error.is_empty());
+    let restarts = state.restarts.to_string();
+    let pid = state.pid;
+
     let busy = Signal::derive(move || save.get().is_saving());
 
     let send =
@@ -325,85 +352,91 @@ fn CloudflareCard(
     let port_body = move || encode(&PortBody {}).unwrap_or_else(|_| "{}".to_owned());
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-medium text-muted-foreground">
-                    {locale.get("tunnel.cloudflare").to_owned()}
-                </h2>
-                <StateBadge state=state.state.clone() on=state.enabled />
-            </div>
+        <Card>
+            <CardHeader>
+                <div class="min-w-0">
+                    <CardTitle>{t!("tunnel.cloudflare")}</CardTitle>
+                </div>
+                <StateBadge state=supervisor on=exposed />
+            </CardHeader>
 
-            <dl class="space-y-2.5 text-sm">
-                <Field label=locale.get("tunnel.installed").to_owned() value=yes_no(installed) />
-                <Field label=locale.get("tunnel.running").to_owned() value=yes_no(running) />
-                <Field
-                    label=locale.get("tunnel.restarts").to_owned()
-                    value=state.restarts.to_string()
-                />
-                {state
-                    .pid
-                    .map(|pid| {
+            <CardContent class="space-y-3">
+                <dl class="space-y-2.5 text-sm">
+                    <DetailFlag label=t!("tunnel.installed") on=installed />
+                    <DetailFlag label=t!("tunnel.running") on=running />
+                    <Detail label=t!("tunnel.restarts") value=restarts />
+                    {pid
+                        .map(|pid| {
+                            view! { <Detail label=t!("tunnel.pid") value=pid.to_string() /> }
+                        })}
+                </dl>
+
+                {(!url.is_empty())
+                    .then(|| view! { <PublicUrl label=t!("tunnel.url") url=url /> })}
+                {last_error
+                    .map(|error| {
                         view! {
-                            <Field label=locale.get("tunnel.pid").to_owned() value=pid.to_string() />
+                            <ErrorNote
+                                message=format!("{}: {error}", t!("tunnel.last_error"))
+                            />
                         }
                     })}
-            </dl>
 
-            {(!state.url.is_empty())
+                {(!installed)
+                    .then(|| {
+                        view! {
+                            <Alert variant=AlertVariant::Muted>
+                                <AlertDescription>
+                                    {t!("tunnel.cloudflared_missing")}
+                                </AlertDescription>
+                            </Alert>
+                        }
+                    })}
+
+                // The result of the last mutation is rendered here rather than inside the footer,
+                // because the footer only exists while the binary is installed: a failure whose
+                // refetch reports the binary as gone would otherwise be dropped on the floor.
+                <Outcome save=save result=result />
+            </CardContent>
+
+            // The controls live in the footer so the card's read half and write half are visibly
+            // separate. Both enable paths are two-step: the confirm names the consequence first.
+            {installed
                 .then(|| {
-                    view! { <PublicUrl label=locale.get("tunnel.url").to_owned() url=state.url.clone() /> }
-                })}
-            {state
-                .last_error
-                .clone()
-                .filter(|error| !error.is_empty())
-                .map(|error| {
                     view! {
-                        <p class="text-sm text-destructive">
-                            {format!("{}: {error}", locale.get("tunnel.last_error"))}
-                        </p>
+                        <CardFooter class="flex-col items-stretch gap-2.5">
+                            <Confirm
+                                label=t!("tunnel.enable_quick")
+                                warning=t!("tunnel.public_warning")
+                                disabled=busy
+                                on_confirm=Callback::new(move |()| {
+                                    send("/api/tunnel/enable", port_body());
+                                })
+                            />
+                            {running
+                                .then(|| {
+                                    view! {
+                                        <Button
+                                            class="w-full"
+                                            label=t!("tunnel.disable")
+                                            variant=ButtonVariant::Outline
+                                            disabled=busy
+                                            on_click=Callback::new(move |()| {
+                                                send("/api/tunnel/disable", "{}".to_owned());
+                                            })
+                                        />
+                                    }
+                                })}
+                            <NamedTunnel
+                                token=token
+                                set_token=set_token
+                                busy=busy
+                                send=send
+                            />
+                        </CardFooter>
                     }
                 })}
-
-            {if installed {
-                view! {
-                    <div class="space-y-3 border-t border-border pt-4">
-                        <Confirm
-                            label=locale.get("tunnel.enable_quick").to_owned()
-                            warning=locale.get("tunnel.public_warning").to_owned()
-                            disabled=busy
-                            on_confirm=Callback::new(move |()| {
-                                send("/api/tunnel/enable", port_body());
-                            })
-                        />
-                        {running
-                            .then(|| {
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="w-full rounded-md border border-border px-3 py-2 text-sm \
-                                               font-medium transition-colors hover:bg-accent disabled:opacity-50"
-                                        disabled=move || busy.get()
-                                        on:click=move |_| send("/api/tunnel/disable", "{}".to_owned())
-                                    >
-                                        {locale.get("tunnel.disable").to_owned()}
-                                    </button>
-                                }
-                            })}
-                        <NamedTunnel token=token set_token=set_token busy=busy send=send />
-                    </div>
-                }
-                    .into_any()
-            } else {
-                view! {
-                    <p class="border-t border-border pt-4 text-sm text-muted-foreground">
-                        {locale.get("tunnel.cloudflared_missing").to_owned()}
-                    </p>
-                }
-                    .into_any()
-            }}
-            <Outcome save=save result=result />
-        </section>
+        </Card>
     }
 }
 /// A named, remotely-managed tunnel.
@@ -417,27 +450,23 @@ fn NamedTunnel(
     busy: Signal<bool>,
     send: impl Fn(&'static str, String) + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let empty = Signal::derive(move || busy.get() || token.get().trim().is_empty());
 
     view! {
-        <div class="space-y-2">
-            <label class="block space-y-1 text-sm">
-                <span class="text-muted-foreground">
-                    {locale.get("tunnel.named_token").to_owned()}
-                </span>
-                <input
-                    type="password"
+        <div class="w-full space-y-2">
+            <Field label=t!("tunnel.named_token")>
+                <Input
+                    input_type="password"
                     autocomplete="off"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    prop:value=move || token.get()
-                    on:input=move |ev| set_token.set(event_target_value(&ev))
-                    placeholder=locale.get("tunnel.named_placeholder").to_owned()
+                    value=Signal::derive(move || token.get())
+                    on_input=Callback::new(move |value| set_token.set(value))
+                    placeholder=t!("tunnel.named_placeholder")
+                    class="font-mono text-xs"
                 />
-            </label>
+            </Field>
             <Confirm
-                label=locale.get("tunnel.enable_named").to_owned()
-                warning=locale.get("tunnel.public_warning").to_owned()
+                label=t!("tunnel.enable_named")
+                warning=t!("tunnel.public_warning")
                 disabled=empty
                 on_confirm=Callback::new(move |()| {
                     let value = token.get();
@@ -461,107 +490,111 @@ fn TailscaleCard(
     state: TailscaleState,
     reload: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (save, set_save) = signal(Save::Idle);
     let (result, set_result) = signal(None::<MutationResult>);
 
     let installed = state.installed;
     let funnel_active = state.funnel_active;
+    let daemon_running = state.daemon_running;
+    let logged_in = state.logged_in;
+    let supervisor = state.state.clone();
+    let url = state.url.clone();
+    let auth_url = state.auth_url.filter(|url| !url.is_empty());
+
     let busy = Signal::derive(move || save.get().is_saving());
 
     let send = move |path: &'static str| run(path, "{}".to_owned(), set_save, set_result, reload);
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-medium text-muted-foreground">
-                    {locale.get("tunnel.tailscale").to_owned()}
-                </h2>
-                <StateBadge state=state.state.clone() on=funnel_active />
-            </div>
+        <Card>
+            <CardHeader>
+                <div class="min-w-0">
+                    <CardTitle>{t!("tunnel.tailscale")}</CardTitle>
+                </div>
+                <StateBadge state=supervisor on=funnel_active />
+            </CardHeader>
 
-            <dl class="space-y-2.5 text-sm">
-                <Field label=locale.get("tunnel.installed").to_owned() value=yes_no(installed) />
-                <Field
-                    label=locale.get("tunnel.daemon_running").to_owned()
-                    value=yes_no(state.daemon_running)
-                />
-                <Field
-                    label=locale.get("tunnel.logged_in").to_owned()
-                    value=yes_no(state.logged_in)
-                />
-                <Field
-                    label=locale.get("tunnel.funnel_active").to_owned()
-                    value=yes_no(funnel_active)
-                />
-            </dl>
+            <CardContent class="space-y-3">
+                <dl class="space-y-2.5 text-sm">
+                    <DetailFlag label=t!("tunnel.installed") on=installed />
+                    <DetailFlag label=t!("tunnel.daemon_running") on=daemon_running />
+                    <DetailFlag label=t!("tunnel.logged_in") on=logged_in />
+                    <DetailFlag label=t!("tunnel.funnel_active") on=funnel_active />
+                </dl>
 
-            {(!state.url.is_empty())
+                {(!url.is_empty())
+                    .then(|| view! { <PublicUrl label=t!("tunnel.url") url=url /> })}
+                // A pending login can only be finished in a browser, so the URL is the control -- and
+                // it is a warning rather than a button because clicking it leaves this page.
+                {auth_url
+                    .map(|url| {
+                        view! {
+                            <Alert variant=AlertVariant::Warning>
+                                <AlertTitle>{t!("tunnel.needs_login")}</AlertTitle>
+                                <AlertDescription>
+                                    <a
+                                        href=url
+                                        target="_blank"
+                                        rel="noreferrer noopener"
+                                        class="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4"
+                                    >
+                                        {t!("tunnel.finish_login")}
+                                    </a>
+                                </AlertDescription>
+                            </Alert>
+                        }
+                    })}
+
+                {(!installed)
+                    .then(|| {
+                        view! {
+                            <Alert variant=AlertVariant::Muted>
+                                <AlertDescription>{t!("tunnel.tailscale_missing")}</AlertDescription>
+                            </Alert>
+                        }
+                    })}
+
+                // Outside the footer for the same reason as the Cloudflare card: the controls only
+                // exist while the binary is installed, and a failure must outlive that.
+                <Outcome save=save result=result />
+            </CardContent>
+
+            {installed
                 .then(|| {
-                    view! { <PublicUrl label=locale.get("tunnel.url").to_owned() url=state.url.clone() /> }
-                })}
-            // A pending login can only be finished in a browser, so the URL is the control.
-            {state
-                .auth_url
-                .clone()
-                .filter(|url| !url.is_empty())
-                .map(|url| {
                     view! {
-                        <a
-                            href=url
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            class="block rounded-md border border-warning/40 bg-warning/5 px-3 py-2 \
-                                   text-sm font-medium underline-offset-4 hover:underline"
-                        >
-                            {locale.get("tunnel.finish_login").to_owned()}
-                        </a>
+                        <CardFooter class="flex-col items-stretch gap-2.5">
+                            <Confirm
+                                label=t!("tunnel.enable_funnel")
+                                warning=t!("tunnel.public_warning")
+                                disabled=busy
+                                on_confirm=Callback::new(move |()| send("/api/tunnel/tailscale-enable"))
+                            />
+                            {funnel_active
+                                .then(|| {
+                                    view! {
+                                        <Button
+                                            class="w-full"
+                                            label=t!("tunnel.withdraw_funnel")
+                                            variant=ButtonVariant::Outline
+                                            disabled=busy
+                                            on_click=Callback::new(move |()| {
+                                                send("/api/tunnel/tailscale-disable");
+                                            })
+                                        />
+                                    }
+                                })}
+                        </CardFooter>
                     }
                 })}
-
-            {if installed {
-                view! {
-                    <div class="space-y-3 border-t border-border pt-4">
-                        <Confirm
-                            label=locale.get("tunnel.enable_funnel").to_owned()
-                            warning=locale.get("tunnel.public_warning").to_owned()
-                            disabled=busy
-                            on_confirm=Callback::new(move |()| send("/api/tunnel/tailscale-enable"))
-                        />
-                        {funnel_active
-                            .then(|| {
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="w-full rounded-md border border-border px-3 py-2 text-sm \
-                                               font-medium transition-colors hover:bg-accent disabled:opacity-50"
-                                        disabled=move || busy.get()
-                                        on:click=move |_| send("/api/tunnel/tailscale-disable")
-                                    >
-                                        {locale.get("tunnel.withdraw_funnel").to_owned()}
-                                    </button>
-                                }
-                            })}
-                    </div>
-                }
-                    .into_any()
-            } else {
-                view! {
-                    <p class="border-t border-border pt-4 text-sm text-muted-foreground">
-                        {locale.get("tunnel.tailscale_missing").to_owned()}
-                    </p>
-                }
-                    .into_any()
-            }}
-            <Outcome save=save result=result />
-        </section>
+        </Card>
     }
 }
 /// A two-step control for an action that publishes this machine.
 ///
 /// The first click only arms it; the second sends. The intermediate state is where the consequence
 /// is spelled out, because "Enable" on its own does not say that the result is a public URL into
-/// this host.
+/// this host. Arming renders an [`Alert`] rather than a recoloured button: the sentence has to be
+/// read, and a button that changes colour is a button people click twice.
 #[component]
 fn Confirm(
     label: String,
@@ -569,55 +602,47 @@ fn Confirm(
     #[prop(into)] disabled: Signal<bool>,
     on_confirm: Callback<()>,
 ) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let (armed, set_armed) = signal(false);
-    let confirm = locale.get("tunnel.confirm").to_owned();
-    let cancel = locale.get("tunnel.cancel").to_owned();
 
     view! {
         {move || {
             if armed.get() {
-                let (confirm, cancel) = (confirm.clone(), cancel.clone());
+                // Cloned per render: the closure below is called again on every change, so it may not
+                // move either string out of its own capture.
+                let warning = warning.clone();
                 view! {
-                    <div class="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3 \
-                                animate-in fade-in duration-150">
-                        <p class="text-sm">{warning.clone()}</p>
-                        <div class="flex gap-2">
-                            <button
-                                type="button"
-                                class="flex-1 rounded-md bg-destructive px-3 py-2 text-sm font-medium \
-                                       text-destructive-foreground disabled:opacity-50"
-                                disabled=move || disabled.get()
-                                on:click=move |_| {
+                    <Alert variant=AlertVariant::Warning>
+                        <AlertDescription>{warning}</AlertDescription>
+                        <div class="mt-2 flex gap-2">
+                            <Button
+                                class="flex-1"
+                                label=t!("tunnel.confirm")
+                                variant=ButtonVariant::Destructive
+                                disabled=disabled
+                                on_click=Callback::new(move |()| {
                                     set_armed.set(false);
                                     on_confirm.run(());
-                                }
-                            >
-                                {confirm}
-                            </button>
-                            <button
-                                type="button"
-                                class="flex-1 rounded-md border border-border px-3 py-2 text-sm \
-                                       font-medium transition-colors hover:bg-accent"
-                                on:click=move |_| set_armed.set(false)
-                            >
-                                {cancel}
-                            </button>
+                                })
+                            />
+                            <Button
+                                class="flex-1"
+                                label=t!("tunnel.cancel")
+                                variant=ButtonVariant::Outline
+                                on_click=Callback::new(move |()| set_armed.set(false))
+                            />
                         </div>
-                    </div>
+                    </Alert>
                 }
                     .into_any()
             } else {
+                let label = label.clone();
                 view! {
-                    <button
-                        type="button"
-                        class="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium \
-                               text-primary-foreground disabled:opacity-50"
-                        disabled=move || disabled.get()
-                        on:click=move |_| set_armed.set(true)
-                    >
-                        {label.clone()}
-                    </button>
+                    <Button
+                        class="w-full"
+                        label=label
+                        disabled=disabled
+                        on_click=Callback::new(move |()| set_armed.set(true))
+                    />
                 }
                     .into_any()
             }
@@ -630,49 +655,49 @@ fn Confirm(
 /// is the case a plain `Save::Saved` would report as a win.
 #[component]
 fn Outcome(save: ReadSignal<Save>, result: ReadSignal<Option<MutationResult>>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    let enable_funnel = locale.get("tunnel.allow_funnel").to_owned();
-
     view! {
         {move || {
             save.get()
                 .message()
-                .map(|message| {
-                    view! { <p class="text-sm text-destructive">{message}</p> }
-                })
+                .map(|message| view! { <ErrorNote message=message /> })
         }}
         {move || {
             result
                 .get()
                 .map(|outcome| {
-                    let class = if outcome.success {
-                        "text-sm text-foreground"
-                    } else {
-                        "text-sm text-destructive"
-                    };
                     let url = outcome
                         .tunnel_url
-                        .or(outcome.auth_url)
+                        .clone()
+                        .or_else(|| outcome.auth_url.clone())
                         .filter(|url| !url.is_empty());
-                    let allow = outcome.enable_url.filter(|url| !url.is_empty());
+                    let allow = outcome.enable_url.clone().filter(|url| !url.is_empty());
                     // Rendered rather than inferred from the presence of `auth_url`: the server can
                     // report that a sign-in is needed without yet having a URL to send you to, and a
                     // panel that only watches the URL shows nothing at all in that window.
                     let needs_login = outcome.needs_login;
-                    let enable_funnel = enable_funnel.clone();
+                    let message = outcome.message;
+                    let success = outcome.success;
                     view! {
-                        <div class="space-y-1.5">
-                            <p class=class>{outcome.message}</p>
-                            {if needs_login {
+                        <div class="w-full space-y-1.5">
+                            {if success {
                                 view! {
-                                    <p class="text-xs text-muted-foreground">
-                                        {locale.get("tunnel.needs_login").to_owned()}
+                                    <p class="text-[0.8125rem] leading-relaxed text-foreground">
+                                        {message}
                                     </p>
                                 }
                                     .into_any()
                             } else {
-                                ().into_any()
+                                view! { <ErrorNote message=message /> }.into_any()
                             }}
+                            {needs_login
+                                .then(|| {
+                                    view! {
+                                        <StatusDot
+                                            label=t!("tunnel.needs_login")
+                                            tone=StatusTone::Warning
+                                        />
+                                    }
+                                })}
                             {url
                                 .map(|url| {
                                     let href = url.clone();
@@ -681,9 +706,9 @@ fn Outcome(save: ReadSignal<Save>, result: ReadSignal<Option<MutationResult>>) -
                                             href=href
                                             target="_blank"
                                             rel="noreferrer noopener"
-                                            class="block break-all font-mono text-xs underline-offset-4 hover:underline"
+                                            class="block underline-offset-4 hover:underline"
                                         >
-                                            {url}
+                                            <Mono value=url class="text-xs" />
                                         </a>
                                     }
                                 })}
@@ -694,9 +719,9 @@ fn Outcome(save: ReadSignal<Save>, result: ReadSignal<Option<MutationResult>>) -
                                             href=url
                                             target="_blank"
                                             rel="noreferrer noopener"
-                                            class="block text-sm font-medium underline-offset-4 hover:underline"
+                                            class="block text-[0.8125rem] font-medium underline-offset-4 hover:underline"
                                         >
-                                            {enable_funnel}
+                                            {t!("tunnel.allow_funnel")}
                                         </a>
                                     }
                                 })}
@@ -707,52 +732,84 @@ fn Outcome(save: ReadSignal<Save>, result: ReadSignal<Option<MutationResult>>) -
     }
 }
 /// A live public URL, marked as one.
+///
+/// An [`Alert`] rather than a green box: the fact worth noticing is that this URL leaves the machine,
+/// and the alert's leading icon is what makes that visible at a glance instead of a border tint.
 #[component]
 fn PublicUrl(label: String, url: String) -> impl IntoView {
     let href = url.clone();
     view! {
-        <div class="rounded-md border border-success/40 bg-success/5 p-3 space-y-1">
-            <p class="text-xs font-medium text-muted-foreground">{label}</p>
-            <a
-                href=href
-                target="_blank"
-                rel="noreferrer noopener"
-                class="block break-all font-mono text-sm underline-offset-4 hover:underline"
-            >
-                {url}
-            </a>
-        </div>
+        <Alert variant=AlertVariant::Info>
+            <AlertTitle>{label}</AlertTitle>
+            <AlertDescription>
+                <a
+                    href=href
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    class="underline-offset-4 hover:underline"
+                >
+                    <Mono value=url />
+                </a>
+            </AlertDescription>
+        </Alert>
     }
 }
 
-/// One label/value pair.
+/// One label/value pair, for a value that is text rather than a state.
+///
+/// Named `Detail` rather than `Field` because [`crate::ui::Field`] is the form control wrapper and the
+/// two would otherwise shadow each other in this module.
 #[component]
-fn Field(label: String, value: String) -> impl IntoView {
+fn Detail(#[prop(into)] label: String, #[prop(into)] value: String) -> impl IntoView {
     view! {
         <div class="flex items-center justify-between gap-4">
-            <dt class="text-muted-foreground truncate">{label}</dt>
+            <dt class="truncate text-muted-foreground">{label}</dt>
             <dd class="shrink-0">{value}</dd>
         </div>
     }
 }
 
-/// The supervisor's state, with a dot whose colour tracks whether anything is exposed.
+/// One label/value pair where the value is a yes/no state.
+///
+/// A [`StatusDot`] rather than the word alone: "Yes" beside "Installed" and "No" beside "Running" read
+/// identically in a column of grey text, and the tone is what separates them.
+#[component]
+fn DetailFlag(#[prop(into)] label: String, on: bool) -> impl IntoView {
+    view! {
+        <div class="flex items-center justify-between gap-4">
+            <dt class="truncate text-muted-foreground">{label}</dt>
+            <dd class="shrink-0">
+                <StatusDot
+                    label=yes_no(on)
+                    tone=if on { StatusTone::Success } else { StatusTone::Muted }
+                />
+            </dd>
+        </div>
+    }
+}
+
+/// The supervisor's state as a dot plus its name.
+///
+/// The tone follows the supervisor's own word rather than the `enabled` flag alone: `failed` is a
+/// failure and `backoff`/`starting`/`stopping` are in between, and a dot that only knew on/off would
+/// paint a crash-looping tunnel the same colour as a healthy one.
 #[component]
 fn StateBadge(state: String, on: bool) -> impl IntoView {
+    let tone = match state.as_str() {
+        "failed" => StatusTone::Destructive,
+        "backoff" | "starting" | "stopping" => StatusTone::Warning,
+        _ if on => StatusTone::Success,
+        _ => StatusTone::Muted,
+    };
     let label = if state.is_empty() {
-        "unknown".to_owned()
+        t!("state.unknown")
     } else {
         state
     };
     view! {
-        <span class="flex items-center gap-2 shrink-0 text-xs">
-            <span class=if on {
-                "size-1.5 rounded-full bg-success"
-            } else {
-                "size-1.5 rounded-full bg-muted-foreground/40"
-            } />
-            <span class="font-mono text-muted-foreground">{label}</span>
-        </span>
+        <div class="shrink-0">
+            <StatusDot label=label tone=tone />
+        </div>
     }
 }
 
@@ -763,78 +820,47 @@ fn InstallNote(download: DownloadState) -> impl IntoView {
     if download.message.is_empty() {
         return ().into_any();
     }
-    let locale = crate::i18n::use_locale();
     // `in_progress` is false on this build, which never fetches a binary. Rendered rather than
     // ignored because a server that starts reporting a download must not do so into a panel that
     // silently drops the flag.
     let downloading = download.in_progress;
     view! {
-        <p class="mt-4 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-            {if downloading {
-                view! {
-                    <span class="mr-2 font-medium text-foreground">
-                        {locale.get("tunnel.downloading").to_owned()}
-                    </span>
-                }
-                    .into_any()
-            } else {
-                ().into_any()
-            }} {download.message}
-        </p>
+        <Alert variant=AlertVariant::Muted>
+            {downloading
+                .then(|| view! { <AlertTitle>{t!("tunnel.downloading")}</AlertTitle> })}
+            <AlertDescription>{download.message}</AlertDescription>
+        </Alert>
     }
     .into_any()
 }
 /// What `tailscale-check` found on this host.
 #[component]
 fn EnvironmentCard(check: TailscaleCheck) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     let platform = if check.platform.is_empty() {
-        locale.get("state.unknown").to_owned()
+        t!("state.unknown")
     } else {
-        check.platform
+        check.platform.clone()
     };
 
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("tunnel.environment").to_owned()}
-            </h2>
-            <dl class="grid gap-2.5 text-sm sm:grid-cols-2">
-                <Field label=locale.get("tunnel.platform").to_owned() value=platform />
-                <Field
-                    label=locale.get("tunnel.cli_installed").to_owned()
-                    value=yes_no(check.installed)
-                />
-                <Field
-                    label=locale.get("tunnel.daemon_installed").to_owned()
-                    value=yes_no(check.daemon_installed)
-                />
-                <Field
-                    label=locale.get("tunnel.daemon_running").to_owned()
-                    value=yes_no(check.daemon_running)
-                />
-                <Field
-                    label=locale.get("tunnel.custom_daemon").to_owned()
-                    value=yes_no(check.custom_daemon_running)
-                />
-                <Field
-                    label=locale.get("tunnel.system_daemon").to_owned()
-                    value=yes_no(check.system_daemon_running)
-                />
-                <Field
-                    label=locale.get("tunnel.logged_in").to_owned()
-                    value=yes_no(check.logged_in)
-                />
-                <Field
-                    label=locale.get("tunnel.brew_available").to_owned()
-                    value=yes_no(check.brew_available)
-                />
-                <Field
-                    label=locale.get("tunnel.cached_password").to_owned()
-                    value=yes_no(check.has_cached_password)
-                />
-            </dl>
-        </section>
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("tunnel.environment")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <dl class="grid gap-2.5 text-sm sm:grid-cols-2">
+                    <Detail label=t!("tunnel.platform") value=platform />
+                    <DetailFlag label=t!("tunnel.cli_installed") on=check.installed />
+                    <DetailFlag label=t!("tunnel.daemon_installed") on=check.daemon_installed />
+                    <DetailFlag label=t!("tunnel.daemon_running") on=check.daemon_running />
+                    <DetailFlag label=t!("tunnel.custom_daemon") on=check.custom_daemon_running />
+                    <DetailFlag label=t!("tunnel.system_daemon") on=check.system_daemon_running />
+                    <DetailFlag label=t!("tunnel.logged_in") on=check.logged_in />
+                    <DetailFlag label=t!("tunnel.brew_available") on=check.brew_available />
+                    <DetailFlag label=t!("tunnel.cached_password") on=check.has_cached_password />
+                </dl>
+            </CardContent>
+        </Card>
     }
 }
 /// The operation catalog, as inventory.
@@ -847,97 +873,88 @@ fn EnvironmentCard(check: TailscaleCheck) -> impl IntoView {
 /// ship, and the operations worth reaching are already the named controls above.
 #[component]
 fn OperationsCard(data: Operations) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-
     view! {
-        <section class="rounded-lg border border-border bg-card p-5 space-y-4">
-            <h2 class="text-sm font-medium text-muted-foreground">
-                {locale.get("tunnel.operations").to_owned()}
-            </h2>
-            <p class="text-sm text-muted-foreground">
-                {locale.get("tunnel.operations_hint").to_owned()}
-            </p>
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("tunnel.operations")}</CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-3">
+                <CardDescription>{t!("tunnel.operations_hint")}</CardDescription>
 
-            <ul class="flex flex-wrap gap-2">
-                {data
-                    .tools
-                    .into_iter()
-                    .map(|tool| {
-                        let detail = tool.path.filter(|path| !path.is_empty());
-                        view! {
-                            <li class="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs">
-                                <span class=if tool.installed {
-                                    "size-1.5 rounded-full bg-success"
-                                } else {
-                                    "size-1.5 rounded-full bg-muted-foreground/40"
-                                } />
-                                <span class="font-medium">{tool.id}</span>
-                                {detail
-                                    .map(|path| {
-                                        view! {
-                                            <code class="text-muted-foreground truncate max-w-56">{path}</code>
+                // The binaries behind the catalog, as chips: an operation is only reachable when the
+                // tool it names is installed, so the install state belongs beside the name.
+                <ul class="flex flex-wrap gap-1.5">
+                    {data
+                        .tools
+                        .into_iter()
+                        .map(|tool| {
+                            let detail = tool.path.filter(|path| !path.is_empty());
+                            view! {
+                                <li>
+                                    <Badge
+                                        variant=if tool.installed {
+                                            BadgeVariant::Success
+                                        } else {
+                                            BadgeVariant::Secondary
                                         }
-                                    })}
-                            </li>
-                        }
-                    })
-                    .collect_view()}
-            </ul>
-            <OperationsTable rows=data.operations />
-        </section>
+                                        class="gap-1.5 px-2 py-1"
+                                    >
+                                        <span class="font-mono">{tool.id}</span>
+                                        {detail
+                                            .map(|path| {
+                                                view! {
+                                                    <span class="max-w-56 truncate text-muted-foreground/80">
+                                                        {path}
+                                                    </span>
+                                                }
+                                            })}
+                                    </Badge>
+                                </li>
+                            }
+                        })
+                        .collect_view()}
+                </ul>
+
+                <OperationsTable rows=data.operations />
+            </CardContent>
+        </Card>
     }
 }
 #[component]
 fn OperationsTable(rows: Vec<OperationRow>) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
-    if rows.is_empty() {
-        return view! {
-            <p class="text-sm text-muted-foreground">{locale.get("tunnel.no_operations").to_owned()}</p>
-        }
-        .into_any();
-    }
     view! {
-        <div class="rounded-lg border border-border overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-muted/50 text-muted-foreground">
+        <TableFrame>
+            <Table>
+                <TableHead>
                     <tr>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_operation").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_tool").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_effect").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_mode").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_params").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_timeout").to_owned()}
-                        </th>
-                        <th class="text-left font-medium px-3 py-2">
-                            {locale.get("tunnel.col_available").to_owned()}
-                        </th>
+                        <TableHeaderCell>{t!("tunnel.col_operation")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("tunnel.col_tool")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("tunnel.col_effect")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("tunnel.col_mode")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("tunnel.col_params")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("tunnel.col_timeout")}</TableHeaderCell>
+                        <TableHeaderCell>{t!("tunnel.col_available")}</TableHeaderCell>
                     </tr>
-                </thead>
-                <tbody>
-                    {rows
-                        .into_iter()
-                        .map(|row| view! { <OperationLine row=row /> })
-                        .collect_view()}
-                </tbody>
-            </table>
-        </div>
+                </TableHead>
+                {if rows.is_empty() {
+                    view! { <TableEmpty message=t!("tunnel.no_operations") columns=7 /> }.into_any()
+                } else {
+                    view! {
+                        <tbody>
+                            {rows
+                                .into_iter()
+                                .map(|row| view! { <OperationLine row=row /> })
+                                .collect_view()}
+                        </tbody>
+                    }
+                        .into_any()
+                }}
+            </Table>
+        </TableFrame>
     }
-    .into_any()
 }
 #[component]
 fn OperationLine(row: OperationRow) -> impl IntoView {
-    let locale = crate::i18n::use_locale();
     // A secret parameter is marked as one: it is the difference between a port and a Cloudflare
     // token, and it decides whether a value can be pasted anywhere it might be logged.
     let params = row
@@ -956,46 +973,60 @@ fn OperationLine(row: OperationRow) -> impl IntoView {
         .collect::<Vec<_>>()
         .join(", ");
     let mutating = row.effect == "mutate";
+    let timeout = row
+        .timeout_ms
+        .map_or_else(|| "—".to_owned(), |ms| format!("{ms} ms"));
 
     view! {
-        <tr class="border-t border-border">
-            <td class="px-3 py-2">
+        <TableRow>
+            <TableCell>
                 <div class="space-y-0.5">
-                    <code class="text-xs">{row.id}</code>
+                    <Mono value=row.id class="text-xs" />
                     <p class="text-xs text-muted-foreground">{row.about}</p>
                 </div>
-            </td>
-            <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{row.tool}</td>
-            <td class="px-3 py-2">
-                <span class=if mutating {
-                    "rounded px-1.5 py-0.5 text-xs bg-warning/15 text-foreground"
-                } else {
-                    "rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground"
-                }>{row.effect}</span>
-            </td>
-            <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{row.mode}</td>
-            <td class="px-3 py-2 text-xs text-muted-foreground">{params}</td>
-            <td class="px-3 py-2 font-mono text-xs text-muted-foreground">
-                {row.timeout_ms.map_or_else(|| "-".to_owned(), |ms| format!("{ms} ms"))}
-            </td>
-            <td class="px-3 py-2">
-                {if row.available {
-                    locale.get("state.yes").to_owned()
-                } else {
-                    locale.get("state.no").to_owned()
-                }}
-            </td>
-        </tr>
+            </TableCell>
+            <TableCell>
+                <Mono value=row.tool class="text-xs text-muted-foreground" />
+            </TableCell>
+            <TableCell>
+                // `mutate` is the half of this table that can start or stop something, so it carries
+                // the warning variant and a read stays neutral.
+                <Badge
+                    variant=if mutating { BadgeVariant::Warning } else { BadgeVariant::Secondary }
+                >
+                    {row.effect}
+                </Badge>
+            </TableCell>
+            <TableCell>
+                <Mono value=row.mode class="text-xs text-muted-foreground" />
+            </TableCell>
+            <TableCell class="text-xs text-muted-foreground">{params}</TableCell>
+            <TableCell>
+                <span class="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
+                    {timeout}
+                </span>
+            </TableCell>
+            <TableCell>
+                <Badge
+                    variant=if row.available {
+                        BadgeVariant::Success
+                    } else {
+                        BadgeVariant::Secondary
+                    }
+                >
+                    {yes_no(row.available)}
+                </Badge>
+            </TableCell>
+        </TableRow>
     }
 }
 
 /// A boolean as a word, through the locale.
 fn yes_no(value: bool) -> String {
-    let locale = crate::i18n::use_locale();
     if value {
-        locale.get("state.yes").to_owned()
+        t!("state.yes")
     } else {
-        locale.get("state.no").to_owned()
+        t!("state.no")
     }
 }
 #[cfg(test)]
